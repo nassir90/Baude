@@ -75,7 +75,7 @@ fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, p
               suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false, bold: Boolean = false) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().heightIn(min = if (compact) DENSE_ROW else 50.dp)
-        .then(if (onClick != null) Modifier.clickable { PhoneCounts.tapped(title, onClick) } else Modifier)
+        .then(if (onClick != null) onClick.tapping(title).let { f -> Modifier.clickable { PhoneCounts.tapped(title, f) } } else Modifier)
         .padding(horizontal = 12.dp, vertical = if (compact) 0.dp else 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         prefix?.invoke()

@@ -177,7 +177,7 @@ fun IconButton(icon: ImageVector, label: String, enabled: Boolean = true, tint: 
     Box(
         Modifier.size(side).clip(RoundedCornerShape(8.dp))
             .then(if (background != null) Modifier.background(background) else Modifier)
-            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick() } else Modifier.clickable(enabled = enabled, onClick = onClick)),
+            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick.tapping(label, tip)() } else Modifier.clickable(enabled = enabled, onClick = onClick.tapping(label))),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(16.dp.icon))
@@ -204,7 +204,7 @@ fun Button(label: String, suggested: Boolean = false, destructive: Boolean = fal
     Box(
         modifier.clip(RoundedCornerShape(8.dp))
             .background((if (suggested) c.accentBg else c.fg.copy(alpha = 0.10f)).let { if (enabled) it else it.copy(alpha = it.alpha * 0.4f) })
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
+            .clickable(enabled = enabled, onClick = onClick.tapping(label)).padding(horizontal = 16.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = Type.bold, color = when {

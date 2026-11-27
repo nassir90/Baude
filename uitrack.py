@@ -5,10 +5,10 @@ tooltip, by schema/copy's key). What's on screen (screen()) and the user's last 
 error this process has (baudelib.errorbook), as do GLib's and GTK's criticals and warnings (a log writer) and
 exceptions in main-loop callbacks. install(app) is the one call an app makes, before its windows. Nothing here runs
 till something's used: a click is looked at as it's made."""
-import collections
 import ctypes
 import os
 import sys
+import threading
 import time
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk
@@ -21,8 +21,10 @@ PART_RECENT_S = 5  # (an error this soon after a part was used: that part's)
 SCREEN_KINDS = ("page", "dialog", "panel", "menu", "region")  # (what an entity on screen is: not one of a chat's elements)
 _LEVELS = {GLib.LogLevelFlags.LEVEL_ERROR: "ERROR", GLib.LogLevelFlags.LEVEL_CRITICAL: "CRITICAL",
            GLib.LogLevelFlags.LEVEL_WARNING: "WARNING"}
-STATE = {"app": None, "crumbs": collections.deque(maxlen=CRUMBS_MAX), "used": None, "screen": None,
+STATE = {"app": None, "crumbs": [], "used": None, "screen": None, "lock": threading.RLock(),
          "shown": {}, "looking": False}  # (shown: each screen in front now, since when)
+# (screen and crumbs are kept by the main thread as they change; context() only reads them, from any thread, and
+# never calls GTK: inside GLib's log writer one more GLib message aborts the process)
 FRONT_IDLE_S = 300  # (no input for this long: nobody's at it, and no screen's time counted)
 _GLIB = {}  # (GLib's own idle_add, timeout_add and timeout_add_seconds, before they were counted)
 
@@ -149,17 +151,30 @@ def screen(win=None):
     return None
 
 
+def refresh(*_):
+    """(main thread) What's on screen looked at again and kept for context()."""
+    try:
+        shown = screen()
+    except Exception:  # noqa: BLE001 (kept as it was)
+        return
+    if shown is not None:  # (none while no window of this app is active: where it was stays)
+        with STATE["lock"]:
+            STATE["screen"] = shown
+
+
 def crumb(action, entity, part, hint=None, at=None):
-    """An action kept among the last CRUMBS_MAX (screen opened first, if it's changed)."""
+    """An action kept among the last CRUMBS_MAX (screen opened first, if it's changed). Main thread."""
     now = time.time() if at is None else at
     shown = screen()
-    if shown is not None and shown != STATE["screen"]:
-        STATE["crumbs"].append({"at": round(now, 3), "action": "open", "screen": shown, "part": None, "widget": None})
-    STATE["screen"] = shown
-    if action != "open":
-        STATE["crumbs"].append({"at": round(now, 3), "action": action, "screen": entity, "part": part,
-                                "widget": hint})
-        STATE["used"] = (now, entity, part)
+    with STATE["lock"]:
+        crumbs = STATE["crumbs"]
+        if shown is not None and shown != STATE["screen"]:
+            crumbs.append({"at": round(now, 3), "action": "open", "screen": shown, "part": None, "widget": None})
+        STATE["screen"] = shown or STATE["screen"]
+        if action != "open":
+            crumbs.append({"at": round(now, 3), "action": action, "screen": entity, "part": part, "widget": hint})
+            STATE["used"] = (now, entity, part)
+        del crumbs[:-CRUMBS_MAX]
 
 
 def screens(win=None):
@@ -221,14 +236,33 @@ def counts_now():
 
 
 def context():
-    """What goes with an error: what's on screen, the part just used, the last actions."""
-    used = STATE["used"]
-    recent = used is not None and time.time() - used[0] <= PART_RECENT_S
-    try:
-        shown = screen()
-    except Exception:  # noqa: BLE001 (an error as windows go: kept without it)
-        shown = STATE["screen"]
-    return {"screen": shown, "part": used[2] if recent else None, "crumbs": list(STATE["crumbs"])}
+    """What goes with an error: what's on screen, the part just used, the last actions. Any thread; no GTK."""
+    with STATE["lock"]:
+        used = STATE["used"]
+        recent = used is not None and time.time() - used[0] <= PART_RECENT_S
+        return {"screen": STATE["screen"], "part": used[2] if recent else None,
+                "crumbs": [dict(c) for c in STATE["crumbs"]]}
+
+
+def _watch(win):
+    """win's focus, dialog and tab changes looked at as they happen."""
+    for prop in ("focus-widget", "visible-dialog", "is-active"):
+        if win.find_property(prop) is not None:
+            win.connect(f"notify::{prop}", refresh)
+    view = getattr(getattr(win, "tabs", None), "view", None)
+    if view is not None:
+        view.connect("notify::selected-page", refresh)
+    GLib.idle_add(refresh)
+
+
+def _watching():
+    app = Gio.Application.get_default()
+    if not isinstance(app, Gtk.Application):
+        return
+    for win in app.get_windows():
+        _watch(win)
+    app.connect("window-added", lambda _app, win: _watch(win))
+    GLib.timeout_add_seconds(2, lambda: refresh() or True)  # (a dialog's page, a panel: what has no signal here)
 
 
 # ---- hooks
@@ -329,6 +363,7 @@ def install(app_name, wake):
         GLib.log_set_writer_func(_writer, None)
     except Exception:  # noqa: BLE001 (GLib's own writer kept: criticals not counted)
         errorbook.caught()
+    _watching()
     _hook(Gtk.Button, "clicked", _used("click"), Gtk.Button)
     _hook(Gtk.ListBox, "row-activated", _used("click", row=True), Gtk.ListBox)
     _hook(Gtk.Switch, "activate", _used("click"), Gtk.Switch)

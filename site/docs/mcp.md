@@ -4019,7 +4019,7 @@ An error a process on a host's machine had, kept by that host by its fingerprint
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` | yes | The process it was in: the host's, Baude's, Record's, the phone's app, or Emission's. |
 | `kind` | `exception` \| `thread` \| `callback` \| `log` \| `wire` \| `agent_exit` \| `draft_save` \| `send` \| `page_load` \| `crash` | yes | What it was: an exception nothing caught (on the main thread; on another thread; in a main-loop callback, which carries on), a critical or warning GLib or GTK logged, an error answered on the wire, an agent that exited by itself with a code other than 0, a draft its host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing. |
-| `fingerprint` | string | yes | What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (file:line), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out). |
+| `fingerprint` | string | yes | What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (its file and function), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out). |
 | `type` | string | yes | The exception's class, the log's domain and level, the op, the agent's program. |
 | `message` | string | yes | What it said, its first line (the last time). |
 | `file` | string/null |  | The file it was raised in, under the checkout, relative to it. |

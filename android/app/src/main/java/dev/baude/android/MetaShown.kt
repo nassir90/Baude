@@ -349,7 +349,7 @@ fun MarkNote(mark: Mark?) {
 @Composable
 fun FootButton(label: String, tip: String, text: Color, onClick: () -> Unit) {
     Text(label, style = Type.caption, color = text, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(4.dp)).tip(tip, onClick).padding(horizontal = 4.dp))
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).tip(tip, onClick.tapping(label, tip)).padding(horizontal = 4.dp))
 }
 
 /** The foot of Meta's page, as its box's status line: Clear, Copy, the working dots, the context meter. */
@@ -396,7 +396,7 @@ fun metaSendTip(): String {
 @Composable
 fun BarButton(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp),
+    Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick.tapping(label)).padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center) {
         Text(label, style = Type.bold, color = c.fg)
     }

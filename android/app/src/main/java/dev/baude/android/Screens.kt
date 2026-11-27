@@ -450,7 +450,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val gone = chat.sender == null && Stopping.line(chat.hostId) != null // (its host not reached: what's sent waits
                                                                                   // in its queue till it is)
             val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
-                !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
+                !(chat.sender == null && (exhausted(chat) || subscriptionOff(chat))) && reverting?.asked != true
             val sendable = ready || (chat.sender == null && isLocal(text))
             val send = {
                 val typed = text.trim()

@@ -25,7 +25,7 @@ from baudelib import wording  # noqa: E402
 from baudelib.claude import EFFORT_LABELS  # noqa: E402
 from meta import (  # noqa: E402
     CHATS, COMMAND_TOOLS, NAME, READ_TOOLS, TOO_SMALL, UNAVAILABLE, available, code_mode, effort, label, model,
-    model_name, report_text, runs_commands, settings_changed, transcript_text, window,
+    model_name, report_text, runs_commands, settings_changed, subscription_off, transcript_text, window,
 )
 from metaagent import SETUP_TOOLS  # noqa: E402
 from metalook import RefCompleter, install_css  # noqa: E402
@@ -243,6 +243,10 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
             self.exhausted.set(True, UNAVAILABLE)
             if not getattr(self, "unavailable_watch", None):
                 self.unavailable_watch = GLib.timeout_add_seconds(self.UNAVAILABLE_EVERY, self._unavailable_check)
+        elif (off := subscription_off()) is not None:  # (its subscription disabled: said so, till it's enabled)
+            self.exhausted.set(True, off)
+            if not getattr(self, "unavailable_watch", None):
+                self.unavailable_watch = GLib.timeout_add_seconds(self.UNAVAILABLE_EVERY, self._unavailable_check)
         elif agent is not None and not agent.closed and not agent.fresh:
             self._context_now()
         elif self.used is not None:
@@ -253,7 +257,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
     UNAVAILABLE_EVERY = 5  # (s between looks at whether Meta's model is back in the mesh, while it isn't)
 
     def _unavailable_check(self):
-        if not available():
+        if not available() or subscription_off() is not None:
             return True
         self.unavailable_watch = None  # (back: its box as it should be now)
         self.model_changed()
@@ -272,7 +276,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         outgrown = agent is not None and agent is self.outgrew and agent.model == model()
         if outgrown:
             self.ctx.bar.set_value(1)
-        if available():
+        if available() and subscription_off() is None:
             self.exhausted.set((self.ctx.over or outgrown) and self.ask is None,
                                TOO_SMALL if self.too_small == model() else wording.say("context_usage.exhausted"))
 

@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import threading
 from collections import deque
@@ -417,6 +418,15 @@ class CodexProc(AppServer):
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
             self.finish(error, turn.get("durationMs"), interrupted=status == "interrupted")
+        elif method == "account/rateLimits/updated":  # (its subscription's limits, as a turn's answer said them)
+            snapshot = params.get("rateLimits")
+            key = accounts.usage_key("codex", self.profile)
+            try:
+                if isinstance(snapshot, dict) and accounts.limits_exhausted(accounts.codex_limits(snapshot)) and \
+                        accounts.exhausted(key) and self.on_disabled is not None:
+                    self.on_disabled(key)
+            except (OSError, sqlite3.Error):
+                pass
         elif method == "thread/tokenUsage/updated":
             usage = params.get("tokenUsage") or {}
             used = (usage.get("last") or {}).get("totalTokens")

@@ -347,6 +347,20 @@ class WindowProc:
         sign-in."""
         return (self.chat_account_info() or {}).get("name")
 
+    def subscription_off(self):
+        """Is the subscription the chat runs on disabled on its host (its listing's account_disabled; a chat this
+        process runs claude for itself: as this machine keeps it)?"""
+        if self.remote is not None:
+            return bool(self.session_id and (self.remote.sessions.get(self.session_id) or {}).get("account_disabled"))
+        if not self.session_id or model_program(self.model) != "claude":
+            return False
+        import sqlite3
+        from baudelib import accounts
+        try:
+            return accounts.disabled(accounts.usage_key("claude", accounts.claude_session_profile(self.session_id)))
+        except (OSError, sqlite3.Error):
+            return False
+
     def chat_account_info(self):
         """The subscription account the chat's agent runs under on its host (Account's fields: its listing's; a chat
         this process runs claude for itself: as this machine keeps it), or None: the CLI's own sign-in."""
@@ -1233,7 +1247,8 @@ class WindowProc:
         if gates := self.composer_box.gates:  # (what's in the way of sending, said as it is)
             toast(self, wording.say("held_send.while_exhausted") if "exhausted" in gates else
                   wording.say("held_send.while_down") if "network" in gates else
-                  wording.say("held_send.while_no_host") if "host" in gates else wording.say("held_send.while_other"))
+                  wording.say("held_send.while_no_host") if "host" in gates else
+                  wording.say("held_send.while_disabled") if "disabled" in gates else wording.say("held_send.while_other"))
             return
         if self.reverting is not None:
             if not self.revert_asked():

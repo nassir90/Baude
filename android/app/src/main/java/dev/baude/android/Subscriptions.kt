@@ -73,6 +73,8 @@ class HostAccounts(val hostId: String) {
     val codexUsage = mutableStateOf(false) // (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
+    val disabled = mutableStateOf<Set<String>>(emptySet()) // (subscriptions disabled on the host, by usage key)
+    val auto = mutableStateOf<Set<String>>(emptySet()) // (those disabled as they're exhausted, by usage key)
     private val reading = HashSet<String>()
 
     /** A subscription's usage as last read: its limits (name, percent), or what to say instead; asOf, where they're as
@@ -127,11 +129,18 @@ class HostAccounts(val hostId: String) {
         g.claudeCli?.let { claudeCli.value = it }
         codexUsage.value = g.codexUsage == true
         missing.value = g.missing.orEmpty()
+        disabled.value = g.disabled.orEmpty().toSet()
+        auto.value = g.autoDisable.orEmpty().toSet()
         g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
     }
+
+    /** A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable). */
+    fun switch(what: String, provider: String, key: String, on: Boolean) =
+        ask(if (key == CODEX_CLI) Msg.Accounts(what = what, provider = "codex", id = "", on = on)
+            else Msg.Accounts(what = what, provider = provider, id = key, on = on))
 
     private fun limits(u: List<Msg.UsageLimit>) =
         u.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }
@@ -145,7 +154,8 @@ class HostAccounts(val hostId: String) {
 
 /** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
  * host picked beside New session, changed there: its name; for each provider, its heading, then a card for each subscription (CLI default first, where the host has the
- * provider's program), each account's with ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…), and each card's usage as a
+ * provider's program), each with Disabled where it is and ⋮ (an account's Rename…, Sign In Again… or Replace Token…, Remove…; every
+ * card's Disable or Enable, Auto Disable on Exhaustion), and each card's usage as a
  * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
  * (where the host lacks the provider's program, its Dependencies row instead: DepRow). */
 @Composable
@@ -192,10 +202,12 @@ fun SubscriptionsPage() {
                 }
                 val cli = if (provider == "claude") "" else HostAccounts.CODEX_CLI
                 if (host.cliCard(provider))
-                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true) {}
+                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true,
+                        cli in host.disabled.value, cli in host.auto.value) { kind -> host.switchPicked(kind, provider, cli) }
                 for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
-                    provider == "claude" || host.codexUsage.value) {
-                    kind -> dialog = kind to a }
+                    provider == "claude" || host.codexUsage.value, a.id.orEmpty() in host.disabled.value,
+                    a.id.orEmpty() in host.auto.value) { kind ->
+                    if (kind == "disable" || kind == "auto") host.switchPicked(kind, provider, a.id.orEmpty()) else dialog = kind to a }
                 val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
                 BoxedList(listOf(Unit), "") {
                     if (lacks != null) DepRow(lacks, depTitle(lacks, title))
@@ -221,12 +233,17 @@ fun SubscriptionsPage() {
     }
 }
 
-/** A subscription's card: its name and, an account's, ⋮ with what can be done to it (pick: "rename", "again" or
- * "remove"); its usage: a bar for each limit with its name and percentage over it, else what was
+/** ⋮'s Disable (Enable) or Auto Disable on Exhaustion picked (kind: "disable", "auto") on a subscription's card (key). */
+private fun HostAccounts.switchPicked(kind: String, provider: String, key: String) =
+    if (kind == "disable") switch("disable", provider, key, key !in disabled.value)
+    else switch("auto_disable", provider, key, key !in auto.value)
+
+/** A subscription's card: its name, Disabled where it is, and ⋮ with what can be done to it (pick: an account's
+ * "rename", "again" or "remove"; every card's "disable", "auto"); its usage: a bar for each limit with its name and percentage over it, else what was
  * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
 private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
-                             shown: Boolean, pick: (String) -> Unit) {
+                             shown: Boolean, off: Boolean, auto: Boolean, pick: (String) -> Unit) {
     val c = LocalBaude.current
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
@@ -234,7 +251,9 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (a != null) AccountMenu(a, pick)
+            if (off) Text(Wording.Subscriptions.disabled, style = Type.body, color = c.dim, maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp))
+            AccountMenu(a, off, auto, pick)
         }
         if (shown) UsageBars(usage, last, Modifier.padding(end = 6.dp))
     }
@@ -407,19 +426,29 @@ private fun limitLabel(l: HostAccounts.Limit): String {
     }
 }
 
-/** An account's ⋮ with what can be done to it (pick: "rename", "again" or "remove"). */
+/** A subscription's ⋮ with what can be done to it (pick): an account's (a) "rename" and "again"; every one's
+ * "disable" (Enable, where it's disabled: off) and "auto" (Auto Disable on Exhaustion, ticked where it's on); an
+ * account's "remove". */
 @Composable
-private fun AccountMenu(a: Msg.Account, pick: (String) -> Unit) {
+private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
-        Popover(open, { open = false }) {
-            MenuChoice(Wording.Common.renameEllipsis, false) { open = false; pick("rename") }
-            MenuChoice(if (a.kind == "token") Wording.Subscriptions.replaceToken else Wording.Subscriptions.signInAgain, false) {
-                open = false
-                pick("again")
+        Popover(open, { open = false }, ticks = Ticks.START) {
+            if (a != null) {
+                MenuChoice(Wording.Common.renameEllipsis, false) { open = false; pick("rename") }
+                MenuChoice(if (a.kind == "token") Wording.Subscriptions.replaceToken else Wording.Subscriptions.signInAgain, false) {
+                    open = false
+                    pick("again")
+                }
+                MenuDivider()
             }
-            MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
+            MenuChoice(if (off) Wording.Subscriptions.enable else Wording.Subscriptions.disable, false) { open = false; pick("disable") }
+            MenuChoice(Wording.Subscriptions.autoDisable, auto) { open = false; pick("auto") }
+            if (a != null) {
+                MenuDivider()
+                MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
+            }
         }
     }
 }

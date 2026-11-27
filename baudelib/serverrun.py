@@ -13,7 +13,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire,
     wording, worktree,
 )
@@ -382,6 +382,8 @@ class ServerRunning:
                                "gone": {"why": e.why, "folder": e.folder}})
                 except deps.Missing as e:  # (a program a chat runs isn't here: what to install, said as it is)
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True, "missing": e.dep})
+                except accounts.Disabled as e:  # (a chat on a disabled subscription: said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
@@ -997,7 +999,7 @@ class ServerRunning:
             if op == "input":
                 try:
                     self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
-                except desktopchats.Elsewhere as e:
+                except (desktopchats.Elsewhere, accounts.Disabled) as e:
                     return reply("error", error=str(e), plain=True)
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
@@ -1086,7 +1088,7 @@ class ServerRunning:
                         self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
                                         h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
                                         meshtools.shown_of_told(h.get("text") or ""))
-                    except desktopchats.Elsewhere as e:  # (kept: sent once it's quiet)
+                    except (desktopchats.Elsewhere, accounts.Disabled) as e:  # (kept: sent once it's quiet)
                         return reply("error", error=str(e), plain=True)
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)

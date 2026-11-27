@@ -25,7 +25,10 @@
     "baudelib/hostaccounts.py:_sign_in",
     "Subscriptions.kt:CodexLogin",
     "Subscriptions.kt:CodexSignIn",
-    "Subscriptions.kt:CodexCard"
+    "Subscriptions.kt:CodexCard",
+    "baudelib/accounts.py:set_switch",
+    "baudelib/accounts.py:exhausted",
+    "baudelib/serversessions.py:subscription_disabled"
   ],
   "copy": [
     "subscriptions",
@@ -83,11 +86,11 @@
       "parts": [
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Usage available after a message\" before its first turn.",
+          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, \"Disabled\" dim at the end of its line where it's disabled, and ⋮ (every card's, CLI default's too). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Usage available after a message\" before its first turn.",
           "actions": [
             {
               "by": "click ⋮",
-              "does": "Menu: Rename…, Sign In Again… (Replace Token… for a token account), Remove…"
+              "does": "Menu: an account's Rename…, Sign In Again… (Replace Token… for a token account); then every card's Disable (Enable where it's disabled) and Auto Disable on Exhaustion (a check item, ticked where it's on); then an account's Remove…. Disable and Enable, and Auto Disable on Exhaustion, are said to the host at once (accounts disable / auto_disable, the card's id, \"\" with provider for CLI default, and on), and the card drawn again from its answer (disabled, auto_disable)"
             },
             {
               "by": "(none)",
@@ -112,7 +115,11 @@
             "subscriptions.other_limit_today",
             "subscriptions.no_limits",
             "subscriptions.last_update",
-            "subscriptions.after_turn"
+            "subscriptions.after_turn",
+            "subscriptions.disable",
+            "subscriptions.enable",
+            "subscriptions.auto_disable",
+            "subscriptions.disabled"
           ],
           "decisions": [
             {
@@ -186,6 +193,26 @@
               "source": [
                 {
                   "message": "b0979709-ca86-482f-8b0e-ee406f67f132"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#280, paraphrased) a provider should be able to be disabled without removing it: its chats turned off and the send button blocked for chats on it, since some providers don't stop when usage runs out and bill extra instead",
+              "rule": "Every app's Subscriptions page lets any subscription (an account, or a provider's CLI default) be disabled and enabled again from its ⋮, without removing it; while it's disabled its card says Disabled, its host stops the agent of every chat on it (a turn going on cut short) and refuses anything sent to them or anything that would start them, and every app's chat on it has its send button off with a banner \"Subscription <name> is disabled\" (Meta's box, where Meta runs on it, the same line over it), till it's enabled or the chat's moved to another subscription",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#280"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#281, paraphrased) a subscription should have a toggle to auto disable on exhaustion",
+              "rule": "Every app's subscription ⋮ has Auto Disable on Exhaustion, a check item; while it's on, the host disables the subscription (as Disable does, its chats stopped) as soon as its chats' turns or a usage read say one of its limits is used up or extra usage is being billed (Claude's rate-limit events: a limit refused, at 100%, or using overage; Codex's rate-limit updates and usage reads: a window at 100%), or at once when it's turned on if the last reading says so; it stays disabled till it's enabled by hand",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#281"
                 }
               ]
             }

@@ -1,7 +1,8 @@
 """hostaccounts — this host's Claude and Codex subscription accounts (accounts), changed for a head anywhere in the
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token or API key, a Codex API key, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
-token account's token replaced (token), a chat moved onto another (use: once it's on it, kept as the one a new
+token account's token replaced (token), a subscription disabled or enabled again (disable: its chats' agents stopped,
+nothing sent to them) or set to disable itself as it's exhausted (auto_disable), a chat moved onto another (use: once it's on it, kept as the one a new
 chat on its provider's models takes, accounts.selected), a subscription's usage read (usage; a Claude sign-in that can't be asked, a setup token's, as its chats' turns last
 said it, with when: as_of), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
@@ -44,8 +45,11 @@ def claude_cli(server):
 def state(server=None):
     missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
     last = {profile: {"read": round(read), "usage": _limits(limits)} for profile, (read, limits) in accounts.last_usage().items()}
+    switches = accounts.switches()
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
-            "missing": missing, "last_usage": last, "codex_usage": True}
+            "missing": missing, "last_usage": last, "codex_usage": True,
+            "disabled": sorted(k for k, v in switches.items() if v["disabled"]),
+            "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"])}
 
 
 def answer(server, conn, msg, reply):
@@ -84,6 +88,19 @@ def answer(server, conn, msg, reply):
         if what == "remove":
             accounts.remove(profile, claude_cli(server))
             return done()
+        if what in ("disable", "auto_disable"):  # (a subscription's switch: id, "" with provider for the CLI's own)
+            key = accounts.usage_key((accounts.account(profile) or {}).get("provider", provider or "claude"), profile)
+            on = bool(msg.get("on"))
+            accounts.set_switch(key, **{"disabled" if what == "disable" else "auto_disable": on})
+            off = what == "disable" and on
+            if what == "auto_disable" and on and _spent(server, key):  # (exhausted already: disabled now)
+                accounts.set_switch(key, disabled=True)
+                off = True
+            if off:
+                getattr(server, "subscription_disabled", lambda _key: None)(key)
+            else:
+                getattr(server, "subscription_switched", lambda: None)()
+            return done()
         if what == "use":
             server.use_account(msg.get("session"), profile)
             return done()
@@ -98,7 +115,8 @@ def answer(server, conn, msg, reply):
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
-    return done(error="accounts takes list, add, rename, token, remove, use, usage, sign_in, code or callback")
+    return done(error="accounts takes list, add, rename, token, remove, disable, auto_disable, use, usage, sign_in, code "
+                      "or callback")
 
 
 def _for_chat(server, conn, msg, done):
@@ -116,6 +134,21 @@ def _for_chat(server, conn, msg, done):
                         why=None if cancelled else extra.get("error") or wording.say("subscriptions.claude_failed"))
         done(**extra)
     return ended
+
+
+def _spent(server, key):
+    """Whether a subscription (usage key) is exhausted as it was last read, or as its chats' turns last said it."""
+    from baudelib.serverstate import state_home
+    read = accounts.last_usage().get(key)
+    seen = accounts.seen_limits(getattr(server, "state_dir", None) or state_home(), key)
+    return accounts.limits_exhausted(read[1] if read else None) or accounts.limits_exhausted(seen[0] if seen else None)
+
+
+def _exhausted(server, key, limits):
+    """A usage read's limits (limits) that say a subscription's used up: disabled if it auto-disables (its chats
+    stopped)."""
+    if accounts.limits_exhausted(limits) and accounts.exhausted(key):
+        getattr(server, "subscription_disabled", lambda _key: None)(key)
 
 
 def _usage(server, profile, provider, done):
@@ -139,6 +172,7 @@ def _usage(server, profile, provider, done):
         return done(usage=_limits(seen[0]), as_of=round(seen[1]))
     if limits is None:
         return done(usage=None)
+    _exhausted(server, accounts.usage_key(provider, profile), limits)
     done(usage=_limits(limits))
 
 

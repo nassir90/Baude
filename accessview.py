@@ -278,7 +278,7 @@ class RuleField(Gtk.Box):
                                                   css_classes=["dim-label"]), activatable=False, selectable=False)
             none.key = None
             self.list.append(none)
-        self.list.select_row(self.list.get_row_at_index(0) if found else None)
+        self.list.select_row(self.list.get_row_at_index(0) if found and self.text.get_text().strip() else None)
         self.pop.get_child().set_size_request(max(240, min(self.get_width(), 360)), -1)
         if found or not self.names:
             self.pop.popup()

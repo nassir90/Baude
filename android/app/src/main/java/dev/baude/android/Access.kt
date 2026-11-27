@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -80,7 +81,7 @@ fun AccessRule(cap: String, own: JSONObject?, state: JSONObject, chat: Boolean =
         for (n in names) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (names.size > 1) Text(if (n.endsWith("_read")) Wording.Access.read else Wording.Access.write, style = Type.body,
                 color = c.dim, maxLines = 1, modifier = Modifier.widthIn(min = 44.dp))
-            ToField(PhoneAccess.named(n), keysOf(ruleNamed(n), chat), known, chat, editable, Modifier.weight(1f)) { set(n, ruleOf(it)) }
+            ToField(PhoneAccess.named(n), keysOf(ruleNamed(n), chat), state, known, chat, editable, Modifier.weight(1f)) { set(n, ruleOf(it)) }
         }
     }
 }
@@ -117,18 +118,19 @@ private fun matches(typed: String, names: Map<String, String>): List<String> {
 /** One rule's field (label: the rule's name, as it's told apart), as an email's To (accessview.RuleField): who it lets
  * in as pills, wrapping, two lines of them and "<n> more" for the rest, which opens it out to every one; none is Nobody,
  * said in it. Tapped, it takes typing, and lists who may be added under it (Same as Host for a chat's, Everybody, then
- * the members, but those it has), matched as it's typed: a tap or the keyboard's Done adds one (Everybody or Same as
+ * the members, but those it has), matched as it's typed: a tap, or the keyboard's Done once something is typed, adds one (Everybody or Same as
  * Host in place of the rest, a member in place of either); × takes one out. change(the pills) as they're changed;
- * what it shows stays as changed till keys (the host's answer) come. */
+ * what it shows stays as changed till the host answers (host: its reply's state; a refusal brings back what it has). */
 @Composable
-private fun ToField(label: String, keys: List<String>, known: Map<String, String>, chat: Boolean, editable: Boolean,
+private fun ToField(label: String, keys: List<String>, host: Any, known: Map<String, String>, chat: Boolean, editable: Boolean,
                     modifier: Modifier = Modifier, change: (List<String>) -> Unit) {
     val c = LocalBaude.current
-    var shown by remember(keys) { mutableStateOf(keys) }
+    var shown by remember(keys, host) { mutableStateOf(keys) }
     var typing by remember { mutableStateOf(false) }
     var typed by remember { mutableStateOf("") }
     var open by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     fun named(k: String) = when (k) { EVERYBODY -> Wording.Access.everybody; SAME -> Wording.Access.sameAsHost; else -> known[k] ?: k.take(8) }
     fun changed(next: List<String>) { shown = next; change(next) }
     fun add(k: String) { typed = ""; changed(if (k == EVERYBODY || k == SAME) listOf(k) else shown.filter { it != EVERYBODY && it != SAME } + k) }
@@ -147,7 +149,7 @@ private fun ToField(label: String, keys: List<String>, known: Map<String, String
                     BasicTextField(typed, { typed = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { found.firstOrNull()?.let { add(it) } }),
+                        keyboardActions = KeyboardActions(onDone = { if (typed.isNotBlank()) found.firstOrNull()?.let { add(it) } else keyboard?.hide() }),
                         modifier = Modifier.focusRequester(focus).onPreviewKeyEvent { e ->
                                 if (e.type == KeyEventType.KeyDown && e.key == Key.Backspace && typed.isEmpty() && shown.isNotEmpty()) {
                                     changed(shown.dropLast(1)); true

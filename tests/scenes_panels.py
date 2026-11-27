@@ -251,13 +251,13 @@ RESTART_BLOCKERS = [{"kind": "chat", "session": "11111111-0000-4000-8000-0000000
                     {"kind": "terminal", "terminal": "abc123", "name": "zsh", "what": "/bin/zsh -l"}]
 
 
-def _restart_pending(app, paused):
+def _restart_pending(app, paused, blockers=RESTART_BLOCKERS):
     """This Mac's host process (the run's own, in this process) keeping a restart that a chat running a command and a
-    task's run hold up (RESTART_BLOCKERS, as its blockers say them), and paused if paused: as the heads hear it."""
+    task's run hold up (blockers, as its blockers say them), and paused if paused: as the heads hear it."""
     sidebar_sessions(T.TMP)
     win = app.window()
     srv = baude.baudelib.hosts._HERE[0]
-    srv.blockers = lambda: RESTART_BLOCKERS
+    srv.blockers = lambda: blockers
     if paused:
         srv.restart_holds.add("a head")
     srv.restart_when_free("head")
@@ -277,12 +277,21 @@ def _(app):
 @scene("56e-daemon-restart-blockers", "Details on that toast: what the restart waits for, the restart paused meanwhile "
                                       "(every app says so), with Restart (once they're done) and Force Restart (now)")
 def _(app):
-    win = _restart_pending(app, False)
+    return _restart_details(_restart_pending(app, False))
+
+
+def _restart_details(win):
+    """Details on the pending restart's toast pressed: its Waiting For open."""
     toast = next(iter(win.sidebar.restart_toasts.shown.values()))
     toast.emit("button-clicked")
     T.wait_for(lambda: isinstance(win.get_visible_dialog(), baude.Adw.AlertDialog), "Waiting For")
     T.pump(0.5)
     return win
+
+
+@scene("56e2-daemon-restart-one-blocker", "Waiting For with one thing in it: a single row")
+def _(app):
+    return _restart_details(_restart_pending(app, False, RESTART_BLOCKERS[:1]))
 
 
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "

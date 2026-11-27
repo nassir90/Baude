@@ -286,3 +286,33 @@ def give_front_to(pid):
     if objc_send(nsapp, b"respondsToSelector:", yield_sel, types=(ctypes.c_void_p,), ret=ctypes.c_bool):
         objc_send(nsapp, b"yieldActivationToApplication:", other, types=(ctypes.c_void_p,))
     return bool(objc_send(other, b"activateWithOptions:", 0, types=(ctypes.c_ulong,), ret=ctypes.c_bool))
+
+
+def presence():
+    """Someone at this Mac, as macOS says it: (seconds since the last input, from any device; whether the screen's
+    locked; whether the main display's asleep), or None if it can't be read."""
+    import ctypes
+    try:
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cg.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
+        cg.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
+        idle = cg.CGEventSourceSecondsSinceLastEventType(0, 0xFFFFFFFF)  # (the session's, any input: kCGAnyInputEventType)
+        cg.CGMainDisplayID.restype = ctypes.c_uint32
+        cg.CGDisplayIsAsleep.restype, cg.CGDisplayIsAsleep.argtypes = ctypes.c_bool, [ctypes.c_uint32]
+        asleep = cg.CGDisplayIsAsleep(cg.CGMainDisplayID())
+        cg.CGSessionCopyCurrentDictionary.restype = ctypes.c_void_p
+        session = cg.CGSessionCopyCurrentDictionary()
+        locked = False
+        if session:
+            cf.CFDictionaryGetValue.restype = ctypes.c_void_p
+            cf.CFDictionaryGetValue.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            value = cf.CFDictionaryGetValue(session, ns_string("CGSSessionScreenIsLocked"))
+            if value:
+                cf.CFBooleanGetValue.restype, cf.CFBooleanGetValue.argtypes = ctypes.c_bool, [ctypes.c_void_p]
+                locked = cf.CFBooleanGetValue(value)
+            cf.CFRelease.argtypes = [ctypes.c_void_p]
+            cf.CFRelease(session)
+        return idle, locked, asleep
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None

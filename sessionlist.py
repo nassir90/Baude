@@ -578,6 +578,7 @@ def remote_info(s):
             "desktop": bool(s.get("desktop")), "elsewhere": bool(s.get("elsewhere")),  # (Claude Desktop's; writing it now)
             "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
             "held": len(s.get("held") or []),  # (messages its host holds for it, to send or drop: HeldTurn)
+            "unseen": baudelib.client.unseen(s),  # (its last turn's end not seen on any head yet: its dot's done)
             "account": (s.get("account") or {}).get("name") if isinstance(s.get("account"), dict) else None}
 
 

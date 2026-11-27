@@ -160,6 +160,10 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         if (TaskLinks.pending?.let { it[0] == hostId && it[1] == sid } == true) show("tasks")
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
+    LaunchedEffect(shown, split) { // (its chat page on screen, or not: what's on it seen, Mesh.tellSeen)
+        chat.inView = split || shown == "chat"
+        Mesh.tellSeen(chat)
+    }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         if (sideAll.none { it.key == side }) side = "meta"
         val i = all.indexOfFirst { it.key == shown }

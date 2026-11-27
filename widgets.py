@@ -577,6 +577,60 @@ def desktop_notify(key, title, body="", clicked=None, picture=None, opens=None):
         ["default", wording.say("common.open")], hints, -1)), posted)
 
 
+PRESENT_S = 60  # (input this recently: someone's at the machine)
+_presence = {}  # (presence's last answer, and when: user_present)
+
+
+def _dbus_value(bus, name, path, iface, method):
+    """A session-bus method's one answer, asked at once (200 ms at most), or None: no such service, or no answer."""
+    try:
+        return bus.call_sync(name, path, iface, method, None, None, Gio.DBusCallFlags.NONE, 200, None).unpack()[0]
+    except GLib.Error:
+        return None
+
+
+def presence():
+    """Someone at this machine now, as the system says it: (seconds since the last input, whether the screen's locked,
+    whether the display's asleep), or None where it can't be told. On macOS, CoreGraphics' (macos.presence); elsewhere
+    GNOME's (Mutter's IdleMonitor, its ScreenSaver) or org.freedesktop.ScreenSaver's (KDE's GetSessionIdleTime)."""
+    if sys.platform == "darwin":
+        import macos
+        return macos.presence()
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error:
+        return None
+    idle = _dbus_value(bus, "org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
+                       "org.gnome.Mutter.IdleMonitor", "GetIdletime")
+    idle = idle / 1000 if idle is not None else _dbus_value(
+        bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver",
+        "GetSessionIdleTime")
+    if idle is None:
+        return None
+    locked = _dbus_value(bus, "org.gnome.ScreenSaver", "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver", "GetActive")
+    if locked is None:
+        locked = _dbus_value(bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver",
+                             "org.freedesktop.ScreenSaver", "GetActive")
+    return float(idle), bool(locked), False  # (a display asleep is the screen saver's: locked, or blanked by it)
+
+
+def user_present():
+    """Whether someone's at this machine: input within PRESENT_S, the screen not locked, the display awake. None where
+    that can't be told (presence)."""
+    at, p = _presence.get("at", -1.0), _presence.get("p")
+    if time.monotonic() - at > 1:  # (asked once a second at most: a scroll asks at every step)
+        _presence["at"], _presence["p"] = time.monotonic(), (p := presence())
+    if p is None:
+        return None
+    idle, locked, asleep = p
+    return idle <= PRESENT_S and not locked and not asleep
+
+
+def notified(key):
+    """Whether key's notification is up (posted by this process, not clicked or taken back since)."""
+    return key in _notified
+
+
 def withdraw_notification(key):
     """key's notification taken back (what it was about seen now), if one's up."""
     if _notified.pop(key, None) is None:

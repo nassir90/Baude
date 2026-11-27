@@ -12,6 +12,7 @@ import time
 from baudelib.transcripts import _first_text, _prompt_texts, ChunkFill, clean_prompt, HistoryIndex, ref_epoch
 from baudelib import tokens  # noqa: E402  (Baude's measures: schema/tokens, the Android app's too)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib.client import unseen  # noqa: E402  (a host's chat's last turn's end not seen on any head yet: done)
 
 import gi
 
@@ -484,13 +485,16 @@ class WindowView:
         if self.resume_pending and self.remote is not None:  # (a network session viewed: as its server says)
             listed = self.remote.sessions.get(self.session_id) or {}
             return "inactive" if self.remote.state == "dead" else \
-                {"working": "working", "waiting": "waiting"}.get(listed.get("state"), "inactive")
+                {"working": "working", "waiting": "waiting"}.get(listed.get("state"),
+                                                                 "done" if unseen(listed) else "inactive")
         if self.resume_pending:  # only viewing: what the program writing it is doing
             return self.tail.state()
         if self.waiting_cards:
             return "waiting"
         if self.busy or self.running_tasks():
             return "working"
+        if self.remote is not None:  # (a host's chat between turns: done till its turn's end is seen on a head)
+            return "done" if unseen(self.remote.sessions.get(self.session_id)) else "inactive"
         if getattr(self, "turn_finished", False) and self.proc is not None:
             return "done"
         return "inactive"

@@ -37,7 +37,7 @@ object PhoneAccess {
             else "manage_read"
         Op.DETACH, Op.TRANSCRIPT, Op.CHAT_SIZE, Op.SUBAGENTS, Op.SENDERS, Op.BOT_PICTURE, Op.READ_FILE, Op.LIST_DIR,
         Op.CATALOGUE -> "manage_read"
-        else -> "manage_write" // (input, stop, rename, archive, unarchive, delete, always_allow, bot)
+        else -> "manage_write" // (input, stop, rename, archive, unarchive, delete, always_allow, bot, seen)
     }
 
     /** Does an attach's always_allow name tools the chat doesn't allow always yet (allowed)? */

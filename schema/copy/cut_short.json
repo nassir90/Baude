@@ -1,8 +1,7 @@
 {
-  "description": "A chat whose last turn a restart cut short: the line at its end and its Continue.",
+  "description": "A chat whose last turn a restart cut short: the line at its end and its Continue (common.continue).",
   "messages": {
     "line": "Cut short by a restart",
-    "button": "Continue",
     "continuing": "Continuing…",
     "message": "Continue where you left off: a restart cut your last turn short.",
     "tip": "Send “{$message}”"

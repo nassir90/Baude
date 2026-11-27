@@ -826,7 +826,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.append(widgets.Spinner())
             row.append(said)
         else:
-            go = Gtk.Button(label=wording.say("cut_short.button"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
+            go = Gtk.Button(label=wording.say("common.continue"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
             go.connect("clicked", lambda *_: self.continue_cut())
             row.append(said)
             row.append(go)

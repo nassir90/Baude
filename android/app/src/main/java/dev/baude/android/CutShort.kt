@@ -49,7 +49,7 @@ fun CutShortLine(chat: Chat) {
                 CutShort.continuing[key] = true
                 Mesh.send(chat, Wording.CutShort.message, emptyList(), keep = false) { CutShort.continuing.remove(key) }
             }.padding(horizontal = 8.dp, vertical = 1.dp)) {
-            Text(Wording.CutShort.button, style = Type.body.copy(fontSize = Tokens.Font.body * 0.9f,
+            Text(Wording.Common.`continue`, style = Type.body.copy(fontSize = Tokens.Font.body * 0.9f,
                 lineHeight = Tokens.Font.bodyLine * 0.9f), color = c.fg)
         }
     }

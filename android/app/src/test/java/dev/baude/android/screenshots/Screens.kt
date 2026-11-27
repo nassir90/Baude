@@ -1842,6 +1842,32 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/50b-chat-queue-sent-elsewhere.png")
     }
 
+    /** A chat at a turn with two messages another head queued (its host's queue, given as it's attached): drawn under
+     * it as queued here; then one taken out on the phone (its ✕), dropped from its host's queue too. */
+    @Test fun chatQueueFromHost() {
+        val ops = ArrayList<org.json.JSONObject>()
+        fun turn(id: String, text: String) = org.json.JSONObject().put("id", id).put("text", text).put("content", text)
+        val queue = org.json.JSONObject().put("rev", 2).put("upto", org.json.JSONObject.NULL).put("turns", org.json.JSONArray(listOf(
+            turn("6b0e3a4c-1d2f-4a5b-8c9d-0e1f2a3b4c5d", "Then tag the release as v0.9.0."),
+            turn("7c1f4b5d-2e3a-4b6c-9d0e-1f2a3b4c5d6e", "And push the tag to origin."))))
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            ops.add(m)
+            when (m.optString("op")) {
+                "attach" -> org.json.JSONObject().put("op", "attached").put("writes", true).put("queue", queue)
+                    .put("session", Mesh.sessions["h1"]!!.first { it.id == "a" }.json().put("state", "working"))
+                else -> null
+            }
+        }
+        Mesh.drafts.clear()
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        chatSoFar(Mesh.open!!)
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50c-chat-queue-from-host.png")
+        Mesh.open!!.queued.firstOrNull()?.let { dev.baude.android.Queue.drop(Mesh.open!!, it) }
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50d-chat-queue-from-host-dropped.png")
+    }
+
     /** Chat a's conversation as its host has it: a long turn begun. */
     private fun chatSoFar(chat: Chat) {
         chat.lines.addAll(listOf(Line("you", "Tidy the release notes for 0.9.", uuid = "u1"),

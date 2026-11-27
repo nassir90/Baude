@@ -1054,6 +1054,7 @@ class RemoteProc(claude.ClaudeProc):
         self.keeps_login = "login" in reply  # (a host that keeps it: one that doesn't, its heads' cards their own)
         self.writes = reply.get("writes") is not False  # (false: its host lets this head only read it)
         self.draft = reply.get("draft")  # (what's written in its box, as its host keeps it: ChatDraft, or None)
+        self.queue = reply.get("queue")  # (what's queued at its turns, as its host keeps it: ChatQueue, or None)
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None}) if self.writes else None
 
@@ -1069,6 +1070,9 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_login", "login": m.get("login")}))
             elif op == "draft_changed" and msg.get("session") == self.session:  # (its draft, another head's write,
                 self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_draft", "draft": m.get("draft")}))  # as "_draft")
+            elif op == "queue_changed" and msg.get("session") == self.session:  # (its queue, another head's change
+                self.queue = msg.get("queue")  # or its host's sending it, as "_queue")
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_queue", "queue": m.get("queue")}))
             elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
                 self.code = "stopped" if msg.get("stopped") else msg.get("code")
                 break
@@ -1100,6 +1104,16 @@ class RemoteProc(claude.ClaudeProc):
         req = next(self.req_ids)
         self.answering[req] = done
         if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
+
+    def queue_op(self, change, done):
+        """Its queue changed on its host (queue: change's add, drop, upto), on this connection, so it's in order with
+        what's sent its claude: done(answer) with the host's answer (op queue, its queue; or error), on the main
+        loop."""
+        req = next(self.req_ids)
+        self.answering[req] = done
+        if not self.ch.send({"op": "queue", "session": self.session, "req": req, **change}):
             self.answering.pop(req, None)
             self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
 

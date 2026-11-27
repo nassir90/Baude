@@ -536,7 +536,9 @@ class QueuedTurn(Gtk.Box):
     conversation): grey, and with the pointer on its row, ✕ (dropped), ↑ (sent: the turn interrupted, then it and every
     queued message before it sent, together) and the revert button (put back in the box to edit) fade in beside it, as
     a sent message's revert does. Its bubble's narrower by the buttons. win: its queue_send, queue_edit, queue_drop.
-    said: the uuid it was sent by, if it was and its host may not have taken it (left_turn_ended): sent by it again."""
+    said: the uuid it was sent by, if it was and its host may not have taken it (left_turn_ended): sent by it again.
+    qid: its id in its chat's queue on its host (hostqueue); hosted: whether its host has it ("adding": asked to)."""
+    qid, hosted = None, False
 
     def __init__(self, win, bubble, text, atts, said=None):
         super().__init__(spacing=6, hexpand=True)

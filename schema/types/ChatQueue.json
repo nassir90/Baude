@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's queue, as its host keeps it: the messages written while its turn runs, the same on every head that opens the chat, on any machine. Its host leads it: as a turn ends it sends them all, as one message, unless a revert stopped the turn; a message queued once no turn's going goes at once.",
+  "properties": {
+    "turns": {
+      "type": "array",
+      "items": {
+        "$ref": "QueuedMessage.json"
+      },
+      "description": "Its messages, oldest first."
+    },
+    "upto": {
+      "type": ["string", "null"],
+      "description": "The one whose send-now stopped the turn: as it ends, it and those before it are sent, the rest kept."
+    },
+    "rev": {
+      "type": "integer",
+      "description": "Its revision: one more with every change, never less (a head drops one it's seen a later revision than)."
+    }
+  },
+  "required": ["turns", "rev"],
+  "additionalProperties": false
+}

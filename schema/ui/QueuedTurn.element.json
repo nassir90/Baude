@@ -28,7 +28,11 @@
     "Queue.kt:Queue.resend",
     "Queue.kt:Queue.putBackTried",
     "Queue.kt:Queue.taken",
-    "Queue.kt:Queue.refused"
+    "Queue.kt:Queue.refused",
+    "baudelib/hostqueue.py:change",
+    "baudelib/hostqueue.py:turn_over",
+    "windowdrafts.py:WindowDrafts.host_queue_in",
+    "Mesh.kt:Mesh.queueIn"
   ],
   "copy": [
     "chat_turns",
@@ -173,6 +177,16 @@
       "source": [
         {
           "issue": "BaudeInternal#243"
+        }
+      ]
+    },
+    {
+      "said": "Queued messages should be shared across the mesh with an elected leader, the same mechanism as drafts; too often something shows in one view of a chat and not on the rest of the mesh (paraphrased)",
+      "rule": "Every app keeps a host chat's queue on the chat's host, as its draft is: any head on any machine that opens the chat shows the same queued messages, and a message queued, deleted, edited or sent now on one head goes from every other. The chat's host is the queue's leader: only it sends the queue, as the turn ends (all of it as one message; up to the one whose send-now stopped the turn; kept past a turn a revert stopped), and at once for a message queued as no turn's going, so it is sent once whichever heads are open, or none. Attachments go with the message. A message its host won't take (QUEUE_CHARS_MAX), or one queued while the host isn't reached, stays the head's own and goes as before.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#296"
         }
       ]
     }

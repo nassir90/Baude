@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    deps, desktopchats, hostlogin, toolnames, worktree,
+    deps, desktopchats, hostlogin, hostqueue, toolnames, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
@@ -477,6 +477,7 @@ class ServerSessions:
             return
         rid, request = msg.get("request_id"), msg.get("request") or {}
         sub, undo = request.get("subtype"), None
+        hostqueue.asked(s, sub)  # (a revert mid-turn: its queue kept past it)
         answer = lambda response: conn.send({"op": "claude", "session": s.id, "msg": {  # noqa: E731
             "type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": response}}})
         if sub == "get_context_usage" and models.model_program(s.meta.get("model")) == "codex":
@@ -744,6 +745,7 @@ class ServerSessions:
                 followed, s.sent_at_turn = bool(told) or s.sent_at_turn, False
                 if s.account_after_turn and proc is s.proc:  # (another account picked at the turn: moved onto it,
                     self.account_after(s, FOLLOW_UP_WAIT if followed else 0)  # follow-ups sent at it answered first)
+                hostqueue.turn_over(self, s, proc)  # (what was queued at it, sent now: its host leads the queue)
 
     def took_queued(self, s):
         """(lock held) Messages sent at a session's turn (queued), its program taking them in as the turn goes on
@@ -959,6 +961,7 @@ class ServerSessions:
         with self.lock:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
+            at_turn = s.busy
             if s.busy and not self.stopped.is_set() and not getattr(made[0], "restarting", False):
                 stopping = getattr(made[0], "stopping", False)
                 self.tasks.chat_over(s, wording.say("task_notes.stopped") if stopping else
@@ -989,6 +992,8 @@ class ServerSessions:
                 for conn in s.live:
                     conn.send({"op": "exited", "session": s.id, "code": code, **stopped})
             self.changed()
+            if at_turn and not self.stopped.is_set() and not s.deleting:
+                hostqueue.exited(self, s)  # (its turn over, stopped outright: what was queued at it sent now)
 
     def ask_context(self, s, soon=False):
         """(lock held) How much of its window the session's agent has used, asked of it (get_context_usage) and kept
@@ -1169,6 +1174,7 @@ class ServerSessions:
                 if s.queued:
                     s.queued = []
                     self.save(s)
+                hostqueue.hold(self, s)  # (what its heads queued: held the same, so they show why and nothing's stuck)
                 if s.proc is not None and not getattr(s.proc, "stopping", False):
                     s.proc.stopping, s.proc.restarting = True, False
                     s.proc.kill()

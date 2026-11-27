@@ -1089,6 +1089,44 @@ abstract class Screens(private val theme: String) {
         withMenus("inbox-6-history")
     }
 
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAskPictureButtons() {
+        inboxFixture()
+        show { dev.baude.android.AskScreen("h1", "logo", {}) }
+        laidOut()
+        screen("inbox-10-picture-buttons")
+    }
+
+    /** The logo ask's first picture button's picture tapped: the large view, its pictures in the ask's order; then a
+     * swipe to the next. */
+    @Test fun inboxAskPictureViewer() {
+        inboxFixture()
+        dev.baude.android.Viewer.flyMs = 0
+        show { dev.baude.android.AskScreen("h1", "logo", {}) }
+        laidOut()
+        val shot = windows().flatMap(::composeRoots).flatMap { semanticsUnder(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Role) && n.config[androidx.compose.ui.semantics.SemanticsProperties.Role] == androidx.compose.ui.semantics.Role.Image &&
+                n.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        } ?: error("no picture to tap")
+        shot.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+        laidOut()
+        screen("inbox-11-picture-viewer")
+        swipe(0.8f, 0.2f)()
+        laidOut()
+        screen("inbox-12-picture-viewer-next")
+        dev.baude.android.Viewer.state.value = null
+    }
+
+    private fun composeRoots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+        is androidx.compose.ui.node.RootForTest -> listOf(v)
+        is android.view.ViewGroup -> (0 until v.childCount).flatMap { composeRoots(v.getChildAt(it)) }
+        else -> emptyList()
+    }
+
+    private fun semanticsUnder(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+        listOf(n) + n.children.flatMap { semanticsUnder(it) }
+
     @Test @Config(qualifiers = "+h3300dp") fun inboxStoppedList() {
         inboxFixture(stopped = true)
         show { dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> }) }

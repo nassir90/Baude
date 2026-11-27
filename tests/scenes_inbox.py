@@ -10,6 +10,7 @@ import test_baude as T  # noqa: E402
 from scenelib import SIDEBAR, scene  # noqa: E402
 import scenes_panels as P  # noqa: E402
 import inbox_fixture  # noqa: E402
+import inboxview  # noqa: E402
 
 SIZE = (1210 + SIDEBAR, 860)
 _FIX = []
@@ -258,3 +259,27 @@ def _(app):
 @scene("inbox-ask-stopped", "An ask whose task went away, opened: struck through, greyed, its buttons off", size=SIZE)
 def _(app):
     return opened(app, "deploy", stopped=("deploy",))[0]
+
+
+def viewed(app, key, step=0):
+    """The ask's first picture button's picture clicked open in the large view, then stepped on (→) step times."""
+    win, page = opened(app, key, whole=False)
+    at_foot(page)
+    pic = next(w for w in T.walk(page.view) if getattr(w, "image_actions", None) is not None
+               and isinstance(w, inboxview.PicturePart))
+    pic.image_actions.view()
+    T.pump(0.5)
+    for _ in range(step):
+        win.lightbox.step(1)
+        T.pump(0.5)
+    return win
+
+
+@scene("inbox-ask-logo-viewer", "A picture button's picture clicked: the large view chat pictures open in", size=SIZE)
+def _(app):
+    return viewed(app, "logo")
+
+
+@scene("inbox-ask-logo-viewer-next", "The large view stepped on to the ask's next picture", size=SIZE)
+def _(app):
+    return viewed(app, "logo", 1)

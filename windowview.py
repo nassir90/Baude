@@ -57,6 +57,8 @@ class WindowView:
         card = self.tool_cards[tool_id] = (MeshCard if name in MESH_CHAT_TOOLS else ToolCard)(name, tool_id)
         if isinstance(card, MeshCard):
             self.mesh_cards.append(card)
+        elif self.offers_background():
+            card.offer_background(self.send_to_background)
         return card
 
     def open_mesh_chat(self, listed):

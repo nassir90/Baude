@@ -1,7 +1,7 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
-Databases are), changed there through its accounts op (hostaccounts): for each provider, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
-Token…, Remove…; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
+Databases are), changed there through its accounts op (hostaccounts): for each provider, a card per subscription (Disabled where it is; ⋮: an account's Rename…, Sign In Again… or Replace
+Token…, Remove…, and every card's Disable or Enable and Auto Disable on Exhaustion; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows; or added
@@ -151,6 +151,7 @@ class Page(Adw.PreferencesPage):
         self.where, self.host = win.terminal_host()
         self.here = wire.is_local(self.where)  # (the host's this machine's: a sign-in's page opened here at once)
         self.accounts, self.claude_cli, self.missing = [], True, {}
+        self.disabled, self.auto = set(), set()  # (subscriptions disabled, and auto-disabling as they're exhausted: usage keys)
         self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.lists, self.usage, self.bars, self.reading, self.last = {}, {}, {}, set(), {}
         self.as_of = {}  # (a subscription's usage as its chats' turns last said it: when, by usage key)
@@ -209,7 +210,8 @@ class Page(Adw.PreferencesPage):
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
         self.codex_usage = bool(reply.get("codex_usage"))
-        if (self.accounts, self.claude_cli, self.missing, self.codex_usage) != self.shown:
+        self.disabled, self.auto = set(reply.get("disabled") or ()), set(reply.get("auto_disable") or ())
+        if self.drawn() != self.shown:
             self.fill()
         if self.get_mapped():
             self.read_usage([p for p in self.usage_ids() if p not in self.usage])
@@ -230,8 +232,12 @@ class Page(Adw.PreferencesPage):
         """Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage)."""
         return self.claude_cli if provider == "claude" else provider not in self.missing and self.codex_usage
 
+    def drawn(self):
+        """What the cards are drawn from: drawn again when it changes."""
+        return self.accounts, self.claude_cli, self.missing, self.codex_usage, self.disabled, self.auto
+
     def fill(self, error=None):
-        self.shown = None if error else (self.accounts, self.claude_cli, self.missing, self.codex_usage)
+        self.shown = None if error else self.drawn()
         self.bars = {}
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
@@ -257,8 +263,10 @@ class Page(Adw.PreferencesPage):
             cards.append(rows)
 
     def card(self, provider, account):
-        """A subscription's card: its name and ⋮ (an account's: Rename…, Sign In Again… or Replace Token…, Remove…),
-        then its usage: a bar for each limit with its percentage."""
+        """A subscription's card: its name, Disabled where it is, and ⋮ (an account's: Rename…, Sign In Again… or
+        Replace Token…; every card's: Disable or Enable, Auto Disable on Exhaustion; an account's: Remove…), then its
+        usage: a bar for each limit with its percentage."""
+        key = account["id"] if account else "" if provider == "claude" else CODEX_CLI
         card = Gtk.Box(css_classes=["card"])
         inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, margin_top=6, margin_bottom=12,
                          margin_start=12, margin_end=6)
@@ -267,15 +275,15 @@ class Page(Adw.PreferencesPage):
         name = Gtk.Label(label=account["name"] if account else wording.say("subscriptions.cli_default"),
                          xalign=0, hexpand=True, ellipsize=3)
         top.append(name)
-        if account is not None:
-            top.append(self.account_menu(account))
+        if key in self.disabled:
+            top.append(Gtk.Label(label=wording.say("subscriptions.disabled"), css_classes=["dim-label"]))
+        top.append(self.account_menu(provider, key, account))
         inside.append(top)
         if provider == "claude" or self.codex_usage:
             bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
             inside.append(bars)
-            profile = account["id"] if account else "" if provider == "claude" else CODEX_CLI
-            self.bars[profile] = bars
-            self.fill_bars(profile)
+            self.bars[key] = bars
+            self.fill_bars(key)
         return card
 
     def fill_bars(self, profile):
@@ -291,22 +299,48 @@ class Page(Adw.PreferencesPage):
             read = self.last[profile]
         usage_lines(bars, read, as_of=None if stale else self.as_of.get(profile))
 
-    def account_menu(self, account):
+    def account_menu(self, provider, key, account):
+        """A card's ⋮: an account's Rename… and Sign In Again… (Replace Token…); every card's Disable (Enable, where
+        it's disabled) and Auto Disable on Exhaustion, checked where it's on; an account's Remove…."""
         actions = Gio.SimpleActionGroup()
         menu = Gio.Menu()
-        items = [("rename", wording.say("common.rename_ellipsis"), rename),
-                 ("again", wording.say("subscriptions.replace_token") if account["kind"] == "token" else
-                  wording.say("subscriptions.sign_in_again"), sign_in_again),
-                 ("remove", wording.say("common.remove_ellipsis"), remove)]
-        for name, label, action in items:
-            act = Gio.SimpleAction(name=name)
-            act.connect("activate", lambda *_a, f=action: f(self, account))
-            actions.add_action(act)
-            menu.append(label, f"account.{name}")
+        off = key in self.disabled
+        sections = [[("rename", wording.say("common.rename_ellipsis"), rename),
+                     ("again", wording.say("subscriptions.replace_token") if account["kind"] == "token" else
+                      wording.say("subscriptions.sign_in_again"), sign_in_again)] if account else [],
+                    [("disable", wording.say("subscriptions.enable" if off else "subscriptions.disable"),
+                      lambda page, _a: page.switch("disable", provider, key, not off)),
+                     ("auto", wording.say("subscriptions.auto_disable"),
+                      lambda page, _a: page.switch("auto_disable", provider, key, key not in page.auto))],
+                    [("remove", wording.say("common.remove_ellipsis"), remove)] if account else []]
+        for items in sections:
+            if not items:
+                continue
+            section = Gio.Menu()
+            for name, label, action in items:
+                act = Gio.SimpleAction.new_stateful(name, None, GLib.Variant("b", key in self.auto)) \
+                    if name == "auto" else Gio.SimpleAction(name=name)
+                act.connect("activate", lambda *_a, f=action: f(self, account))
+                actions.add_action(act)
+                section.append(label, f"account.{name}")
+            menu.append_section(None, section)
         more = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=menu, valign=Gtk.Align.CENTER,
                               tooltip_text=wording.say("subscriptions.more_tip"), css_classes=["flat"])
         more.insert_action_group("account", actions)
         return more
+
+    def switch(self, what, provider, key, on):
+        """A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable); this
+        machine's: Meta's box as its subscription is now (meta.subscription_off)."""
+        def then(reply):
+            if reply.get("error"):
+                self.toast(reply["error"])
+            if self.here:
+                import meta
+                for chat in list(meta.CHATS):
+                    chat.model_changed()
+        self.ask({"what": what, "provider": "codex" if key == CODEX_CLI else provider,
+                  "id": "" if key == CODEX_CLI else key, "on": on}, then)
 
     def shown_now(self, *_):
         """The page in front: its subscriptions' usage read now and every USAGE_S till it isn't."""
@@ -596,11 +630,35 @@ def _limits(usage):
     return [(u.get("key", ""), u["name"], u["percent"], u.get("resets")) for u in usage]
 
 
+class _Fields(Gtk.Box):
+    """A dialog's form, its rows stacked: Tab goes through them top to bottom, but last (a row, or None) after all the
+    others (an Add account dialog's tabs: Tab from the account name goes past them to the box picked)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.last = None
+
+    def do_focus(self, direction):
+        if direction not in (Gtk.DirectionType.TAB_FORWARD, Gtk.DirectionType.TAB_BACKWARD):
+            return Gtk.Box.do_focus(self, direction)
+        rows = list(_children(self))
+        if self.last in rows:
+            rows.remove(self.last)
+            rows.append(self.last)
+        if direction == Gtk.DirectionType.TAB_BACKWARD:
+            rows.reverse()
+        if (at := self.get_focus_child()) in rows:
+            if at.child_focus(direction):
+                return True
+            rows = rows[rows.index(at) + 1:]
+        return any(row.child_focus(direction) for row in rows)
+
+
 def _form(page, heading, submit_label):
     """An AlertDialog over page whose form (returned with its status line and submit button) stays open till what's
     sent is done: Close is its only response."""
     dialog = Adw.AlertDialog(heading=heading, close_response="cancel")
-    form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, width_request=360)  # (room for the token's hint)
+    form = _Fields(orientation=Gtk.Orientation.VERTICAL, spacing=8, width_request=360)  # (room for the token's hint)
     status = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
     submit = Gtk.Button(label=submit_label, css_classes=["suggested-action"])
     dialog.set_extra_child(form)
@@ -652,6 +710,7 @@ class _Source:
             t.connect("toggled", lambda t: t.get_active() and self.picked())
         self.new.connect("toggled", lambda t: t.get_active() and self.picked())
         form.append(self.tabs)
+        form.last = self.tabs
         form.append(self.token)
         form.append(self.folder)
         self.picked()

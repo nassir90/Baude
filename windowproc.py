@@ -347,6 +347,20 @@ class WindowProc:
         sign-in."""
         return (self.chat_account_info() or {}).get("name")
 
+    def subscription_off(self):
+        """Is the subscription the chat runs on disabled on its host (its listing's account_disabled; a chat this
+        process runs claude for itself: as this machine keeps it)?"""
+        if self.remote is not None:
+            return bool(self.session_id and (self.remote.sessions.get(self.session_id) or {}).get("account_disabled"))
+        if not self.session_id or model_program(self.model) != "claude":
+            return False
+        import sqlite3
+        from baudelib import accounts
+        try:
+            return accounts.disabled(accounts.usage_key("claude", accounts.claude_session_profile(self.session_id)))
+        except (OSError, sqlite3.Error):
+            return False
+
     def chat_account_info(self):
         """The subscription account the chat's agent runs under on its host (Account's fields: its listing's; a chat
         this process runs claude for itself: as this machine keeps it), or None: the CLI's own sign-in."""
@@ -1090,9 +1104,9 @@ class WindowProc:
         self.send_text(text)
 
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
-    # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
-    # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
-    # box; its ✕ drops it. They're the open chat's: another chat opened, they're kept with its draft
+    # that ends sends them all, together as one message. A queued message's ↑ sends it with every one before it at
+    # once, to the turn going on, which goes on with it (send_at_turn); its revert puts it back in the box; its ✕
+    # drops it. They're the open chat's: another chat opened, they're kept with its draft
     # (clear_transcript), sent as its turn ends meanwhile (send_left_queues) and drawn again as it's opened (take_draft)
     def queue_message(self):
         buf = self.input.get_buffer()
@@ -1162,16 +1176,33 @@ class WindowProc:
         self.input.grab_focus()
 
     def queue_send(self, turn):
-        """Its ↑: it and the queued messages before it sent together: now, or once the interrupted turn's ended."""
-        if turn not in self.queued:
+        """Its ↑: it and the queued messages before it sent together, now: to the turn going on (send_at_turn), or as
+        a turn of its own when none is. A revert waiting to be made is made first, as sending does (on_send): the turn
+        it stops ends, and they're sent after it."""
+        if turn not in self.queued or self.live_elsewhere():
             return
-        if self.busy:
+        if self.busy and self.reverting is None and self.proc is not None:
+            self.send_at_turn(self.queued[:self.queued.index(turn) + 1])
+        elif self.busy:
             if self.queue_upto is None or self.queued.index(turn) > self.queued.index(self.queue_upto):
                 self.queue_upto = turn
             self.interrupt()
         else:
             self.queue_upto = turn
             self.flush_queue()
+
+    def send_at_turn(self, turns):
+        """Queued messages given the agent at its turn, together as one message, without stopping it: claude, Codex
+        and pi take it in between the turn's steps (Apple's model, once its turn's over), and the turn goes on. Drawn
+        as sent, where the chat's got to."""
+        turns = list(turns)
+        self.unqueue(turns)
+        text = "\n\n".join(t.text for t in turns if t.text)
+        atts = [a for t in turns for a in t.atts]
+        said = turns[0].said if len(turns) == 1 and turns[0].said else str(uuid.uuid4())
+        self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
+        self.stick_bottom, self.restore_scroll = True, None
+        self.proc.user(self.user_content(text, atts), said)
 
     def flush_queue(self):
         """The queue sent up to queue_upto (all of it: "all"), as one message (send_text), once no turn's going."""
@@ -1233,7 +1264,8 @@ class WindowProc:
         if gates := self.composer_box.gates:  # (what's in the way of sending, said as it is)
             toast(self, wording.say("held_send.while_exhausted") if "exhausted" in gates else
                   wording.say("held_send.while_down") if "network" in gates else
-                  wording.say("held_send.while_no_host") if "host" in gates else wording.say("held_send.while_other"))
+                  wording.say("held_send.while_no_host") if "host" in gates else
+                  wording.say("held_send.while_disabled") if "disabled" in gates else wording.say("held_send.while_other"))
             return
         if self.reverting is not None:
             if not self.revert_asked():

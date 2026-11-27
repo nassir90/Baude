@@ -707,8 +707,11 @@ class TasksPage(Gtk.Box):
                 binding = None
             else:
                 text = entry.get_text().strip()
+                same = next((c["binding"] for c in state["choices"]
+                             if text.lower() in (str(c["binding"].get("label") or "").lower(),
+                                                 str(c["binding"].get("value") or "").lower())), None) if text else None
                 binding = dict(state["picked"]) if state["picked"] is not None and \
-                    entry.get_text() == shown_text(state["picked"]) else {"value": text} if text else None
+                    entry.get_text() == shown_text(state["picked"]) else dict(same) if same else {"value": text} if text else None
                 if binding is not None and kind == "model":
                     binding.pop("effort", None)
                     if effort.get_selected() > 0:

@@ -614,8 +614,8 @@ def presence():
     return float(idle), bool(locked), False  # (a display asleep is the screen saver's: locked, or blanked by it)
 
 
-def user_present():
-    """Whether someone's at this machine: input within PRESENT_S, the screen not locked, the display awake. None where
+def user_present(idle_s=PRESENT_S):
+    """Whether someone's at this machine: input within idle_s, the screen not locked, the display awake. None where
     that can't be told (presence)."""
     at, p = _presence.get("at", -1.0), _presence.get("p")
     if time.monotonic() - at > 1:  # (asked once a second at most: a scroll asks at every step)
@@ -623,7 +623,7 @@ def user_present():
     if p is None:
         return None
     idle, locked, asleep = p
-    return idle <= PRESENT_S and not locked and not asleep
+    return idle <= idle_s and not locked and not asleep
 
 
 def notified(key):

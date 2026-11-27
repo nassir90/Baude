@@ -45,7 +45,7 @@ fun CutShortLine(chat: Chat) {
             .semantics { contentDescription = Wording.CutShort.tip(message = Wording.CutShort.message) }
             .clickable {
                 val gone = Mesh.conn(at)?.state != "up" || Stopping.line(at) != null
-                if (gone || chat.chrome.missing.value || exhausted(chat)) return@clickable // (what the box couldn't send now)
+                if (gone || chat.chrome.missing.value || exhausted(chat) || subscriptionOff(chat)) return@clickable // (what the box couldn't send now)
                 CutShort.continuing[key] = true
                 Mesh.send(chat, Wording.CutShort.message, emptyList(), keep = false) { CutShort.continuing.remove(key) }
             }.padding(horizontal = 8.dp, vertical = 1.dp)) {

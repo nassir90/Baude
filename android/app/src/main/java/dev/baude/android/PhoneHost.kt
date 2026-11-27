@@ -466,14 +466,31 @@ object PhoneHost {
                     return head.send(WireCheck.refused(WireCheck.INVALID, req, "a draft is at most ${WireConstants.DRAFT_CHARS_MAX} characters"))
                 var told: List<Head> = emptyList()
                 var kept: JSONObject? = null
+                var stale: JSONObject? = null
                 live(s) {
-                    val draft = JSONObject().put("text", text).put("rev", (s.meta.optJSONObject("composer")?.optLong("rev") ?: 0L) + 1)
+                    val was = s.meta.optJSONObject("composer") ?: JSONObject()
+                    val epoch = was.optLong("epoch")
+                    val sent = d.sent
+                    if (sent != null && sent == was.opt("sent")) { // (that send's own, made again: it's emptied it already)
+                        kept = was
+                        return@live
+                    }
+                    val written = d.epoch?.toLong() ?: 0L
+                    if (written < epoch) { // (written before the last send: what was sent, not to come back)
+                        stale = was
+                        return@live
+                    }
+                    val draft = JSONObject().put("text", if (sent != null) "" else text).put("rev", was.optLong("rev") + 1)
+                        .put("epoch", maxOf(epoch, written) + if (sent != null) 1 else 0)
+                        .put("sent", sent ?: was.opt("sent")?.takeIf { it is String } ?: JSONObject.NULL)
                         .put("head", d.head?.take(64) ?: JSONObject.NULL).put("at", now())
                     s.meta.put("composer", draft)
                     save(s)
                     kept = draft
                     told = s.viewers.filter { it !== head && PhoneAccess.allowed(it, "manage_write", s.meta) }
                 }
+                stale?.let { return reply(Op.ERROR, "error" to WireCheck.SAID.getValue(WireCheck.STALE), "code" to WireCheck.STALE,
+                    "session" to s.id, "draft" to it) }
                 val draft = kept ?: return reply(Op.ERROR, "error" to "no session $sid")
                 for (h in told) h.send(Msg.DraftChanged(session = s.id, draft = Msg.ChatDraft.from(draft)).json())
                 reply(Op.DRAFT_SAVED, "session" to s.id, "draft" to draft)

@@ -1173,13 +1173,24 @@ class ServerRunning:
 
     def save_draft(self, conn, s, msg):
         """(lock held) draft_save: s's draft kept as msg's text, its revision one more than the last, and told every
-        other head attached that may write it (draft_changed); the reply's op and fields."""
+        other head attached that may write it (draft_changed); the reply's op and fields. One written before the
+        draft's last send (its epoch less) isn't kept (stale_draft); one a send makes (sent) empties it and starts
+        the next epoch, once for each send."""
         text = msg.get("text")
         if s.id not in self.sessions:  # (a Claude Desktop chat only listed: Baude's own, on this machine, keeps its)
             return "error", {"error": f"no session {s.id}"}
         if not isinstance(text, str) or len(text) > wire.CONSTANTS["DRAFT_CHARS_MAX"]:
             return "error", {"error": wire.SAID[wire.INVALID], "code": wire.INVALID}
-        draft = {"text": text, "rev": int((s.meta.get("composer") or {}).get("rev") or 0) + 1,
+        was = s.meta.get("composer") or {}
+        epoch, sent = int(was.get("epoch") or 0), msg.get("sent") if isinstance(msg.get("sent"), str) else None
+        if sent is not None and sent == was.get("sent"):  # (that send's own, made again: it's emptied it already)
+            return "draft_saved", {"session": s.id, "draft": was}
+        if msg["epoch"] < epoch:  # (written before the last send: what was sent, not to come back)
+            return "error", {"error": wire.SAID[wire.STALE], "code": wire.STALE, "session": s.id, "draft": was}
+        epoch = max(epoch, msg["epoch"])  # (a head's own send's, its save not come: it's emptied it there already)
+        if sent is not None:
+            text, epoch = "", epoch + 1
+        draft = {"text": text, "rev": int(was.get("rev") or 0) + 1, "epoch": epoch, "sent": sent or was.get("sent"),
                  "head": msg["head"][:64] if isinstance(msg.get("head"), str) else None, "at": time.time()}
         s.meta["composer"] = draft
         self.save(s)

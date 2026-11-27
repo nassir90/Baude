@@ -15,6 +15,14 @@
       "type": ["string", "null"],
       "description": "The box that wrote it (draft_save's head): what that box knows as its own save, coming back."
     },
+    "epoch": {
+      "type": "integer",
+      "description": "How many times it's been emptied by a send (none: 0): one more with every send, never less. A save written before the last send (its epoch less) is refused, and a head drops a draft of an epoch less than one it's seen, so what was sent never comes back."
+    },
+    "sent": {
+      "type": ["string", "null"],
+      "description": "The send that last emptied it (draft_save's sent): the same send's save, made again, empties it once."
+    },
     "at": {
       "type": ["number", "null"],
       "description": "When it was written, epoch seconds."

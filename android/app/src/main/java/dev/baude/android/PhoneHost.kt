@@ -62,7 +62,7 @@ object PhoneHost {
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
-        "access", "access_set", "seen", "ephemeral", "control",
+        "access", "access_set", "seen", "draft_save", "ephemeral", "control",
         "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
@@ -340,6 +340,7 @@ object PhoneHost {
             Op.BOT_PICTURE -> Msg.BotPicture.from(msg).session
             Op.MEMORY -> Msg.Memory.from(msg).session
             Op.SEEN -> Msg.Seen.from(msg).session
+            Op.DRAFT_SAVE -> Msg.DraftSave.from(msg).session
             else -> null
         }.orEmpty()
         val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
@@ -355,7 +356,8 @@ object PhoneHost {
                 s.viewers.add(head)
                 if (a.live == true) s.live.add(head)
                 if (writes) for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
-                reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()), "writes" to writes)
+                reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()), "writes" to writes,
+                    "draft" to (s.meta.optJSONObject("composer")?.takeIf { writes } ?: JSONObject.NULL))
             }
             Op.DETACH -> {
                 val last = synchronized(lock) {
@@ -448,6 +450,25 @@ object PhoneHost {
                 }
                 changed()
                 reply(Op.BOT_SET, "session" to listing(s))
+            }
+            Op.DRAFT_SAVE -> { // (what's written in its box and not sent: kept here for every head, the last write's,
+                val d = Msg.DraftSave.from(msg) // told the others attached that may write it)
+                val text = d.text.orEmpty()
+                if (text.length > WireConstants.DRAFT_CHARS_MAX)
+                    return head.send(WireCheck.refused(WireCheck.INVALID, req, "a draft is at most ${WireConstants.DRAFT_CHARS_MAX} characters"))
+                var told: List<Head> = emptyList()
+                var kept: JSONObject? = null
+                live(s) {
+                    val draft = JSONObject().put("text", text).put("rev", (s.meta.optJSONObject("composer")?.optLong("rev") ?: 0L) + 1)
+                        .put("head", d.head?.take(64) ?: JSONObject.NULL).put("at", now())
+                    s.meta.put("composer", draft)
+                    save(s)
+                    kept = draft
+                    told = s.viewers.filter { it !== head && PhoneAccess.allowed(it, "manage_write", s.meta) }
+                }
+                val draft = kept ?: return reply(Op.ERROR, "error" to "no session $sid")
+                for (h in told) h.send(Msg.DraftChanged(session = s.id, draft = Msg.ChatDraft.from(draft)).json())
+                reply(Op.DRAFT_SAVED, "session" to s.id, "draft" to draft)
             }
             Op.BOT_PICTURE -> reply(Op.BOT_PICTURE, "session" to s.id, "picture" to
                 (picture(s).takeIf { it.exists() }?.let { Base64.getEncoder().encodeToString(it.readBytes()) } ?: JSONObject.NULL))

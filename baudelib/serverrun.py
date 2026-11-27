@@ -895,7 +895,7 @@ class ServerRunning:
                     # it again)
                     s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes,
-                             login=hostlogin.attached(self, conn, s))
+                             login=hostlogin.attached(self, conn, s), draft=s.meta.get("composer") if writes else None)
             if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace;
                 s.viewers.discard(conn)  # one that only reads it isn't its head: its grace kept)
                 s.live.discard(conn)
@@ -972,6 +972,9 @@ class ServerRunning:
                 return reply("seen_set", session=s.id, seen=s.meta.get("seen"))
             if op == "rename":
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
+            if op == "draft_save":  # (what's written in its box and not sent: kept here for every head, the last
+                kind, fields = self.save_draft(conn, s, msg)  # write's, told the others attached)
+                return reply(kind, **fields)
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
             if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh)
@@ -1038,6 +1041,23 @@ class ServerRunning:
                 return reply("memory", session=s.id, **mem)
         self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
         return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
+
+    def save_draft(self, conn, s, msg):
+        """(lock held) draft_save: s's draft kept as msg's text, its revision one more than the last, and told every
+        other head attached that may write it (draft_changed); the reply's op and fields."""
+        text = msg.get("text")
+        if s.id not in self.sessions:  # (a Claude Desktop chat only listed: Baude's own, on this machine, keeps its)
+            return "error", {"error": f"no session {s.id}"}
+        if not isinstance(text, str) or len(text) > wire.CONSTANTS["DRAFT_CHARS_MAX"]:
+            return "error", {"error": wire.SAID[wire.INVALID], "code": wire.INVALID}
+        draft = {"text": text, "rev": int((s.meta.get("composer") or {}).get("rev") or 0) + 1,
+                 "head": msg["head"][:64] if isinstance(msg.get("head"), str) else None, "at": time.time()}
+        s.meta["composer"] = draft
+        self.save(s)
+        for v in list(s.viewers):
+            if v is not conn and self.access.allowed(v, "manage_write", s):
+                v.send({"op": "draft_changed", "session": s.id, "draft": draft})
+        return "draft_saved", {"session": s.id, "draft": draft}
 
     def started_by(self, sid):
         """(member, verified) that started the chat sid here (its meta's started_by), or None: a head here did."""
@@ -1163,7 +1183,7 @@ class ServerRunning:
         listed = s.listing()
         meta = copy.deepcopy(s.meta)
         for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
-                    "start_key", "rotated", "last_thread"):
+                    "start_key", "rotated", "last_thread", "composer"):  # (the Bot's draft stays the Bot's)
             meta.pop(key, None)
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
         meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",

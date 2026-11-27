@@ -439,6 +439,16 @@ A container's or a Compose project's log, followed (logs): one a connection, the
 | `page` | string |  | The category's page, by its key: a container's or a Compose project's. |
 | `id` | string |  | The container's id, or the Compose project's name. |
 
+#### `draft_save` (DraftSave)
+
+A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `text` | string | yes | What's written in its box now (empty: nothing, as once it's sent). |
+| `head` | string/null |  | The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save. |
+
 #### `edit_adopt` (EditAdopt)
 
 Edits waiting on this host's notebooks that another machine's Record kept (Meta's, from before edits were the notebook host's), handed to the host once, each with its own id, by and t. One whose id the host has (waiting or decided), or whose notebook it hasn't, is left out. Answered with edits: those taken in.
@@ -1276,6 +1286,7 @@ attach's answer.
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
 | `login` | ChatLogin? |  | Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws. |
 | `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
+| `draft` | ChatDraft? |  | Its draft, as its host keeps it (draft_save); null if none's been written, or the head may only read the chat. |
 
 #### `autofix` (AutofixReply)
 
@@ -1437,6 +1448,15 @@ docker_follow logs: more of the log.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `text` | string |  | The lines. |
+
+#### `draft_saved` (DraftSaved)
+
+draft_save's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft as kept now. |
 
 #### `edit` (EditReply)
 
@@ -2083,6 +2103,15 @@ What a session's agent says, as it says it (claude's stream-json); to those atta
 | `session` | string | yes | The session's id. |
 | `msg` | object |  | A stream-json message. |
 
+#### `draft_changed` (DraftChanged)
+
+A chat's draft written by a head (draft_save): told every other head attached to it that may write it, as attach's answer tells one attaching.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft now. |
+
 #### `emission_call` (EmissionCall)
 
 A Bot's browser tool's request, carried to the phone showing it.
@@ -2394,6 +2423,17 @@ What a Codex browser sign-in's server on the host answered the address a browser
 | `type` | string |  | Its Content-Type. |
 | `body` | string | yes | The page. |
 | `location` | string |  | Where it sends the browser on to, if it does (a page of OpenAI's). |
+
+#### ChatDraft
+
+A chat's draft, as its host keeps it: the text written in its box and not sent, the same on every head that opens the chat, on any machine. Only the text: what's attached is a file on the head's own machine, kept there.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes | What's written (empty once it's sent). |
+| `rev` | integer | yes | Its revision: one more with every save, never less (a head drops one it's seen a later revision than). |
+| `head` | string/null |  | The box that wrote it (draft_save's head): what that box knows as its own save, coming back. |
+| `at` | number/null |  | When it was written, epoch seconds. |
 
 #### ChatLogin
 
@@ -3634,6 +3674,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `BATCH_MAX` | `25` | A browser batch's actions, at most. |
 | `BOT_PICTURE_MAX` | `2097152` | A Bot's picture, as bot sends it, at most, in bytes. |
 | `DEFAULT_WINDOW` | `32768` | A model's context window, in tokens, where its server or settings don't say one. |
+| `DRAFT_CHARS_MAX` | `200000` | A chat's draft, as draft_save sends it, at most, in characters: a longer one is refused, and stays the head's own. |
 | `EPHEMERAL_S` | `1` | A side question whose head's gone (or detached): gone this soon, in seconds. |
 | `FRAME_QUALITY` | `72` | A watched browser's frames' JPEG quality (emission_frame). |
 | `GRACE_MAX_S` | `86400` | start's grace, at most, in seconds. |
@@ -3650,6 +3691,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `25` | The wire's version, as a host's hello says it. |
+| `VERSION` | `27` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

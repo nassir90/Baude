@@ -81,9 +81,11 @@ private val slide = tween<androidx.compose.ui.unit.IntSize>(120)
 
 /** One tool call as Baude's card has it (ToolCard): its name, toggles that open what it was given and what came back,
  * its summary and, while it runs, a spinner; under that its views, its pictures, and, asked, its permission buttons
- * (answer). A call that failed or was cut short is red all through. view: opens its subagent's page. */
+ * (answer). A call that failed or was cut short is red all through. view: opens its subagent's page. background: moves
+ * a command or subagent running to the background, where its chat's agent can (Background, while it runs). */
 @Composable
-fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((Call) -> Unit)?) {
+fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((Call) -> Unit)?,
+             background: ((Call) -> Unit)? = null) {
     val outer = LocalBaude.current
     val state = call.state
     val bad = state == "error" || state == "interrupted"
@@ -95,13 +97,14 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
     val inputShown = !plainRead
     val outputShown = call.outputs.isNotEmpty() && (!call.subagent || state == "error")
     val inputOpen = (call.inputOpen || asking && call.base != "AskUserQuestion") && inputShown
+    val movable = background != null && call.base in BACKGROUNDABLE && state == "running" && !asking && !call.moving
     CompositionLocalProvider(LocalBaude provides c) {
         Column(Modifier.fillMaxWidth().border(1.dp, if (asking) c.warning else if (bad) c.destructive else c.rule,
             RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(call.answer?.let { Wording.ToolCalls.answeredTask(task = it.optString("task")) } ?: toolTitle(call.name), Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
                     color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (inputShown || outputShown || call.subagent) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (inputShown || outputShown || call.subagent || movable) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (inputShown) Toggle(when (call.base) {
                         "Bash", "BashOutput", "PowerShell" -> Wording.Common.command
                         "Task", "Agent" -> Wording.Common.prompt
@@ -112,6 +115,7 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
                     if (outputShown) Toggle(if (state == "error") Wording.Meta.error else Wording.Meta.output, call.outputOpen) {
                         call.outputOpen = !call.outputOpen
                     }
+                    if (movable) Toggle(Wording.ToolCalls.toBackground, false) { background?.invoke(call) }
                 }
                 if (!asking && (state == "running" || state == "background")) Spinner()
             }
@@ -432,7 +436,8 @@ private fun pyJson(v: Any?): String = when (v) {
 /** Several calls in a row folded into a line, › 5 tool calls, 1 failed (a spinner after it while one runs); opened,
  * their cards under it (ToolGroup). It opens itself for a call with pictures or one asking you. */
 @Composable
-fun ToolGroup(group: List<Call>, calls: ChatCalls, asking: (Call) -> Ask?, answer: @Composable (Ask) -> Unit, view: ((Call) -> Unit)?) {
+fun ToolGroup(group: List<Call>, calls: ChatCalls, asking: (Call) -> Ask?, answer: @Composable (Ask) -> Unit, view: ((Call) -> Unit)?,
+              background: ((Call) -> Unit)? = null) {
     val c = LocalBaude.current
     val key = group.first().id
     val open = calls.opened[key] == true
@@ -458,7 +463,7 @@ fun ToolGroup(group: List<Call>, calls: ChatCalls, asking: (Call) -> Ask?, answe
         }
         AnimatedVisibility(open, enter = expandVertically(slide), exit = shrinkVertically(slide)) {
             Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (call in group) ToolCard(call, asking(call), answer, view)
+                for (call in group) ToolCard(call, asking(call), answer, view, background)
             }
         }
     }
@@ -480,7 +485,7 @@ fun TaskNoteLine(json: String) {
 /** A chat's lines as items: runs of two or more calls as a group, a lone call as a card, every other line as line
  * draws it. A mesh call's card isn't grouped; it ends a run. asking: the permission it waits on, drawn with answer. */
 fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> Ask? = { null }, answer: @Composable (Ask) -> Unit = {},
-                        view: ((Call) -> Unit)? = null, line: @Composable (Line) -> Unit) {
+                        view: ((Call) -> Unit)? = null, background: ((Call) -> Unit)? = null, line: @Composable (Line) -> Unit) {
     var i = 0
     val keyed = HashSet<String>()
     while (i < lines.size) {
@@ -492,7 +497,7 @@ fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> A
             continue
         }
         if (call.name in MESH_CHAT_TOOLS) {
-            item { ToolCard(call, asking(call), answer, view) }
+            item { ToolCard(call, asking(call), answer, view, background) }
             i++
             continue
         }
@@ -503,7 +508,8 @@ fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> A
             run.add(next)
             i++
         }
-        if (run.size >= 2) item { ToolGroup(run, calls, asking, answer, view) } else item { ToolCard(run[0], asking(run[0]), answer, view) }
+        if (run.size >= 2) item { ToolGroup(run, calls, asking, answer, view, background) }
+        else item { ToolCard(run[0], asking(run[0]), answer, view, background) }
     }
 }
 

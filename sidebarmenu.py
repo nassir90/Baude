@@ -66,7 +66,7 @@ class SidebarMenu:
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
         if info.get("bot") and can_rotate(info) and info.get("remote_state") not in ("working", "waiting"):
-            # (after Bot Settings…, a Codex Bot's too: it has no Bot items; not at a turn, as Archive isn't)
+            # (after Bot Settings…; not at a turn, as Archive isn't)
             at = next((i + 1 for i, (_label, action) in enumerate(items) if action == "make_bot"), 1)
             items.insert(at, (wording.say("sidebar.rotate"), "rotate"))
         if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \

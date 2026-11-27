@@ -42,7 +42,7 @@ from gitview import GIT_POOL  # noqa: E402,F401
 from signalrefs import db_prefetch, pg_forget, tool_dir  # noqa: E402
 from signalcode import REF_LSP_PACKAGES, lsp_dir  # noqa: E402
 from signalnames import Signal  # noqa: E402
-from toolcards import artifact_from_tool  # noqa: E402
+from toolcards import BACKGROUNDED_RE, artifact_from_tool  # noqa: E402
 from sessionlist import bot_picture, network, remote_info  # noqa: E402
 from refpopovers import (  # noqa: E402
     LookupPopover, RefPopover, chat_checkout, in_chat, ref_busy, ref_column_table, ref_kind_label, ref_run_names,
@@ -223,12 +223,23 @@ class WindowSignal:
         return any(w.is_active() and w.session_id == session_id and w.tabs.current() is w.tabs.get("chat")
                    for w in (app.windows() if app is not None else [self]))
 
+    def in_front_anywhere(self, session_id, r):
+        """Is the chat in front of you on any machine of the mesh (this one's too: Record's, the phone's), as each
+        host says of its own machine's apps (network's in_front, from their telemetry)? r: the host it's on, if it's a
+        host's chat; else it's this machine's host's."""
+        if not session_id or session_id.startswith("new-"):
+            return False
+        host = r if r is not None else network().here_alive()
+        host_id = host is not None and (host.info.get("id") or host.key)
+        return bool(host_id) and network().in_front(host_id, session_id)
+
     def tell_desktop(self, session_id, body, title=None, info=None, turn=None):
         """A turn's end, or a question it asks, in a chat you aren't looking at (looking_at: in another window or
         app, behind the Feedback tab, or left mid-turn behind another chat), as a desktop notification
         (widgets.desktop_notify): a click on it brings this window up with that chat open. info: the chat's, if it's
         known (a network chat's, which find_session doesn't know). The sidebar's dot says it too. Other programs'
-        chats (Claude Desktop, a terminal) are theirs to say: they notify on their own. turn: a host's chat's turn's
+        chats (Claude Desktop, a terminal) are theirs to say: they notify on their own. Nor one in front of you on
+        another machine of the mesh (in_front_anywhere). turn: a host's chat's turn's
         end it's of ({uuid, size?}, as its host knows it), taken back as that's seen on any head of the mesh
         (withdraw_seen), and not posted if it's been seen already."""
         if self.looking_at(session_id):
@@ -256,6 +267,8 @@ class WindowSignal:
                     win.switch_to(lambda: win.resume_session(info))
         key, title = self.chat_key(session_id), title or wording.say("common.untitled")
         r = (info or {}).get("remote") or (getattr(self, "remote", None) if here else None)
+        if self.in_front_anywhere(session_id, r):
+            return
         TURNS.pop(key, None)  # (one in its place: a question it asks, taken back as it's answered)
         if turn is not None and r is not None:
             note = {"remote": r, "sid": session_id, "posted": time.monotonic(),
@@ -276,8 +289,8 @@ class WindowSignal:
             return
 
         def pictured(tex):
-            if (win := me()) is None or win.looking_at(session_id):  # (seen while its picture came)
-                return
+            if (win := me()) is None or win.looking_at(session_id) or win.in_front_anywhere(session_id, r):  # (seen
+                return  # while its picture came)
             if turn is not None and r is not None:
                 if (size := turn_size(note)) is not None and seen_past(r.sessions.get(session_id), size):
                     return  # (seen on another head while its picture came)
@@ -1157,12 +1170,13 @@ class WindowSignal:
 
     # ---- background tasks rebuilt from a transcript (a viewed / tailed / resumed session has no
     # task events: those only exist on the live stream of the claude that runs it)
-    def task_from_result(self, card, content):
+    def task_from_result(self, card, content, from_file=True):
+        """from_file: a task the transcript tells of, which no live event will end; else one moved to the background
+        as it ran (send_to_background), whose end claude tells."""
         texts = content if isinstance(content, list) else [content]
         text = "\n".join(c.get("text", "") if isinstance(c, dict) else str(c or "") for c in texts)
         info = None
-        if m := re.search(r"Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)",
-                          text):
+        if m := BACKGROUNDED_RE.search(text):
             info = {"task_id": m.group(1), "task_type": "local_bash", "output_file": m.group(2).rstrip("."),
                     "description": card.input.get("description") or card.input.get("command")}
         elif "Async agent launched" in text and (m := re.search(r"agentId: (\w+)", text)):
@@ -1172,7 +1186,7 @@ class WindowSignal:
             return
         info.update({"tool_use_id": card.tool_id, "is_backgrounded": True})
         self.on_task_event("task_started", info)
-        self.tasks[info["task_id"]]["from_file"] = True
+        self.tasks[info["task_id"]]["from_file"] = from_file
         if info["task_type"] == "local_agent":
             self.follow_subagent(info["task_id"], card.tool_id, opened=False)
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "What a process is told to profile.",
+  "description": "What a process profiles while line profiling's on.",
   "properties": {
     "app": {
       "enum": [
@@ -16,7 +16,11 @@
       "items": {
         "type": "string"
       },
-      "description": "What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off."
+      "description": "What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named."
+    },
+    "default": {
+      "type": "boolean",
+      "description": "They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set."
     },
     "error": {
       "type": [
@@ -28,7 +32,8 @@
   },
   "required": [
     "app",
-    "functions"
+    "functions",
+    "default"
   ],
   "additionalProperties": false
 }

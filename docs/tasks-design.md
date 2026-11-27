@@ -38,7 +38,7 @@ A task declares variables, each a name ("Translation Model"), a type and an opti
 value, its effort, the host serving it), `decider` (a decider, as decide's `model` names it), `host`,
 `browser_host`, `terminal_host` (a host of the mesh), `kube_context`, `pod`, `container`, `database`, `text`. Unlike the
 form's inputs, which each run fills, a variable is bound once for the task: by its Bot (`set_task`'s `bindings`) or by
-a person on the task's page (`task_bind`, needing manage write on the Bot's chat, as its other changes do).
+a person on the task's page (`task_bind`, needing manage write on the Bot's chat and shell, as setting a task's bindings through `tasks set` does).
 
 Binding offers what the task's host has of that type (`task_choices`), from the lists ⌘K lists: its models (as its
 hello lists them, and other hosts' run here), the mesh's hosts, its kubeconfig's contexts, the workloads in its local

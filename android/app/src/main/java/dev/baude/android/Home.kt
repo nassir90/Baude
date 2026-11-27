@@ -15,6 +15,14 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
@@ -455,7 +463,8 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
 /** Open folder… (Baude's ask_host_folder): the folder a new chat on host h starts in, a path there typed or browsed,
  * from the one last given there (else the host's home). Under it, the folders the host lists (list_dir) as it's typed:
  * those in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
- * tapped is put in the path. Open: picked. */
+ * tapped is gone into, and Back goes back out, as Android's folder picker has it. A keyboard's keys as Baude's
+ * (folderKey): Tab completes, Up and Down pick, Alt+Up goes up, Ctrl+H shows hidden folders. Open: picked. */
 @Composable
 private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     val c = LocalBaude.current
@@ -464,54 +473,94 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     val start = HomePrefs.folder(ctx, h) ?: home
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start,
         androidx.compose.ui.text.TextRange(start.length))) }
-    var listed by remember { mutableStateOf<Pair<String, List<String>>?>(null) } // (the folder listed, its folders shown)
+    var listed by remember { mutableStateOf<Listed?>(null) }
+    var hidden by remember { mutableStateOf(false) }
+    var pick by remember { mutableStateOf(-1) } // (the row picked with Up and Down; -1: none)
+    var then by remember { mutableStateOf<String?>(null) } // (a key waiting for the folders listed: "complete" or "into"; done with the listing that lands)
+    val back = remember { mutableStateListOf<String>() } // (the paths gone out of, for Back)
     fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
     fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
     val typed = full(field.text)
-    LaunchedEffect(typed) {
-        if (!typed.startsWith("/")) { listed = null; return@LaunchedEffect }
-        fun shown(folder: String, r: JSONObject, part: String) = folder to Msg.Dir.from(r).entries.orEmpty()
+    LaunchedEffect(typed, hidden) {
+        pick = -1
+        if (!typed.startsWith("/")) { listed = Listed(typed, "", null, emptyList()); return@LaunchedEffect }
+        fun shown(folder: String, r: JSONObject, part: String) = Msg.Dir.from(r).entries.orEmpty()
             .mapNotNull { e -> e.name?.takeIf { e.dir == true } }
-            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".")) }
+            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".") || hidden) }
         Mesh.ask(h, Msg.ListDir(path = typed).json()) { r ->
             if (typed != full(field.text)) return@ask // (typed on since: that one's answer's wanted)
-            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = shown(typed, r, "")
+            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = Listed(typed, typed, null, shown(typed, r, ""))
             else { // (not a folder: its parent's, that its last part begins)
                 val parent = up(typed)
                 val part = typed.trimEnd('/').substringAfterLast('/')
                 Mesh.ask(h, Msg.ListDir(path = parent).json()) { p ->
                     if (typed != full(field.text)) return@ask
-                    listed = if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part)
-                        else parent to emptyList()
+                    listed = Listed(typed, parent, part,
+                        if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part) else emptyList())
                 }
             }
         }
     }
-    fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
+    fun set(text: String) { field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)) }
+    fun put(path: String) { back.add(field.text); set(path.trimEnd('/') + "/") } // (a folder gone into: a / lists it)
+    val (folder, part, names) = listed?.let { Triple(it.folder, it.part, it.names) } ?: Triple("", null, emptyList())
+    val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
+        names.map { it to folder.trimEnd('/') + "/" + it }
+    fun into() { // (the folder picked, else the only one there)
+        val row = rows.getOrNull(pick) ?: rows.lastOrNull()?.takeIf { names.size == 1 }
+        if (row != null) put(row.second)
+    }
     fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
+    fun complete() { if (typed.startsWith("/")) folderCompletion(field.text, part, names)?.let { set(it) } }
+    fun whenListed(key: String) {
+        if (listed?.typed != typed) then = key else if (key == "complete") complete() else into()
+    }
+    LaunchedEffect(listed) { // (this composition's, so the listing that landed)
+        if (listed?.typed == typed) then?.let { then = null; if (it == "complete") complete() else into() }
+    }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(pick) { if (pick >= 0) list.animateScrollToItem(pick) }
+    val keys = FolderKeys(
+        complete = { whenListed("complete") },
+        pick = { step -> pick = when {
+            rows.isEmpty() -> -1
+            pick >= 0 -> (pick + step).coerceIn(0, rows.lastIndex)
+            step < 0 -> rows.lastIndex
+            else -> if (rows[0].first == ".." && rows.size > 1) 1 else 0
+        } },
+        picked = { pick >= 0 },
+        into = { whenListed("into") },
+        up = {
+            val at = if (part != null) up(typed) else typed
+            if (typed.startsWith("/") && at.trimEnd('/').isNotEmpty()) put(up(at))
+        },
+        home = { put(home) },
+        hidden = { hidden = !hidden },
+    )
     AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // (in the dialog's own window, so its Back is had before the dialog's dismissing)
+                androidx.activity.compose.BackHandler(back.isNotEmpty()) { set(back.removeAt(back.lastIndex)) }
                 val focusing = remember { androidx.compose.ui.focus.FocusRequester() }
                 LaunchedEffect(Unit) { focusing.requestFocus() }
                 Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
                     .padding(horizontal = 10.dp, vertical = 9.dp)) {
                     if (field.text.isEmpty()) Text("~", style = Type.body, color = c.dim)
-                    BasicTextField(field, { field = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg),
+                    BasicTextField(field, { field = it }, singleLine = true,
+                        textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { open() }),
-                        modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusing)
+                            .onPreviewKeyEvent { folderKey(it, keys) })
                 }
-                val (folder, names) = listed ?: ("" to emptyList())
-                val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
-                    names.map { it to folder.trimEnd('/') + "/" + it }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 240.dp).clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, c.rule, RoundedCornerShape(8.dp))) {
-                    items(rows, key = { it.second + "\u0000" + it.first }) { (name, path) ->
-                        Row(Modifier.fillMaxWidth().clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
+                    .border(1.dp, c.rule, RoundedCornerShape(8.dp)), state = list) {
+                    itemsIndexed(rows, key = { _, it -> it.second + "\u0000" + it.first }) { i, (name, path) ->
+                        Row(Modifier.fillMaxWidth().then(if (i == pick) Modifier.background(c.accentBg.copy(alpha = 0.3f)) else Modifier)
+                            .clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(if (name == "..") Adwaita.GoUp else Adwaita.Folder, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
@@ -525,6 +574,58 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )
+}
+
+/** What Open folder… lists for a path typed: the folder listed, the path's last part when that isn't a folder (null
+ * when it is), the folders shown. */
+private data class Listed(val typed: String, val folder: String, val part: String?, val names: List<String>)
+
+/** Tab in a folder's path (Baude's folder_completion), as GTK's file chooser and a shell complete: one folder the
+ * path's last part begins, it with a /; several, as much as all of them share; nothing more to put, null. */
+internal fun folderCompletion(typed: String, part: String?, names: List<String>): String? {
+    val begun = when {
+        part == null && !typed.endsWith("/") -> return "$typed/"
+        part == null -> ""
+        typed.endsWith("/") || !typed.endsWith(part) -> return null
+        else -> part
+    }
+    if (names.isEmpty()) return null
+    val at = typed.dropLast(begun.length)
+    if (names.size == 1) return at + names[0] + "/"
+    val low = names.map { it.lowercase() }
+    var shared = 0
+    while (low.all { it.length > shared && it[shared] == low[0][shared] }) shared++
+    return if (shared <= begun.length) null else at + names[0].take(shared)
+}
+
+/** What a folder's path field's keys do (folderKey). */
+private class FolderKeys(val complete: () -> Unit, val pick: (Int) -> Unit, val picked: () -> Boolean, val into: () -> Unit,
+                         val up: () -> Unit, val home: () -> Unit, val hidden: () -> Unit)
+
+/** A keyboard's keys in a folder's path (Baude's folder_keys), as file choosers have them: Tab completes it (GTK,
+ * shells); Up and Down pick in the list and Enter goes into the one picked (GTK's location bar, Finder's Go to
+ * Folder); Alt+Up or Meta+Up the folder above (Nautilus, Dolphin; Finder), Alt+Down or Meta+Down into the one picked
+ * or the only one; Alt+Home or Meta+Shift+H home; Ctrl+H, Alt+. or Meta+Shift+. hidden folders shown or not. */
+private fun folderKey(e: androidx.compose.ui.input.key.KeyEvent, k: FolderKeys): Boolean {
+    if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return false
+    val key = e.key
+    val mods = listOf(e.isShiftPressed, e.isCtrlPressed, e.isAltPressed, e.isMetaPressed)
+    val none = mods.none { it }
+    val alt = mods == listOf(false, false, true, false)
+    val meta = mods == listOf(false, false, false, true)
+    val metaShift = mods == listOf(true, false, false, true)
+    val doing: (() -> Unit)? = when {
+        key == Key.Tab && none -> k.complete
+        (key == Key.DirectionUp || key == Key.DirectionDown) && none -> { { k.pick(if (key == Key.DirectionUp) -1 else 1) } }
+        (key == Key.Enter || key == Key.NumPadEnter) && none && k.picked() -> k.into
+        key == Key.DirectionUp && (alt || meta) -> k.up
+        key == Key.DirectionDown && (alt || meta) -> k.into
+        key == Key.MoveHome && alt || key == Key.H && metaShift -> k.home
+        key == Key.H && mods == listOf(false, true, false, false) || key == Key.Period && (alt || metaShift) -> k.hidden
+        else -> null
+    }
+    doing?.invoke()
+    return doing != null
 }
 
 /** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's

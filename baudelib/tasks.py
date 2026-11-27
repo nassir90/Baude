@@ -525,13 +525,22 @@ class Tasks:
         self.checked = None  # (when every task's bound variables were last looked at: monotonic; None, never)
 
     # ---- kept
+    def moved(self, s, folder):
+        """(server's lock held) s's Bot's folder moved: its Store, if it's open, goes on in folder (its tasks/)."""
+        with self.lock:
+            st = self.stores.get(s.id)
+            if st is not None:
+                for key in [k for k in self.warned if k[0] == st.folder]:
+                    self.warned[(folder, key[1])] = self.warned.pop(key)
+                st.folder = folder
+
     def store(self, s):
         """(server's lock held) s's Store, its routines moved over first if it has any."""
         from baudelib.serverstate import bot_dir
         with self.lock:
             st = self.stores.get(s.id)
             if st is None:
-                st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.id), "tasks"))
+                st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.meta), "tasks"))
             if s.meta.get("routines"):
                 for r in s.meta["routines"]:
                     if not isinstance(r, dict):
@@ -830,7 +839,7 @@ class Tasks:
                     with self.lock:
                         self.notices.pop(sid, None)
                     continue
-                if s.busy or s.codex_queue or self.asking(sid):
+                if s.busy or self.asking(sid):
                     continue
                 with self.lock:
                     n = pending.pop(next(iter(pending)))
@@ -1111,7 +1120,7 @@ class Tasks:
                 break
             reminded = True  # (its turn ended without the tool: told once more, then it's failed)
             wait["done"].clear()
-            said = wording.say("tasks.answer_reminder", run=rid) + "\n\n" + form_said(form)
+            said = wording.say("tasks.answer_reminder", run=rid)
             wait["said"] = str(uuid.uuid4())  # (a message of its own: its from line says the run waits on it)
         if tool and not wait["answered"] and not wait["failed"]:
             wait["text"], wait["failed"] = wording.say("tasks.answer_refused", wrong=wait["refused"]) \
@@ -1131,7 +1140,7 @@ class Tasks:
                 s = srv.sessions.get(sid)
                 if s is None or s.deleting or s.meta.get("archived"):
                     return wording.say("host_errors.no_task"), True
-                if not s.busy and not s.codex_queue:
+                if not s.busy:
                     with self.lock:
                         self.waiting.setdefault(sid, []).append(wait)
                     try:
@@ -1304,7 +1313,7 @@ class Tasks:
                     with srv.lock:
                         c, b = srv.sessions.get(cid), srv.sessions.get(came.get("bot"))
                         if c is not None and b is not None and not c.deleting and not b.deleting and \
-                                not b.busy and not b.codex_queue and not b.meta.get("archived"):
+                                not b.busy and not b.meta.get("archived"):
                             sender = {"kind": "subagent", "name": c.listing().get("title") or "",
                                       "host": srv.me["id"], "host_name": srv.me["name"], "session": cid,
                                       "bot": b.id, "task": came.get("task") or "", "task_name": came.get("name") or "",

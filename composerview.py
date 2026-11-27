@@ -771,8 +771,8 @@ class Composer(Gtk.Overlay):
         return True
 
     def gate(self, name, on):
-        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),
-        on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
+        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone, the
+        subscription it runs on disabled), on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
         (self.gates.add if on else self.gates.discard)(name)
         self.send.set_sensitive(self.busy or not self.gates)
 

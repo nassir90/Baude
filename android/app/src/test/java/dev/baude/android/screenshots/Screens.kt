@@ -508,6 +508,21 @@ abstract class Screens(private val theme: String) {
         screen("40e-telemetry-foot")
     }
 
+    // (the same page's Errors, the latest opened: what was on screen, the screens before it, the code it ran)
+    @Test fun telemetryErrors() {
+        telemetryFixture()
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1700.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        tap("input: the server isn't there")
+        laidOut()
+        screen("40g-telemetry-errors")
+    }
+
     // (the foot on a host without line_profiler: what's missing and how it's installed, in Line Profiling's place)
     @Test fun telemetryNoProfiler() {
         telemetryFixture(profiler = false)
@@ -674,6 +689,21 @@ abstract class Screens(private val theme: String) {
                             model("gpt-5.4-codex", null, 70, 120_000, 0, 9_800_000, 1_500_000, 22_000_000))))
                         .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 550_000, 2_400_000, 100_000_000, 6_400_000, 160_000_000)))))
                 }
+                "errors" -> out.put("errors", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("app", "phone").put("kind", "send").put("fingerprint", "send:input:#")
+                        .put("type", "input").put("message", "the server isn't there").put("count", 3)
+                        .put("first", now - 7200).put("last", now - 240).put("commit", "1cb8c6ad0f3e").put("wire", 43)
+                        .put("wire_op", "input").put("screen", "Composer.region").put("stack", org.json.JSONArray())
+                        .put("crumbs", org.json.JSONArray(listOf(
+                            org.json.JSONObject().put("at", now - 420).put("action", "open").put("screen", "Sidebar.region"),
+                            org.json.JSONObject().put("at", now - 300).put("action", "open").put("screen", "Composer.region"),
+                            org.json.JSONObject().put("at", now - 262).put("action", "click").put("screen", "Composer.region").put("part", "send button")))),
+                    org.json.JSONObject().put("app", "baude").put("kind", "callback")
+                        .put("fingerprint", "callback:KeyError@windowdrafts.py:done").put("type", "KeyError")
+                        .put("message", "'rev'").put("count", 1).put("first", now - 5400).put("last", now - 5400)
+                        .put("file", "windowdrafts.py").put("line", 331).put("function", "done").put("commit", "1cb8c6ad0f3e")
+                        .put("wire", 43).put("screen", "Composer.region").put("part", "send button")
+                        .put("stack", org.json.JSONArray()).put("crumbs", org.json.JSONArray()))))
                 "events" -> out.put("events", org.json.JSONArray(listOf("chat_opened", "chat_front", "turn_sent", "turn_ended",
                     "chat_left").mapIndexed { i, k -> org.json.JSONObject().put("at", now - 900 + i * 60).put("app", "baude")
                         .put("kind", k).put("host", Mesh.hosts.first().id).put("session", "c1a7e4f0-0000-4000-8000-000000000001")

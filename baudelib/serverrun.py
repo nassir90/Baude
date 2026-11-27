@@ -8,12 +8,13 @@ import os
 import re
 import select
 import socket
+import sys
 import threading
 import time
 import uuid
 
 from baudelib import (
-    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
@@ -350,6 +351,7 @@ class ServerRunning:
         ch = wire.Channel.over(sock)
         ch.serving = True
         conn = Conn(ch, origin, sender, verified)
+        conn.errored = self.wire_errored
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -374,6 +376,7 @@ class ServerRunning:
                     conn.close()
                     (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
                     break
+                conn.asking(msg)
                 try:
                     self.handle(conn, msg)
                 except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
@@ -418,6 +421,19 @@ class ServerRunning:
             ch.close()
             if conn.subscribed:
                 self.heads_look()
+
+    def wire_errored(self, msg, op):
+        """An error answered on a connection (Conn's), kept as the host's with the op it answered: one answered from
+        an except block that exception with its stack, unless it's one of the schema's refusals or said for the user
+        as it is."""
+        t, e, tb = sys.exc_info()
+        code = msg.get("code") or msg.get("denied")
+        if t is not None and not msg.get("plain") and not code:
+            err = {**errorbook.of_exception(t, e, tb, "exception"), "wire_op": op}
+        else:
+            err = errorbook.of_note("wire", op or "?", msg.get("error") or "", key=f"{code}" if code else None,
+                                    wire_op=op, code=code)
+        self.telemetry.note(err)
 
     def emission_watch(self, conn, req, bot, msg):
         """A Bot's Emission here (started if it isn't; bot None: Emission's own window on its Default profile)

@@ -102,6 +102,8 @@ class App(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        import uitrack
+        uitrack.alone("emission")  # (its errors, a page that wouldn't load among them, told to its machine's host)
         if self.agent:  # (never seen: no logo, no look)
             return
         GLib.set_application_name("Emission")

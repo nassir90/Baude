@@ -1283,21 +1283,24 @@ An app's telemetry, told to its own machine's host as it happens (the phone's ap
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `app` | `baude` \| `record` \| `phone` | yes | The app it's of: Baude, Record, or the phone's app. |
+| `app` | `baude` \| `record` \| `phone` \| `emission` | yes | The app it's of: Baude, Record, the phone's app, or Emission (its errors only). |
 | `pid` | integer | yes | The app's process id. |
 | `events` | array of TelemetryEvent |  | What happened since it last told (each at its own time). |
 | `profile` | TelemetryProfile? |  | What it profiled since it last told, if it's profiling. |
 | `profile_error` | string/null |  | Why it isn't profiling what it's told to, if it isn't. |
+| `commit` | string/null |  | The commit the app runs (its first 12 characters), as it started: kept on each of its rows. |
+| `wire` | integer/null |  | The wire's version the app speaks: kept on each of its rows. |
+| `errors` | array of TelemetryError |  | Its errors since it last told, each once by its fingerprint with how many times it happened (added to what the host keeps of it). |
 
 #### `telemetry_read` (TelemetryRead)
 
-A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
+A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `from` | number | yes | From, in seconds since the epoch. |
 | `to` | number/null |  | To (null: now). |
-| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` |  | What's wanted (none: only the state). |
+| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` \| `errors` |  | What's wanted (none: only the state). |
 | `limit` | integer/null |  | The most events, samples and profiles each (the latest kept; default 5000). |
 
 #### `telemetry_set` (TelemetrySet)
@@ -2300,7 +2303,7 @@ telemetry's answer: kept.
 
 #### `telemetry_read` (TelemetryReadReply)
 
-telemetry_read's answer, each list the earliest first.
+telemetry_read's answer, each list the earliest first (errors the latest first).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -2309,6 +2312,7 @@ telemetry_read's answer, each list the earliest first.
 | `events` | array of TelemetryEvent |  | Its chat events. |
 | `metrics` | array of TelemetrySample |  | Its samples. |
 | `profiles` | array of TelemetryProfile |  | Its line profiles. |
+| `errors` | array of TelemetryError |  | The errors of the processes on its machine that happened in the stretch, the last to happen first. |
 | `usage` | TelemetryUsage? |  | Its turns added up. |
 
 #### `telemetry_set` (TelemetrySetReply)
@@ -3951,6 +3955,18 @@ A variable a task declares: a name its script reads it by (baudetask.vars), and 
 | `type` | `model` \| `decider` \| `host` \| `browser_host` \| `terminal_host` \| `kube_context` \| `pod` \| `container` \| `database` \| `text` | yes | What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same. |
 | `description` | string/null |  | What it's for, as its Bot said. |
 
+#### TelemetryCrumb
+
+Something the user did in an app, a few kept before an error (its breadcrumbs): what was on screen and the part used, by their schema/ui names.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When, in seconds since the epoch. |
+| `action` | `click` \| `menu` \| `open` | yes | What was done: a button or row clicked (or activated from the keyboard), a menu's item picked, or a screen opened (a tab, a page, a dialog, a side panel's page). |
+| `screen` | string/null |  | The schema/ui entity it was on ("Telemetry.dialog"), null where it has none. |
+| `part` | string/null |  | The entity's part used, by its name there ("Collect Telemetry"), null where it isn't one of its parts. |
+| `widget` | string/null |  | What was used where it isn't a part schema/ui names: its copy key, else its icon's name, else its kind of widget. |
+
 #### TelemetryDay
 
 A day's tokens, from the turns that ended in it.
@@ -3965,6 +3981,33 @@ A day's tokens, from the turns that ended in it.
 | `cache_read` | integer | yes | Input tokens read from a cache. |
 | `output` | integer | yes | Tokens written. |
 | `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
+
+#### TelemetryError
+
+An error a process on a host's machine had, kept by that host by its fingerprint (its kind and type and where it was raised): how many times, when first and last, the code it was on, what was on screen and the user's last actions before it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` | yes | The process it was in: the host's, Baude's, Record's, the phone's app, or Emission's. |
+| `kind` | `exception` \| `thread` \| `callback` \| `log` \| `wire` \| `agent_exit` \| `draft_save` \| `send` \| `page_load` \| `crash` | yes | What it was: an exception nothing caught (on the main thread; on another thread; in a main-loop callback, which carries on), a critical or warning GLib or GTK logged, an error answered on the wire, an agent that exited by itself with a code other than 0, a draft its host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing. |
+| `fingerprint` | string | yes | What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (its file and function), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out). |
+| `type` | string | yes | The exception's class, the log's domain and level, the op, the agent's program. |
+| `message` | string | yes | What it said, its first line (the last time). |
+| `file` | string/null |  | The file it was raised in, under the checkout, relative to it. |
+| `line` | integer/null |  | Its line there. |
+| `function` | string/null |  | The function. |
+| `stack` | array of string |  | Its frames (file:line function), the innermost last, at most 20 (the last time). |
+| `count` | integer | yes | Times it happened. |
+| `first` | number | yes | When it first happened, in seconds since the epoch. |
+| `last` | number | yes | When it last happened. |
+| `commit` | string/null |  | The commit the process ran the last time (its first 12 characters). |
+| `wire` | integer/null |  | The wire's version it spoke the last time. |
+| `first_commit` | string/null |  | The commit it ran the first time. |
+| `screen` | string/null |  | The schema/ui entity on screen as it happened ("Telemetry.dialog"), the last time; null in a process with no screen. |
+| `part` | string/null |  | The entity's part the user had just used, by its name there, if one was used just before. |
+| `wire_op` | string/null |  | The wire op it happened answering (a wire error's, an exception in a host's op). |
+| `code` | string/integer/null |  | A wire error's code (Error's), an agent's exit code. |
+| `crumbs` | array of TelemetryCrumb |  | The user's last actions before it (at most 8), the earliest first, the last time. |
 
 #### TelemetryEvent
 
@@ -3986,6 +4029,8 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 | `tokens_cache_read` | integer/null |  | A turn_ended's: the input tokens it read from a cache (each call of the turn's, counted each time it's read). |
 | `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote (thinking among them). |
 | `tokens_in` | integer/null |  | An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out. |
+| `commit` | string/null |  | The commit the app that saw it runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the app that saw it speaks. |
 
 #### TelemetryFront
 
@@ -4046,6 +4091,8 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 | `from` | number | yes | When it began. |
 | `app` | `host` \| `baude` \| `record` | yes | The process profiled: the host's, Baude's or Record's. |
 | `lines` | array of TelemetryLine | yes | Its lines that ran, the most time first (at most 200). |
+| `commit` | string/null |  | The commit the process profiled runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the process profiled speaks. |
 
 #### TelemetryProfiling
 
@@ -4073,6 +4120,8 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 | `memory_pressure` | string/null |  | How pressed for memory the system says it is: "normal", "warning" or "critical" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux). |
 | `memory_stall` | number/null |  | The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none. |
 | `procs` | array of TelemetryProc | yes | The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). |
+| `commit` | string/null |  | The commit the host runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the host speaks. |
 
 #### TelemetryState
 
@@ -4260,6 +4309,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `42` | The wire's version, as a host's hello says it. |
+| `VERSION` | `43` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

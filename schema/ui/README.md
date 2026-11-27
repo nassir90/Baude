@@ -262,3 +262,19 @@ An entry or a part may carry:
   never takes out and puts back the text row being typed in or the group holding it, so the row keeps its focus, its
   caret and what's typed, and the page stays where it's scrolled to. The owner found a text change at the foot of
   Settings → Telemetry jumping the page back to its top (2026-11-27). Source: `[{"issue": "BaudeInternal#286"}]`.
+- **Telemetry names the UI by this spec.** The owner's goals for telemetry: "measure how much time is spent in each
+  part of the codebase (for python with line_profiler); measure the raw number of invocations and a trivial index of
+  the invocations that doesn't require searching with a model; measure the number of times something is executed;
+  record the errors that happen during program execution." Every app names what the user does and what's on screen
+  by this spec's entity and part names (an entity is the nearest widget whose class an entry's `code` names; a part
+  is the one whose copy says what the widget shows), so the spec is the index: an error's screen and part, its
+  breadcrumbs and (with telemetry's counters) every count are keyed `Entity.kind` and part name, never a widget's own
+  text. A new entry or part names its code and copy so it's found. The owner: "Yep, unifying schema/ui and telemetry
+  is a pretty good idea as it points to homogenous UI ontology" (owner, 2026-11-27 session). Source:
+  `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"},
+  {"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"}]`.
+- **Every telemetry row says the code that made it.** Every event, sample, profile and error a host keeps carries the
+  commit (its first 12 characters) and wire version of the process that made it, so what changed between versions
+  can be told apart without going by times alone. The coordinator's plan, which the owner approved ("You can build
+  this", owner, 2026-11-27 session). Source: `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message":
+  "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"}]`.

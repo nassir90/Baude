@@ -201,11 +201,25 @@ class Conn:
         self.acting = None  # (the chat here whose own tools it is, as its hello said)
         self.task = None  # (a task's script's: {run, bot: {id, name}}, its run's Bot's from its hello on)
         self.archived = False  # (subscribed to archived sessions too)
+        self.asked = {}  # (the ops of its latest requests, by their req: what an error answered was answering)
         self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
         self.writer.start()
 
+    errored = None  # (told of each error answered on it, with the op it answered: the host's telemetry)
+
     def send(self, msg):
+        if self.errored is not None and msg.get("op") == "error":
+            try:
+                self.errored(msg, self.asked.get(msg.get("req")))
+            except Exception:  # noqa: BLE001 (answered all the same)
+                pass
         self.out.put(msg)
+
+    def asking(self, msg):
+        """A request come: its op kept by its req, the latest 64."""
+        self.asked[msg.get("req")] = msg.get("op")
+        if len(self.asked) > 64:
+            self.asked.pop(next(iter(self.asked)))
 
     def _write(self):
         while (msg := self.out.get()) is not None:

@@ -96,6 +96,20 @@
         "null"
       ],
       "description": "An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the app that saw it runs (its first 12 characters), as it started."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the app that saw it speaks."
     }
   },
   "required": [

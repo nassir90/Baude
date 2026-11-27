@@ -9,6 +9,7 @@ import time
 
 import macos  # noqa: E402  (no GTK: before it's loaded)
 from gi.repository import GLib  # noqa: E402
+from baudelib import errorbook  # noqa: E402
 from baudelib.emissionlink import blocks_tracking  # noqa: E402
 from emissioncore import AGENT, CONSOLE_JS, download_path, failure_page, for_bots, objc_sel, once  # noqa: E402
 from emissionpointer import (  # noqa: E402
@@ -226,7 +227,9 @@ class MacWeb:
         info = send(error, b"userInfo")
         url = cls._text(send(info, b"objectForKey:", macos.ns_string("NSErrorFailingURLStringKey"),
                              types=(ctypes.c_void_p,))) or web.asked
-        web.show_failure(url, cls._text(send(error, b"localizedDescription")))
+        why = cls._text(send(error, b"localizedDescription"))
+        errorbook.note("page_load", domain, why, key=f"{domain}:{code}", code=code)
+        web.show_failure(url, why)
 
     # (each of these answers WebKit on every path: a completion handler never called aborts the app)
 

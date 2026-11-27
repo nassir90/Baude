@@ -119,7 +119,23 @@ class MacWeb:
         if not cls.loaded:
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/WebKit.framework/WebKit")
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Foundation.framework/Foundation")
+            cls.allow_http()
             cls.loaded = True
+
+    @staticmethod
+    def allow_http():
+        """Plain http opens as in any browser (a dev server on app.localhost, a box on the LAN, any address typed):
+        App Transport Security, which WebKit's network process takes from this process's bundle (Python's, which
+        says nothing of it), is told in memory, before WebKit's first asked, that a web view's loads are anyone's
+        (NSAllowsArbitraryLoadsInWebContent: what's meant for a browser; local networking alone leaves *.localhost
+        out)."""
+        send = macos.objc_send
+        ats = send(b"NSDictionary", b"dictionaryWithObject:forKey:",
+                   send(b"NSNumber", b"numberWithBool:", True, types=(ctypes.c_bool,)),
+                   macos.ns_string("NSAllowsArbitraryLoadsInWebContent"), types=(ctypes.c_void_p, ctypes.c_void_p))
+        if info := send(send(b"NSBundle", b"mainBundle"), b"infoDictionary"):
+            send(info, b"setObject:forKey:", ats, macos.ns_string("NSAppTransportSecurity"),
+                 types=(ctypes.c_void_p, ctypes.c_void_p))
 
     @classmethod
     def make_delegate(cls):

@@ -3970,6 +3970,11 @@ How many times one thing in a process was used or ran over a stretch, and how lo
 | `count` | integer | yes | Times. |
 | `seconds` | number | yes | Their time added up: a part's or menu item's from its click till the app was free again (its handlers, and what they drew at once); a screen's in front, with someone at the machine; an op's handling; a callback's running; a function's running, added up (its calls' time with theirs in it); 0 for a program. |
 | `max` | number/null |  | The longest of them (a screen's: its longest stretch in front). |
+| `own` | number |  | A function's own time added up: the processor time its runs took on their thread, less what the functions of Baude's own it called took (what it ran itself, not what it waited for: what line profiling is aimed by). |
+| `within` | array of object |  | A function's: the clicks and ops it ran within (from the click till it was painted; the op's handling), its own time in each, the most first (at most 3). |
+| `within[].kind` | `part` \| `menu` \| `op` | yes | A click (part, menu) or a wire op the host answered (op). |
+| `within[].name` | string | yes | Its count's name. |
+| `within[].seconds` | number | yes | The function's own time within it, added up. |
 
 #### TelemetryCounters
 
@@ -4099,6 +4104,21 @@ A model's turns, or a model and effort's.
 | `output` | integer | yes | Tokens written. |
 | `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
 
+#### TelemetryPick
+
+A function line profiling was aimed at, and the count that picked it: where the process's time went (its own time, weighted up by the slow clicks and ops it ran within).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `function` | string | yes | What's profiled, as its count names it (module:Class.method). |
+| `count` | integer | yes | Its runs in the stretch it was picked from (the last day). |
+| `seconds` | number | yes | Its own time added up in that stretch (the processor time it took, less its counted callees'). |
+| `within` | object |  | The click or op it ran within that weighted it most (none: it ran within none). |
+| `within.kind` | `part` \| `menu` \| `op` | yes | A click (part, menu) or a wire op the host answered (op). |
+| `within.name` | string | yes | Its count's name ("Composer.region/send button", an op). |
+| `within.seconds` | number | yes | The function's own time within it. |
+| `within.each` | number | yes | Its average time, a click's or op's: what weighted the function up. |
+
 #### TelemetryProc
 
 A process's use of its machine, in one sample.
@@ -4122,6 +4142,7 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 | `lines` | array of TelemetryLine | yes | Its lines that ran, the most time first (at most 200). |
 | `commit` | string/null |  | The commit the process profiled runs (its first 12 characters), as it started. |
 | `wire` | integer/null |  | The wire's version the process profiled speaks. |
+| `picked` | array of TelemetryPick |  | What its counts picked it to profile over the stretch, each with the count that picked it (none: named by telemetry_set, or the developers' pick). |
 
 #### TelemetryProfiling
 
@@ -4130,9 +4151,10 @@ What a process profiles while line profiling's on.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
-| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named. |
-| `default` | boolean | yes | They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it): what telemetry_set named for it, else what its counts picked (picked), else Baude's developers' pick (lineprofile.DEFAULTS) till there are counts. |
+| `default` | boolean | yes | Nothing's named for it by telemetry_set: what it profiles is picked by its counts (or the developers' pick, before there are any). |
 | `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
+| `picked` | array of TelemetryPick |  | What its counts picked for it now, each with the count that picked it (none while something's named, or nothing's counted yet). |
 
 #### TelemetrySample
 
@@ -4338,6 +4360,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `43` | The wire's version, as a host's hello says it. |
+| `VERSION` | `44` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

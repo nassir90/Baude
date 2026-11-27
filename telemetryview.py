@@ -88,6 +88,7 @@ class Recorder:
         self.front = None  # (the chat in front, in which window: (win ref, chat))
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
+        self.picked = []  # (the counts that picked what's profiled now)
         self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
         self.count_timer = None  # (what's counted told every counters.FLUSH_S, while it's on)
         self.errors_due, self.known = False, False  # (this process's errors to be told in a moment; whether its
@@ -150,11 +151,11 @@ class Recorder:
                 for win in list(self.windows):
                     self.look(win)
         self.host_pid = pid
-        functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name),
-                         []) if on and t.get("line_profiling") else []
+        mine = next((p for p in t.get("profiling") or [] if p.get("app") == self.name), {})
+        functions = (mine.get("functions") or []) if on and t.get("line_profiling") else []
         funccount.switch(bool(on and t.get("line_profiling")))  # (counted only to aim line profiling)
         if functions != self.profiler.functions:
-            self.profile(functions)
+            self.profile(functions, mine.get("picked") or [])
 
     def watch(self, win):
         self.windows.add(win)
@@ -300,8 +301,12 @@ class Recorder:
         here.request(msg, lambda r: done(r.get("op") == "telemetry_kept"))
 
     # ---- profiling
-    def profile(self, functions):
+    def profile(self, functions, picked=()):
+        """Profiling these from now (picked: the counts that picked them, aim's), what was profiled till now told."""
         last = self.profiler.set(functions)
+        if last:
+            last["picked"] = self.picked
+        self.picked = list(picked)
         if self.profile_timer is not None:
             GLib.source_remove(self.profile_timer)
             self.profile_timer = None
@@ -310,7 +315,9 @@ class Recorder:
         self.send({"profile": last} if last else {}, lambda _ok: None)
 
     def profiled(self):
-        if (p := self.profiler.snapshot()) is not None or self.profiler.error != self.told_error:
+        if (p := self.profiler.snapshot()) is not None:
+            p["picked"] = self.picked
+        if p is not None or self.profiler.error != self.told_error:
             self.send({"profile": p} if p else {}, lambda _ok: None)
         return True
 
@@ -931,10 +938,13 @@ class Page(Adw.PreferencesPage):
 
     def show_lines(self):
         """Every process's lines profiled in the last hour, added up, the most time first, each with its app's logo."""
-        lines = {}
+        lines, picks = {}, {}
         for p in getattr(self, "profiles", []):
             if p.get("app") not in PROFILED:
                 continue
+            for k in p.get("picked") or []:  # (by its function's file and Class.method, as line_profiler says it)
+                module, _, qual = k["function"].partition(":")
+                picks[(p["app"], module.replace(".", "/") + ".py", qual)] = k
             for x in p.get("lines") or []:
                 k = (p["app"], x["file"], x["line"])
                 got = lines.setdefault(k, {**x, "app": p["app"], "hits": 0, "seconds": 0.0})
@@ -951,7 +961,13 @@ class Page(Adw.PreferencesPage):
                     mono=True)
             r.add_prefix(logo(x["app"]))
             r.set_title_lines(1)
-            r.set_tooltip_text(f"{wording.say(APP_NAMES[x['app']])}: {x['file']}:{x['line']} ({x['function']})")
+            tip = f"{wording.say(APP_NAMES[x['app']])}: {x['file']}:{x['line']} ({x['function']})"
+            if (k := picks.get((x["app"], x["file"], x["function"]))) is not None:  # (aimed at by its counts: which)
+                tip += "\n" + wording.say("telemetry.picked_by", seconds=f"{k['seconds']:.1f}")
+                if (w := k.get("within")) is not None:
+                    tip += "\n" + wording.say("telemetry.picked_within", name=count_title(w),
+                                               ms=f"{1000 * w['each']:.0f}")
+            r.set_tooltip_text(tip)
             rows.append(r)
         self.group("lines", wording.say("telemetry.top_lines") if top else None, rows)
 

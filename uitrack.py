@@ -13,7 +13,7 @@ import time
 
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
-from baudelib import counters, errorbook, wire, wording
+from baudelib import counters, errorbook, funccount, wire, wording
 from baudelib.uiindex import index
 
 CRUMBS_MAX = 8
@@ -304,13 +304,16 @@ def _used(action, row=False):
             crumb(action, entity, part, hint)
             name = f"{entity}/{part}" if part else f"{entity}/({hint})"
             began = time.perf_counter()
+            kind = action if action == "menu" else "part"
+            funccount.within(kind, name)  # (what runs till it's painted: this click's, to aim line profiling)
 
             ended = []
 
             def done(*_):  # (the next frame painted: its handlers, and what they drew, done)
                 if not ended:
                     ended.append(True)
-                    counters.COUNTERS.add(action if action == "menu" else "part", name, time.perf_counter() - began)
+                    funccount.within()
+                    counters.COUNTERS.add(kind, name, time.perf_counter() - began)
                     look()
                 return False
             _after_paint(widget, done)

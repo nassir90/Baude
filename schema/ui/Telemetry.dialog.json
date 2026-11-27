@@ -52,7 +52,10 @@
     "baudelib/telemetry.py:counted",
     "baudelib/telemetry.py:Telemetry.flush_counts",
     "PhoneCounts.kt:PhoneCounts",
-    "Telemetry.kt:CountRow"
+    "Telemetry.kt:CountRow",
+    "baudelib/aim.py:picks",
+    "baudelib/telemetry.py:Telemetry.aim",
+    "baudelib/funccount.py:within"
   ],
   "copy": [
     "telemetry",
@@ -443,14 +446,16 @@
     },
     {
       "name": "Line Profiling",
-      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is Baude's developers' pick, shipped with the code (lineprofile.DEFAULTS), unless telemetry_set from any member of the mesh names others for it on that host (python3 -m baudelib.telemetry profile); nothing on the page names or edits them. Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed), gone, with the switch in its place, as soon as line_profiler's installed there (looked for again each time the page asks; no restart). Not on the phone's own host (no Python there).",
+      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is picked from its function counts (baudelib.aim): where its time actually went, each function's own time in the last day (the processor time it took, less its counted callees': what it ran, not what it waited for), what ran within a slow click or op weighted up by that click's or op's average time (twice at 100 ms, up to 10 times), the top 8 two at a time in turn, 10 minutes each, in an order that holds; never telemetry's own code, nor what runs within its ops or its page's clicks; Baude's developers' pick (lineprofile.DEFAULTS) only till anything's counted; telemetry_set from any member of the mesh names others for a process in their place (python3 -m baudelib.telemetry profile). Nothing on the page names or edits them; a top line's tooltip says the count that picked its function, matched by its file and Class.method (\"Picked by Its Own Time: 2.1s in the Last Day\", then \"Mostly in Composer.region · send button: 340 ms Each\" where a click or op weighted it). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed), gone, with the switch in its place, as soon as line_profiler's installed there (looked for again each time the page asks; no restart). Not on the phone's own host (no Python there).",
       "copy": [
         "telemetry.line_profiling",
         "telemetry.top_lines",
         "telemetry.hits_seconds",
         "telemetry.not_found",
         "telemetry.no_profiling",
-        "telemetry.host_process"
+        "telemetry.host_process",
+        "telemetry.picked_by",
+        "telemetry.picked_within"
       ],
       "actions": [
         {
@@ -472,7 +477,7 @@
         },
         {
           "said": "Which functions are profiled is the developers' call, shipped as a default set that can be overridden over the mesh; asking the user to pick a process and type function names doesn't make sense (paraphrased)",
-          "rule": "Every app's Line Profiling is a switch and the top lines: what each process profiles is the default set shipped with the code (lineprofile.DEFAULTS), or what telemetry_set names for it from any member of the mesh; no app names, picks or edits functions on the page",
+          "rule": "Every app's Line Profiling is a switch and the top lines: what each process profiles is picked from its counts (or the developers' default set till there are any), or what telemetry_set names for it from any member of the mesh; no app names, picks or edits functions on the page",
           "decided": "2026-11-27",
           "source": [
             {
@@ -487,6 +492,17 @@
           "source": [
             {
               "issue": "BaudeInternal#286"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good but we also just want intelligent choice of whre to pick line_profiler. The initial chhouice was braindead. Why would telemetry monitor itself? Who is that useful for? For a dev who wants improving software?",
+          "rule": "Every host aims line profiling at where each process's time is actually spent, not at its entry points: the functions with the most own time (less their callees'), weighted toward those that run within slow clicks and slow host ops, rotated in a stable order so each of the top gets a window, and never at telemetry's own code or what its ops and page run; each profile says which count picked each function; what telemetry_set names over the mesh still takes their place",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
             }
           ]
         },

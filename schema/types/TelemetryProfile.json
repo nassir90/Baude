@@ -39,6 +39,13 @@
         "null"
       ],
       "description": "The wire's version the process profiled speaks."
+    },
+    "picked": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryPick.json"
+      },
+      "description": "What its counts picked it to profile over the stretch, each with the count that picked it (none: named by telemetry_set, or the developers' pick)."
     }
   },
   "required": [

@@ -992,6 +992,7 @@ class RemoteProc(claude.ClaudeProc):
         self.login = reply.get("login")  # (its sign-in, as its host has it: ChatLogin, or None)
         self.keeps_login = "login" in reply  # (a host that keeps it: one that doesn't, its heads' cards their own)
         self.writes = reply.get("writes") is not False  # (false: its host lets this head only read it)
+        self.draft = reply.get("draft")  # (what's written in its box, as its host keeps it: ChatDraft, or None)
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None}) if self.writes else None
 
@@ -1005,6 +1006,8 @@ class RemoteProc(claude.ClaudeProc):
             elif op == "login_state" and msg.get("session") == self.session:  # (its sign-in, its host's: told
                 self.login = msg.get("login")  # as {type: "_login"}, as a note of its host's is "_note")
                 self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_login", "login": m.get("login")}))
+            elif op == "draft_changed" and msg.get("session") == self.session:  # (its draft, another head's write,
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_draft", "draft": m.get("draft")}))  # as "_draft")
             elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
                 self.code = "stopped" if msg.get("stopped") else msg.get("code")
                 break

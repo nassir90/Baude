@@ -34,6 +34,7 @@ from baudelib.hostlogin import login_error  # noqa: E402
 from chatinput import Attachment, attachment_widget  # noqa: E402
 from sessionlist import HERE_HOST, THIS_MACHINE, local_host, main_folder, network, on_main, remote_name  # noqa: E402
 from sidequestion import SideQuestion  # noqa: E402
+from composerview import ComposerMarkdown  # noqa: E402
 
 
 class WindowDrafts:
@@ -135,10 +136,13 @@ class WindowDrafts:
     def keep_draft(self, key, queue=None):
         """The box's draft kept as key's, its queue with it (queue: queue_state's), with one another window left there
         (join_drafts), and the box emptied for the next chat's. An empty box and no queue keep nothing and drop
-        nothing: a draft this window took is gone already (take_draft), and one there is another window's."""
+        nothing: a draft this window took is gone already (take_draft), and one there is another window's. A host's
+        chat's text is saved to its host first (flush_host_draft); saved: whether it was."""
         text, atts = widgets.typed_text(self.input), list(self.attachments)
+        saved = self.flush_host_draft()
+        self.hd = {"sid": None}  # (its host's draft no longer this box's)
         if text.strip() or atts or queue:
-            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts,
+            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts, "saved": saved,
                      **({"queue": queue} if queue else {})}
             if (other := self.DRAFTS.pop(key, None)) is not None:
                 draft = self.join_drafts(other, draft)
@@ -149,12 +153,157 @@ class WindowDrafts:
 
     def take_draft(self):
         """The chat just opened: its draft (keep_draft) in the box, and its queue under the conversation, if it was left
-        with them."""
+        with them; a host's chat's text as its host keeps it (open_host_draft)."""
         if draft := self.DRAFTS.pop(self.draft_key(), None):
             self.QUEUE_SEEN.pop(self.draft_key(), None)  # (its queue this window's again: sent as its turn ends here)
             self.set_box(draft["text"], draft["caret"], draft["attachments"])
             self.put_queue(draft.get("queue"))
             self.completer.hide()
+        self.open_host_draft(draft)
+
+    # ---- a host's chat's draft: its text kept by its host (draft_save), the same in every head that opens the chat,
+    # on any machine. Saved DRAFT_SAVE_MS after typing stops, at once as the box is emptied (a message sent or
+    # queued) and as the chat's left; another head's save comes as "_draft" (h_draft). The last write wins: one that
+    # comes while this box has a save of its own waiting or on its way is held (hd's held) and put in only if its
+    # host had it after this box's. What's attached stays this app's (files on this machine: DRAFTS)
+    DRAFT_SAVE_MS = 400
+    hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), flight
+    # (saves on their way), held (another's, held)})
+    draft_timer = None
+
+    @property
+    def draft_head(self):
+        """This window's box, as its saves say it (draft_save's head)."""
+        if getattr(self, "_draft_head", None) is None:
+            self._draft_head = str(uuid.uuid4())
+        return self._draft_head
+
+    def draft_host(self):
+        """The host that keeps the open chat's draft (a host's chat, listed, there now, this head let write it), or
+        None."""
+        r = self.remote
+        if r is None or r.state != "alive" or getattr(self, "desktop_chat", False) or not self.draft_key():
+            return None
+        return None if getattr(self.proc, "writes", True) is False else r
+
+    def box_markdown(self):
+        return ComposerMarkdown.to_markdown(widgets.typed_text(self.input))
+
+    def open_host_draft(self, local):
+        """(the chat just opened, its local draft local, or None) Its host's draft in the box, unless this app's is
+        newer: typed here while its host couldn't be told (saved false), or kept from before its host kept any:
+        that's saved to it instead."""
+        self.drop_draft_timer()
+        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None}
+        if self.draft_host() is None:
+            return
+        d = getattr(self.proc, "draft", None) if isinstance(self.proc, baudelib.client.RemoteProc) else None
+        if not isinstance(d, dict):
+            if self.box_markdown().strip():
+                self.save_host_draft()
+            return
+        self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "")
+        if local is not None and local.get("saved") is not True and self.box_markdown() != self.hd["text"]:
+            return self.save_host_draft()
+        self.put_host_text(self.hd["text"])
+
+    def reattached_draft(self):
+        """(the open chat attached again: its host back, say) What's typed since its host was last told saved to it;
+        else what it has, if it's had a write since."""
+        if self.hd.get("sid") is None or self.hd["sid"] != self.session_id or \
+                not isinstance(self.proc, baudelib.client.RemoteProc) or self.draft_host() is None:
+            return
+        if self.box_markdown() != (self.hd["text"] if self.hd["text"] is not None else ""):
+            return self.save_host_draft()
+        self.host_draft_in(self.proc.draft)
+
+    def put_host_text(self, text):
+        """text in the box (what's attached as it is), the caret where it was, unless that's what's there."""
+        self.hd["text"] = text
+        if self.box_markdown() != text:
+            caret = widgets.caret_of(self.input)
+            self.set_box(text, [min(c, len(text)) for c in caret])
+
+    def drop_draft_timer(self):
+        if self.draft_timer is not None:
+            GLib.source_remove(self.draft_timer)
+            self.draft_timer = None
+
+    def draft_typed(self):
+        """(the box's text changed by hand: draft_changed) Its host's copy saved DRAFT_SAVE_MS after typing stops,
+        at once as it's emptied."""
+        self.drop_draft_timer()
+        if self.reverting is not None or self.hd.get("sid") is None or self.hd["sid"] != self.session_id or \
+                self.draft_host() is None:
+            return
+        text = self.box_markdown()
+        if text == self.hd["text"]:
+            return
+        if not text.strip():
+            self.save_host_draft()
+        else:
+            self.draft_timer = GLib.timeout_add(self.DRAFT_SAVE_MS, self.draft_due)
+
+    def draft_due(self):
+        self.draft_timer = None
+        self.save_host_draft()
+        return False
+
+    def flush_host_draft(self):
+        """(the chat being left, or the app restarting) What's typed saved to its host now, if it hasn't been; True
+        if its host has it (or the chat's draft isn't a host's)."""
+        self.drop_draft_timer()
+        if self.hd.get("sid") is None or self.hd["sid"] != self.session_id or self.reverting is not None:
+            return True
+        if self.draft_host() is None:
+            return self.box_markdown() == self.hd.get("text")
+        if self.box_markdown() != self.hd["text"]:
+            self.save_host_draft()
+        return True
+
+    def save_host_draft(self):
+        """The box's text saved to the open chat's host (draft_save)."""
+        self.drop_draft_timer()
+        r = self.draft_host()
+        if r is None:
+            return
+        hd, sid, text = self.hd, self.session_id, self.box_markdown()
+        hd["text"] = text
+        hd["flight"] += 1
+
+        def done(reply):
+            hd["flight"] -= 1
+            if reply.get("op") != "draft_saved":  # (not kept there: this app's, saved again as it's opened)
+                if (d := self.DRAFTS.get(sid)) is not None:
+                    d["saved"] = False
+                elif self.hd is hd:
+                    hd["text"] = None
+                return
+            hd["rev"] = max(hd["rev"], reply["draft"]["rev"])
+            if self.hd is hd and (held := hd["held"]) is not None and not hd["flight"] and self.draft_timer is None:
+                hd["held"] = None
+                self.host_draft_in(held)
+        r.request({"op": "draft_save", "session": sid, "text": text, "head": self.draft_head}, done)
+
+    def h_draft(self, msg):
+        """Another head's write of the open chat's draft, as its host tells it (draft_changed)."""
+        self.host_draft_in(msg.get("draft"))
+
+    def host_draft_in(self, d):
+        hd = self.hd
+        if not isinstance(d, dict) or hd.get("sid") is None or hd["sid"] != self.session_id or \
+                (d.get("rev") or 0) <= hd["rev"]:
+            return  # (one seen already, or older than one that has been)
+        if d.get("head") == self.draft_head:  # (this box's own save, back)
+            hd["rev"] = d["rev"]
+            return
+        if hd["flight"] or self.draft_timer is not None or self.reverting is not None or \
+                hd["text"] is not None and self.box_markdown() != hd["text"]:  # (this box's typing, not saved yet: it
+            if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # goes after, unless its host has this after it)
+                hd["held"] = d
+            return
+        hd["rev"] = d["rev"]
+        self.put_host_text(d.get("text") or "")
 
     @classmethod
     def drafts_state(cls):

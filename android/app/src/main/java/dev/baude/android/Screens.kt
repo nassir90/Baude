@@ -128,6 +128,25 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
         chat.draft.value = null
     }
+    LaunchedEffect(chat, chat.boxText.value) { // (its host's draft: in place of what's written)
+        val put = chat.boxText.value ?: return@LaunchedEffect
+        text = put
+        chat.typed = put
+        chat.boxText.value = null
+    }
+    LaunchedEffect(chat, text) { // (its host's draft saved a moment after typing stops, at once as the box empties)
+        chat.typed = text
+        val markdown = toMarkdown(text)
+        if (!Mesh.keepsDraft(chat) || chat.reverting != null || markdown == chat.draftText) {
+            chat.draftTyping = false
+            return@LaunchedEffect
+        }
+        chat.draftTyping = true
+        if (markdown.isNotBlank()) kotlinx.coroutines.delay(Mesh.DRAFT_SAVE_MS)
+        chat.draftTyping = false
+        Mesh.saveDraft(chat, markdown)
+    }
+    androidx.compose.runtime.DisposableEffect(chat) { onDispose { Mesh.flushDraft(chat) } } // (left: saved now)
     val list = remember(chat) { androidx.compose.foundation.lazy.LazyListState() }
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
     val placeKey = if (chat.sender == null) "${chat.hostId}/${chat.sid}" else null // (a host's chat's place is kept)

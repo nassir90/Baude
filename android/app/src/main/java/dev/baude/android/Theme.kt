@@ -102,8 +102,10 @@ object Gap {
     // at Global Scale 1.0 (BASE_SCALE's 1.2 of these), a Bot's twice that, as on the desktop)
     val homeRow = androidx.compose.ui.unit.Dp(40f)
     val homeBotRow = homeRow * 2f
-    val avatar = Tokens.Gap.avatar                  // (bot_row's Adw.Avatar)
-    val avatarGap = Tokens.Gap.avatarGap            // (bot_row's box spacing)
+    // (bot_row's Adw.Avatar and its box spacing, as icons are (Dp.icon): the picture keeps the desktop's size against
+    // the name beside it)
+    val avatar get() = Tokens.Gap.avatar.icon
+    val avatarGap get() = Tokens.Gap.avatarGap.icon
     val headerTop = Tokens.Gap.headerTop            // (header_row's margins, top and start)
     val headerStart = Tokens.Gap.headerStart
     val chatH = Tokens.Gap.chatH                    // (the chat's box: its margins, start and end, top and bottom)

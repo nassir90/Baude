@@ -4,6 +4,7 @@
 import ctypes
 import os
 import shutil
+import time
 
 import gi  # noqa: E402
 
@@ -575,15 +576,17 @@ class Tab:
         self.id, self.win = f"tab{Tab.made}", win
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
+        self.painted, self.ticking = None, None  # (hosted on macOS: frames)
+        self.fading = None  # (a timeout, at the Bot's pointer's idle time's end: frames then, to fade it out)
         if win.Engine is MacWeb:  # (its view kept over its place as soon as that's shown, hidden or moved: hosted, in a
             for signal in ("map", "unmap"):  # side panel that's resized and switched, every frame it's shown)
                 self.place.connect(signal, lambda *_: self.web.follow())
-            if win.hosted:  # (followed each frame while it's shown in Baude's window: not in its own, never shown)
-                self.ticking = None
-                self.place.connect("map", lambda p: setattr(self, "ticking", p.add_tick_callback(
-                    lambda *_: self.web.follow() or True)))
-                self.place.connect("unmap", lambda p: self.ticking is not None and (
-                    p.remove_tick_callback(self.ticking), setattr(self, "ticking", None)))
+            if win.hosted:  # (followed while it's shown in Baude's window, not in its own, never shown: after each
+                # frame Baude's window draws, a resize, a panel dragged, a toast coming, and each frame while the
+                # Bot's pointer moves (kick); none's drawn for it otherwise, so a page left as it is costs nothing)
+                self.place.connect("map", lambda p: self.frames(True))
+                self.place.connect("unmap", lambda p: self.frames(False))
+                self.place.connect("destroy", lambda p: self.unfade())
         self.web.window, self.web.tab_id = win, self.id
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
@@ -592,6 +595,51 @@ class Tab:
         self.last = {}
         if url is not None:
             self.web.load(address(url))
+
+    def frames(self, on):
+        """(hosted) Its page followed after each frame of the window its place is in (on), or not (off: unmapped)."""
+        if self.painted is not None:
+            clock, handler = self.painted
+            clock.disconnect(handler)
+            self.painted = None
+        if self.ticking is not None:
+            self.place.remove_tick_callback(self.ticking)
+            self.ticking = None
+        if not on:
+            self.unfade()
+        clock = self.place.get_frame_clock() if on else None
+        if clock is not None:
+            self.painted = (clock, clock.connect("after-paint", lambda *_: self.web.follow()))
+            self.kick()
+
+    def kick(self):
+        """(hosted) Frames drawn while the Bot's pointer or the glow moves, each following it, till they're still."""
+        if self.painted is None:
+            return
+        if self.ticking is None and self.win.pointer.busy():
+            self.ticking = self.place.add_tick_callback(self.tick)
+        pointer = self.win.pointer  # (its idle time ending isn't a move: frames are asked for then, to fade it out)
+        self.unfade()
+        left = pointer.seen + pointer.IDLE_S - time.monotonic()
+        if left > 0:
+            self.fading = GLib.timeout_add(int(left * 1000) + 20, self.faded)
+
+    def unfade(self):
+        if self.fading is not None:
+            GLib.source_remove(self.fading)
+            self.fading = None
+
+    def faded(self):
+        self.fading = None
+        self.kick()
+        return False
+
+    def tick(self, *_):
+        if self.win.pointer.busy():  # (a frame, followed once it's drawn: frames' after-paint)
+            return True
+        self.ticking = None
+        self.web.follow()  # (as it's left)
+        return False
 
 
 class Chrome:

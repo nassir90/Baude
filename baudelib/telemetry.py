@@ -30,6 +30,7 @@ PROFILE_S = 30  # (how often what's profiled is saved)
 KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30, "errors": 90}  # (events back a year: the tokens' grid;
 # an error since it last happened)
 ERRORS_FLUSH_S = 1  # (errors written this long after one comes, those meanwhile with it)
+ERRORS_KEPT = 1000  # (errors kept: the latest by when they last happened)
 LIMIT = 5000  # (telemetry_read's most of each, the latest kept)
 EVENTS_MAX = 1000  # (one telling's)
 APPS = tuple(wire.DEFS["Telemetry"]["properties"]["app"]["enum"])
@@ -496,7 +497,14 @@ class Telemetry:
                     got.update({k: r[k] for k in _ERROR_LATEST})
                 got.update(count=got["count"] + r["count"], first=min(got["first"], r["first"]),
                            last=max(got["last"], r["last"]))
+            self._cap_errors()
         self._errors_soon()
+
+    def _cap_errors(self):
+        """(errors_lock held) Only the latest ERRORS_KEPT by when they last happened kept."""
+        if len(self.errs) > ERRORS_KEPT:
+            keep = sorted(self.errs.items(), key=lambda kv: -kv[1]["last"])[:ERRORS_KEPT]
+            self.errs = dict(keep)
 
     def _errors(self):
         """(errors_lock held) What's kept, read the first time."""
@@ -529,6 +537,7 @@ class Telemetry:
                 return
             old = time.time() - KEEP_DAYS["errors"] * 86400
             self.errs = {k: e for k, e in self.errs.items() if e["last"] >= old}
+            self._cap_errors()
             try:
                 os.makedirs(self.dir, mode=0o700, exist_ok=True)
                 tmp = os.path.join(self.dir, "errors.json.tmp")

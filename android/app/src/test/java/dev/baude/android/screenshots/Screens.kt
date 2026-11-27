@@ -696,9 +696,10 @@ abstract class Screens(private val theme: String) {
                         .put("wire_op", "input").put("screen", "Composer.region").put("stack", org.json.JSONArray())
                         .put("crumbs", org.json.JSONArray(listOf(
                             org.json.JSONObject().put("at", now - 420).put("action", "open").put("screen", "Sidebar.region"),
-                            org.json.JSONObject().put("at", now - 300).put("action", "open").put("screen", "Composer.region")))),
+                            org.json.JSONObject().put("at", now - 300).put("action", "open").put("screen", "Composer.region"),
+                            org.json.JSONObject().put("at", now - 262).put("action", "click").put("screen", "Composer.region").put("part", "send button")))),
                     org.json.JSONObject().put("app", "baude").put("kind", "callback")
-                        .put("fingerprint", "callback:KeyError@windowdrafts.py:331").put("type", "KeyError")
+                        .put("fingerprint", "callback:KeyError@windowdrafts.py:done").put("type", "KeyError")
                         .put("message", "'rev'").put("count", 1).put("first", now - 5400).put("last", now - 5400)
                         .put("file", "windowdrafts.py").put("line", 331).put("function", "done").put("commit", "1cb8c6ad0f3e")
                         .put("wire", 43).put("screen", "Composer.region").put("part", "send button")

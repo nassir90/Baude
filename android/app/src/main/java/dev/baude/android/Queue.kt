@@ -311,7 +311,7 @@ object Queue {
 /** A round flat button on a turn (a queued or held message's): its content, its label for what it does. */
 @Composable
 fun TurnButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onClick).semantics(mergeDescendants = true) {
+    Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onClick.tapping(label)).semantics(mergeDescendants = true) {
         contentDescription = label
     }, contentAlignment = Alignment.Center) { content() }
 }

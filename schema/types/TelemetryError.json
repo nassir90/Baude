@@ -30,7 +30,7 @@
     },
     "fingerprint": {
       "type": "string",
-      "description": "What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (file:line), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out)."
+      "description": "What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (its file and function), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out)."
     },
     "type": {
       "type": "string",

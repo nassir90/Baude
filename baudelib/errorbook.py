@@ -38,7 +38,8 @@ def ours(path):
 
 def of_exception(exc_type, exc, tb, kind="exception"):
     """An exception as an error (without its count and times): its fingerprint its kind, type and the innermost
-    frame of Baude's own code in its stack (the innermost frame, if none is)."""
+    frame of Baude's own code in its stack (the innermost frame, if none is): its file and function, not its line, so an
+    edit above it doesn't make it another error."""
     frames = traceback.extract_tb(tb) if tb is not None else []
     top = next((f for f in reversed(frames) if ours(f.filename)), frames[-1] if frames else None)
     name = getattr(exc_type, "__qualname__", None) or str(exc_type)
@@ -46,7 +47,7 @@ def of_exception(exc_type, exc, tb, kind="exception"):
            "stack": [f"{lineprofile.shown_path(f.filename)}:{f.lineno} {f.name}" for f in frames[-STACK_MAX:]]}
     if top is not None:
         out.update(file=lineprofile.shown_path(top.filename), line=top.lineno, function=top.name)
-    out["fingerprint"] = f"{kind}:{name}@{out['file']}:{out['line']}" if top is not None else f"{kind}:{name}"
+    out["fingerprint"] = f"{kind}:{name}@{out['file']}:{out['function']}" if top is not None else f"{kind}:{name}"
     return out
 
 
@@ -64,7 +65,7 @@ class Book:
     exception sys.excepthook is given there is a callback's."""
 
     def __init__(self):
-        self.lock, self.pending = threading.Lock(), {}
+        self.lock, self.pending = threading.RLock(), {}  # (re-entered: a finalizer's critical, logged inside, notes one)
         self.app, self.wake, self.context, self.in_loop = None, None, None, None
 
     def claim(self, app, wake, context=None, in_loop=None):

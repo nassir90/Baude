@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 object TelemetryStore {
     private const val SAMPLE_S = 5L
     private const val LIMIT = 5000
+    private const val ERRORS_KEPT = 1000 // (errors kept: the latest by when they last happened)
     private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L)
     private val KINDS = setOf("chat_opened", "chat_front", "chat_left", "turn_sent", "turn_ended")
     private val APPS = setOf("baude", "record", "phone")
@@ -129,6 +130,8 @@ object TelemetryStore {
         }
         val old = System.currentTimeMillis() / 1000.0 - KEEP.getValue("errors") * 86400
         kept.entries.removeAll { it.value.optDouble("last", 0.0) < old }
+        if (kept.size > ERRORS_KEPT) kept.entries.sortedByDescending { it.value.optDouble("last", 0.0) }.drop(ERRORS_KEPT)
+            .forEach { kept.remove(it.key) }
         if (root == null) return
         dir().mkdirs()
         val tmp = File(dir(), "errors.json.tmp")

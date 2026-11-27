@@ -495,38 +495,60 @@ def fit_row(title, *values, **kw):
     return row(title, *values, fit=True, **kw)
 
 
-def error_row(e):
-    """An error: its process's logo, its type and message, how many times and how long ago it last happened; opened,
-    where it was raised, what was on screen, the user's last actions before it, and the code it ran."""
-    import widgets
-    r = Adw.ExpanderRow(title=GLib.markup_escape_text(f"{e['type']}: {e['message']}" if e.get("message") and
-                                                      e["message"] != e["type"] else e["type"]))
-    r.set_title_lines(1)
-    r.add_prefix(logo(e.get("app")))
-    r.add_suffix(Gtk.Label(label=widgets.time_ago(e.get("last") or 0), css_classes=["dim-label", "numeric"]))
-    r.add_suffix(Gtk.Label(label=wording.say("telemetry.error_times", count=e.get("count") or 1),
-                           css_classes=["dim-label", "numeric"]))
-    r.set_tooltip_text(e.get("message") or None)
+class ErrorRow(Adw.ExpanderRow):
+    """An error: its process's logo, its type and message, how long ago it last happened and how many times; opened,
+    where it was raised, what was on screen, the user's last actions before it, and the code it ran. set(e) brings it
+    up to date where it is (opened stays opened)."""
+
+    def __init__(self, e):
+        super().__init__()
+        self.set_title_lines(1)
+        self.add_prefix(logo(e.get("app")))
+        self.ago, self.times = (Gtk.Label(css_classes=["dim-label", "numeric"]) for _ in range(2))
+        self.add_suffix(self.ago)
+        self.add_suffix(self.times)
+        self.details, self.shown = [], None
+        self.set(e)
+
+    def set(self, e):
+        self.set_title(GLib.markup_escape_text(f"{e['type']}: {e['message']}" if e.get("message") and
+                                               e["message"] != e["type"] else e["type"]))
+        self.ago.set_label(widgets.time_ago(e.get("last") or 0))
+        self.times.set_label(wording.say("telemetry.error_times", count=e.get("count") or 1))
+        self.set_tooltip_text(e.get("message") or None)
+        lines = error_lines(e)
+        if lines != self.shown:
+            self.shown = lines
+            for r in self.details:
+                self.remove(r)
+            self.details = [fit_row(*line, mono=mono) for *line, mono in lines]
+            for r in self.details:
+                self.add_row(r)
+
+
+def error_lines(e):
+    """What an error says of itself opened: ([title, values...], monospace) for each row."""
+    out = []
     if e.get("file"):
-        r.add_row(fit_row(wording.say("telemetry.error_where"),
-                      f"{e['file']}:{e.get('line')}" + (f" {e['function']}" if e.get("function") else ""), mono=True))
+        out.append((wording.say("telemetry.error_where"),
+                    f"{e['file']}:{e.get('line')}" + (f" {e['function']}" if e.get("function") else ""), True))
     if e.get("wire_op"):
-        r.add_row(fit_row(wording.say("telemetry.error_op"), str(e["wire_op"]) + (
-            f" · {e['code']}" if e.get("code") is not None else "")))
+        out.append((wording.say("telemetry.error_op"), str(e["wire_op"]) + (
+            f" · {e['code']}" if e.get("code") is not None else ""), False))
     elif e.get("code") is not None:
-        r.add_row(fit_row(wording.say("telemetry.error_code"), str(e["code"])))
+        out.append((wording.say("telemetry.error_code"), str(e["code"]), False))
     if e.get("screen") or e.get("part"):
-        r.add_row(fit_row(wording.say("telemetry.error_screen"), where_said(e.get("screen"), e.get("part"))))
+        out.append((wording.say("telemetry.error_screen"), where_said(e.get("screen"), e.get("part")), False))
     for c in reversed(e.get("crumbs") or []):
         key = f"telemetry.action_{c.get('action')}"
-        r.add_row(fit_row(wording.say(key) if wording.has(key) else str(c.get("action")),
-                      where_said(c.get("screen"), c.get("part") or c.get("widget")), widgets.time_ago(c["at"])))
+        out.append((wording.say(key) if wording.has(key) else str(c.get("action")),
+                    where_said(c.get("screen"), c.get("part") or c.get("widget")), widgets.time_ago(c["at"]), False))
     if e.get("commit") or e.get("wire") is not None:
-        r.add_row(fit_row(wording.say("telemetry.error_version"), wording.say(
-            "telemetry.version_of", commit=e.get("commit") or "–", wire=str(e.get("wire") or "–")), mono=True))
+        out.append((wording.say("telemetry.error_version"), wording.say(
+            "telemetry.version_of", commit=e.get("commit") or "–", wire=str(e.get("wire") or "–")), True))
     if (first := e.get("first")) and e.get("count", 1) > 1:
-        r.add_row(fit_row(wording.say("telemetry.error_first"), widgets.time_ago(first)))
-    return r
+        out.append((wording.say("telemetry.error_first"), widgets.time_ago(first), False))
+    return out
 
 
 def row(title, *values, sensitive=True, mono=False, bold=False, visible=True, fit=False):
@@ -577,7 +599,7 @@ class Page(Adw.PreferencesPage):
             self.add(self.made[key])
         self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
-        self.errors_shown = None
+        self.error_rows = {}  # (the Errors group's rows, by app and fingerprint)
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -604,12 +626,35 @@ class Page(Adw.PreferencesPage):
             return False
         self.took_state(reply)
         errors = reply.get("errors") or []
-        if "errors" in self.groups and self.errors_shown == repr(errors):
-            return False
-        self.errors_shown = repr(errors)
-        self.group("errors", wording.say("telemetry.errors"),
-                   [error_row(e) for e in errors] or [row(wording.say("telemetry.no_errors"), sensitive=False)])
+        self.show_errors(errors)
         return False
+
+    def show_errors(self, errors):
+        """The Errors group's rows brought up to date in place, by app and fingerprint: those that are still there are
+        kept (opened stays opened, the page stays where it's scrolled), the new added, the gone removed."""
+        g, have, title = self.made["errors"], self.error_rows, wording.say("telemetry.errors")
+        if not errors:
+            have.clear()
+            self.group("errors", title, [row(wording.say("telemetry.no_errors"), sensitive=False)])
+            return
+        if not have:  # (what was there was the placeholder, or nothing)
+            self.group("errors", title)
+        keys = [f"{e.get('app')}:{e.get('fingerprint')}" for e in errors]
+        for k in [k for k in have if k not in keys]:
+            g.remove(have.pop(k))
+        for k, e in zip(keys, errors):
+            if k in have:
+                have[k].set(e)
+            else:
+                have[k] = ErrorRow(e)
+        want = [have[k] for k in keys]
+        shown = [r for r in self.rows["errors"] if r in want]
+        if shown != want:
+            for r in shown:
+                g.remove(r)
+            for r in want:
+                g.add(r)
+        self.rows["errors"] = want
 
     def read(self, msg, done):
         import depsview

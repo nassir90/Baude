@@ -278,7 +278,7 @@ Run it again after changing either: it writes this page and `baudelib/script/bau
 A Bot's task is a script its host runs (see [docs/tasks-design.md](../../docs/tasks-design.md)). Its Python scripts \
 `import baudetask`, and through it reach whatever the Bot itself can: Emission tabs, Multiplex terminals, \
 Kubernetes and Docker objects, databases, every host of the mesh and its models, chats and subagents, beside \
-asking the Bot (`ask`, `fallback`) and starting agents (`agent`).
+asking the Bot (`ask`, `fallback`), asking a person (`inbox`) and starting agents (`agent`).
 
 ## How calls are judged
 
@@ -340,6 +340,38 @@ def check(inputs):
     finally:
         task.emission.close(tab=tab.tab)
 ```
+
+## Asking a person: the Inbox
+
+`inbox()` raises an ask of a person in the Inbox of every app that may manage the task's Bot (Baude's, the phone's), \
+drawn as a message is: Markdown, its pictures between paragraphs or alone in a table's cells, its form as setting \
+rows, and the buttons the script gives, sized to their labels. Pressing one answers it, with the form's values; the \
+ask leaves every Inbox at once. The person may have a model answer it for them to confirm, send it to a Bot, or \
+write to the task's Bot, which may answer it or put a new version of it. The host keeps it across restarts; one whose \
+run ended unanswered stays, struck through, till it's removed.
+
+```python
+import baudetask as task
+
+
+@task.main
+def deploy(inputs):
+    asked = task.inbox(
+        "### Deploy 2.5 to production?\n\nStaging has run **2.5** since 08:10 with no errors.\n\n![home](home.png)",
+        ["Approve", {"label": "Deny", "style": "red"}],
+        pictures=["shots/home.png"], form=[{"name": "note", "type": "text", "label": "Note for the release"}],
+        title="Deploy site: 2.5 to production?")
+    got = asked.wait()                 # {button, label, values, by}: days, if it must (the run waits for input)
+    if got["label"] == "Approve":
+        task.say("deploying:", got["values"]["note"])
+```
+
+`asked.poll()` answers at once (None if nobody's answered yet), `asked.wait(timeout=60)` gives up after a minute \
+(None), `asked.revise(body=..., buttons=...)` puts a new version (what's left out stays), `asked.withdraw()` takes it \
+back. A withdrawn ask, or one whose run is stopped, raises `baudetask.Unanswered` from `wait` and `poll`. Button \
+styles: `primary`, `secondary` (the default), or one of the accent palette's colours `blue`, `teal`, `green`, \
+`yellow`, `orange`, `red`, `pink`, `purple`, `slate`; `{"label": ..., "picture": "a.png"}` draws the picture over its \
+label.
 
 ## Terminals
 

@@ -24,6 +24,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
 
 import fixview  # noqa: E402  (☰ → Ongoing Feedback: the fixes, approved or rejected)
+import inboxview  # noqa: E402  (the Inbox: tasks' asks of a person, in tabs of their own)
 from livefeed import read_appended  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
@@ -954,6 +955,52 @@ class WindowSignal:
                               icon="mail-send-symbolic", tooltip=wording.say("window.feedback_tab_tip"),
                               select=select)
 
+    def open_inbox(self, select=True):
+        """The Inbox row: its tab, opened or shown (inboxview.InboxPage)."""
+        return self.tabs.open(("inbox",), lambda: inboxview.InboxPage(self), wording.say("inbox.title"),
+                              icon="mail-unread-symbolic", tooltip=wording.say("inbox.tip"), select=select)
+
+    def open_ask(self, host_key, aid, select=True):
+        """An ask of the Inbox in a tab of its own (inboxview.AskPage), titled with its task's name; None if its host
+        doesn't have it now."""
+        if (page := self.tabs.get(("ask", host_key, aid))) is not None:
+            self.tabs.show(("ask", host_key, aid))
+            return page
+        ask = inboxview.find_ask(host_key, aid)
+        if ask is None:
+            return None
+        self.inbox_selected = (host_key, aid)
+        return self.tabs.open(("ask", host_key, aid), lambda: inboxview.AskPage(self, ask),
+                              ask.get("task_name") or wording.say("inbox.title"), icon="alarm-symbolic", select=select)
+
+    def selected_ask(self):
+        """The ask Meta helps with: the one whose tab is shown, else the one last touched in the Inbox. (ask, its
+        AskView or None), or None."""
+        page = self.tabs.current()
+        if isinstance(page, inboxview.AskPage):
+            ask = inboxview.find_ask(page.key, page.aid)
+            return (ask, page.view) if ask is not None else None
+        picked = getattr(self, "inbox_selected", None)
+        if picked is None:
+            return None
+        ask = inboxview.find_ask(*picked)
+        if ask is None:
+            return None
+        view = None
+        if (tab := self.tabs.get(("ask", *picked))) is not None:
+            view = tab.view
+        elif (inbox := self.tabs.get(("inbox",))) is not None and picked in inbox.cards:
+            view = inbox.cards[picked].view
+        return ask, view
+
+    def refresh_inbox(self):
+        """The network changed: the Inbox row's count, the Inbox's tab and each ask's, as the hosts say them now."""
+        if (row := getattr(getattr(self, "sidebar", None), "inbox_row", None)) is not None:
+            row.refresh()
+        for child in self.tabs.children():
+            if isinstance(child, (inboxview.InboxPage, inboxview.AskPage)):
+                child.refresh()
+
     def reopen_tab(self, key, line):
         """What was shown, gone back or forward to (MainTabs.back, forward): the chat, the feedback, or a file's code
         at its line (opened again, if it's still there). False if it can't be."""
@@ -961,6 +1008,10 @@ class WindowSignal:
             return self.tabs.show("chat")
         if key[0] == "fixes":
             return bool(self.open_fixes())
+        if key[0] == "inbox":
+            return bool(self.open_inbox())
+        if key[0] == "ask":
+            return bool(self.open_ask(key[1], key[2]))
         if key[0] == "code":
             if key[2]:  # (a version's text: only while its tab's open)
                 return self.tabs.show(key)

@@ -14,7 +14,7 @@ import uuid
 
 from baudelib import (
     access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
-    hostlogin, hostqueue, hostresume, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
+    hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -906,6 +906,8 @@ class ServerRunning:
             return reply("relaying")
         if op == "mcp_line" and getattr(conn, "agent_relay", None) is not None:
             return conn.agent_relay[0].relay_line(conn.agent_relay[1], msg.get("line"))
+        if op in inbox.OPS:  # (what a task asks of a person: raised, waited for and answered; baudelib/inbox.py)
+            return self.inbox.op(conn, msg, reply)
         if op in ("task_report", "task_ask"):  # (a task's script, running here: on this machine's socket, its run's
             if conn.origin is not None or conn.member is not None:  # token its own)
                 return conn.send(self.access.refused(req, "shell"))

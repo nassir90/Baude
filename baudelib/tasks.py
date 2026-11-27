@@ -773,6 +773,7 @@ class Tasks:
             self.running.pop(run["id"], None)
             for key in [k for k in self.polled if k[0] == sid]:  # (its branches looked at again now: a push
                 self.polled.pop(key)                               # while it ran, run after it)
+        self.server.inbox.run_over(run["id"])  # (its asks of a person still waiting: stopped)
         self.server.log(f"task {task['name']!r} of {sid}: {status}" + (f" ({error})" if error else ""))
         self.server.changed()
         self.server.woken.set()

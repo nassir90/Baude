@@ -1,0 +1,314 @@
+{
+  "description": "One ask a task raised, opened in a tab of its own (titled with the task's name, an alarm icon): who it's from and ⋯, its Markdown body with pictures, its form, its buttons and Route to…, and a message box at the foot that writes to the asking task's Bot. Full width.",
+  "apps": [
+    "baude",
+    "phone"
+  ],
+  "opens": [
+    "a card's title in the Inbox",
+    "back / forward in the tab history"
+  ],
+  "code": [
+    "inboxview.py:AskView",
+    "inboxview.py:AskPage",
+    "inboxview.py:AskMarkdown",
+    "baudelib/inbox.py:Inbox",
+    "Inbox.kt:AskScreen"
+  ],
+  "copy": [
+    "inbox",
+    "composer"
+  ],
+  "phone": {
+    "does": "A screen of its own opened from the Inbox, titled with the task's name, Back returns to the Inbox",
+    "why": "One column at a time on a phone",
+    "decided": "2026-11-27"
+  },
+  "parts": [
+    {
+      "name": "From line",
+      "shows": "The asking Bot's picture, then \"from Task “<task>” on <host>\" (dim, small), as a message's from line; at the end, on a stopped ask \"Not answered — the task stopped\", on one sent to a Bot \"Sent to <Bot>\", and ⋯.",
+      "copy": [
+        "inbox.from_task",
+        "inbox.not_answered",
+        "inbox.sent_to"
+      ]
+    },
+    {
+      "name": "⋯ menu",
+      "shows": "History: every version of the ask with when it came (\"v2 · today 10:42\"), the one shown ticked; picking one shows it (its buttons work only on the latest). On a stopped ask, Remove too.",
+      "copy": [
+        "inbox.more",
+        "inbox.history",
+        "inbox.version_at",
+        "common.remove"
+      ]
+    },
+    {
+      "name": "Body",
+      "shows": "The task's Markdown, as a message is drawn: headings, bold, lists, code, tables. A picture on a line of its own is as wide as the text, its height as its shape has it, rounded; a table cell holding only a picture shows it; never a file path. Click a picture to see it large (the image viewer).",
+      "copy": [
+        "inbox.no_picture"
+      ]
+    },
+    {
+      "name": "Form",
+      "shows": "The ask's fields as setting rows (TaskField's types): text, a field that fills the row's width with its label in it; number, an entry at the row's end; on/off, a switch; choice, a drop-down. The person fills them; Meta may fill them for them to check."
+    },
+    {
+      "name": "Buttons",
+      "shows": "The task's buttons, each sized to its label, wrapping as whole buttons when a row is full (Adw.WrapBox; the phone's FlowRow): style primary (the accent), secondary (plain), or a colour of the accent palette (blue, teal, green, yellow, orange, red, pink, purple, slate: schema/tokens accent.*); a picture button shows its picture over its label. Route to… at the row's end.",
+      "actions": [
+        {
+          "by": "click a button",
+          "does": "Answers the ask: its task is told which button, with the form's values, and the ask leaves every Inbox. There's no separate Submit."
+        }
+      ]
+    },
+    {
+      "name": "Route to…",
+      "shows": "A flat menu button: \"Have a model answer\", then the ask's host's models as the model picker lists them; \"Send to a Bot\", then that host's Bots with their pictures.",
+      "copy": [
+        "inbox.route_to",
+        "inbox.route_tip",
+        "inbox.have_model_answer",
+        "inbox.send_to_bot"
+      ],
+      "actions": [
+        {
+          "by": "pick a model",
+          "does": "The model is asked to answer; meanwhile \"<model> is answering…\" over the buttons. Its answer fills the form and says \"<model> would press “<button>”\" with its reason; nothing takes effect till the person presses a button (the model's, or another, the form as they leave it). Dismiss lets it go."
+        },
+        {
+          "by": "pick a Bot",
+          "does": "The ask is sent to that Bot, which answers it with its answer_ask tool (the one way a Bot's answer takes effect without the person pressing); the ask stays, \"Sent to <Bot>\", till it does."
+        }
+      ]
+    },
+    {
+      "name": "Model's answer",
+      "shows": "Over the buttons while a model's answer waits: \"<model> would press “<button>”\" (bold) and its reason, with Dismiss; that button drawn as the suggested one. While it's asked: \"<model> is answering…\" with a spinner. Failed: \"<model> couldn't answer: <why>\".",
+      "copy": [
+        "inbox.model_would_press",
+        "inbox.model_answering",
+        "inbox.model_failed",
+        "code_apart.dismiss"
+      ]
+    },
+    {
+      "name": "Message box",
+      "shows": "The composer at the foot, its send button's tooltip \"Send to <Bot>\" (the asking task's Bot).",
+      "copy": [
+        "inbox.send_to"
+      ],
+      "actions": [
+        {
+          "by": "send",
+          "does": "What's written goes to the asking task's Bot as a message, with the ask; the Bot may propose an answer (answer_ask: shown over the buttons as a model's is, for the person to confirm, never pressing for them) or put a new version of it (revise_ask), which shows here at once."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "stopped",
+      "shows": "Its task went away unanswered: the body's first heading struck through and the body greyed, \"Not answered — the task stopped\" on the from line, form and buttons off, Route to… off, the box still writes to the Bot.",
+      "copy": [
+        "inbox.not_answered"
+      ]
+    },
+    {
+      "name": "answered elsewhere",
+      "shows": "Answered on another device (or by a Bot): the tab says \"This ask is no longer waiting\" and its buttons are off.",
+      "copy": [
+        "inbox.gone"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Tasks render their asks the way a person formats a message: markdown, tables that can hold images.",
+      "rule": "Every app draws an ask's body as a message's Markdown, a table cell holding only a picture showing it.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        }
+      ]
+    },
+    {
+      "said": "A living, versioned artefact with buttons that evolve it, messages to agents, closing with the deterministic task.",
+      "rule": "Every app shows an ask's versions, its buttons and a message box to the asking task's Bot. A press answers the version it was pressed on, and the host refuses it once the ask has a newer one; the task may put a new version of an ask that was pressed, which opens the same ask again, waiting, with its History.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7221349386"
+        }
+      ]
+    },
+    {
+      "said": "\"Versions\" is the wrong word: the picker becomes ⋯ → History.",
+      "rule": "Every app lists an ask's versions under ⋯ → History, never as \"Versions\".",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "Images can sit between paragraphs of text, not only in table cells; no file path is ever shown for one.",
+      "rule": "Every app draws an ask's picture between paragraphs as wide as the text, and never a file path for it.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "The ask uses full width (full-width mode is always supported); no narrow column.",
+      "rule": "Every app draws an ask at the full width it has, never in a narrow column.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "Buttons size to their labels and overflow as units, wrapping only when a row is full, the native way on each platform.",
+      "rule": "Every app sizes an ask's buttons to their labels and wraps them as whole buttons only when a row is full (Adw.WrapBox; Compose FlowRow).",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "Choices aren't tied to pictures explicitly; picture buttons are supported.",
+      "rule": "Every app draws a button with a picture as a picture button; nothing else ties pictures to choices.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "No expiry rules; form fields are supported in asks.",
+      "rule": "No app expires an ask; every app draws an ask's form as setting rows.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "Asks come from tasks only, for now.",
+      "rule": "Every ask names its task and the task's Bot; no app raises one from a chat.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224233722"
+        }
+      ]
+    },
+    {
+      "said": "Pressing any button notifies the task, with the form's values; no separate Submit.",
+      "rule": "Every app answers an ask by its buttons alone, sending the form's values with the one pressed.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224233722"
+        }
+      ]
+    },
+    {
+      "said": "When a model answers for the person, its answer is shown to confirm first, the ask staying until they do.",
+      "rule": "Every app shows a model's answer for the person to confirm or change; it takes effect only as they press a button.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7221349386"
+        }
+      ]
+    },
+    {
+      "said": "A typed message goes to the asking task's Bot, which can answer or post a new version.",
+      "rule": "Every app sends what's written in an ask's box to the asking task's Bot.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7221349386"
+        }
+      ]
+    },
+    {
+      "said": "Meta can help fill in the form of an ask you've selected, using its context.",
+      "rule": "Every app's Meta can read the selected ask (body, form, buttons, task and run log, its Bot's chat) and fill its form for the person to check; it never presses a button.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    "inbox-ask",
+    "inbox-ask-route",
+    "inbox-ask-proposal",
+    "inbox-ask-stopped"
+  ]
+}

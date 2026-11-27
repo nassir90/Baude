@@ -104,6 +104,8 @@ object MetaTools {
         tool("unarchive_chats", "Bring archived chats back to the list.", listOf("chats"), JSONObject().put("chats", strs())),
         tool("delete_chats", "Delete chats of this machine's own: their transcripts go to Baude's trash, and undo brings " +
             "them back. Not a host's session, nor the chat open.", listOf("chats"), JSONObject().put("chats", strs())),
+        tool("read_ask", Wording.Inbox.readAskTool, emptyList(), JSONObject()),
+        tool("fill_ask", Wording.Inbox.fillAskTool, listOf("values"), JSONObject().put("values", obj())),
     ))
 
     /** A JSON-RPC line from Meta's claude: its answer, to then (null for a notification). */
@@ -511,6 +513,29 @@ object MetaTools {
         Meta.save()
     }
 
+    /** A chat's conversation as Meta reads it (read_chat): its end, if it's long; or why it couldn't be read. */
+    private fun readChat(h: String, s: Msg.Session, done: (String?, String?) -> Unit) {
+        val ok = { t: String -> done(t, null) }
+        val no = { t: String -> done(null, t) }
+        val size = s.size?.toLong() ?: 0
+        Mesh.ask(h, Msg.Transcript(session = s.id.orEmpty(),
+            offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
+            if (r.optString("op") != Op.TRANSCRIPT) return@ask no(Msg.Error.from(r).said.orEmpty())
+            val data = Msg.TranscriptReply.from(r).data.orEmpty()
+            val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
+            val said = parse(text, cutFirst = size > 60_000).mapNotNull {
+                when (it.kind) {
+                    "you", "bot", "note", "error" -> "[${it.kind}] ${it.text}"
+                    "call" -> "[tool] " + toolLine(JSONObject(it.text))
+                    "task" -> "[note] " + taskSaid(JSONObject(it.text))
+                    "stopped" -> "[note] " + Wording.ChatNotes.interrupted
+                    else -> null
+                }
+            }.joinToString("\n").takeLast(20_000).ifEmpty { "(nothing said yet)" }
+            ok("<chat title=\"${title(s).replace("\"", "&quot;")}\">\n$said\n</chat>")
+        }
+    }
+
     // ---- the tools
 
     /** A tool called: what it says back (and whether it went wrong), to done, on the main thread. */
@@ -547,23 +572,27 @@ object MetaTools {
             "show" -> show(args, at, ok, no)
             "read_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
-                val size = s.size?.toLong() ?: 0
-                Mesh.ask(h, Msg.Transcript(session = s.id.orEmpty(),
-                    offset = (size - 60_000).coerceAtLeast(0)).json()) { r ->
-                    if (r.optString("op") != Op.TRANSCRIPT) return@ask no(Msg.Error.from(r).said.orEmpty())
-                    val data = Msg.TranscriptReply.from(r).data.orEmpty()
-                    val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
-                    val said = parse(text, cutFirst = size > 60_000).mapNotNull {
-                        when (it.kind) {
-                            "you", "bot", "note", "error" -> "[${it.kind}] ${it.text}"
-                            "call" -> "[tool] " + toolLine(JSONObject(it.text))
-                            "task" -> "[note] " + taskSaid(JSONObject(it.text))
-                            "stopped" -> "[note] " + Wording.ChatNotes.interrupted
-                            else -> null
-                        }
-                    }.joinToString("\n").takeLast(20_000).ifEmpty { "(nothing said yet)" }
-                    ok("<chat title=\"${title(s).replace("\"", "&quot;")}\">\n$said\n</chat>")
+                readChat(h, s) { text, error -> if (error != null) no(error) else ok(text.orEmpty()) }
+            }
+            "read_ask" -> {
+                val (h, id) = Inbox.shown ?: return no("No ask has been opened in the Inbox.")
+                val a = Inbox.find(h, id) ?: return no(Wording.Inbox.notWaiting)
+                val about = Inbox.described(h, a)
+                Mesh.ask(h, Msg.TaskRunGet(session = a.session.orEmpty(), run = a.run.orEmpty()).json()) { r ->
+                    val log = if (r.optString("op") != Op.TASK_RUN) "(its run's log couldn't be read: ${Msg.Error.from(r).said.orEmpty()})"
+                        else Msg.TaskRunReply.from(r).log.orEmpty().takeLast(200).joinToString("\n") { it.text.orEmpty() }.ifEmpty { "(empty)" }
+                    val run = "<run_log>\n$log\n</run_log>"
+                    val bot = Mesh.session(h, a.session.orEmpty())
+                        ?: return@ask ok("$about\n$run\n(the asking Bot's chat isn't listed here)")
+                    readChat(h, bot) { chat, error -> ok("$about\n$run\n" + (chat ?: "(its Bot's chat couldn't be read: $error)")) }
                 }
+            }
+            "fill_ask" -> {
+                val (h, id) = Inbox.shown ?: return no("No ask has been opened in the Inbox.")
+                val a = Inbox.find(h, id)?.takeIf { it.status == "waiting" } ?: return no(Wording.Inbox.notWaiting)
+                val v = a.versions?.lastOrNull() ?: return no(Wording.Inbox.notWaiting)
+                val wrong = Inbox.fill(h, a, v, args.optJSONObject("values") ?: JSONObject())
+                ok(if (wrong.isEmpty()) "Filled, for the person to check and press a button." else "Filled what fit. Didn't fit: ${wrong.joinToString("; ")}.")
             }
             "rename_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))

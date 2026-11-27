@@ -2,7 +2,8 @@
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token or API key, a Codex API key, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), a subscription disabled or enabled again (disable: its chats' agents stopped,
-nothing sent to them) or set to disable itself as it's exhausted (auto_disable), a chat moved onto another (use: once it's on it, kept as the one a new
+nothing sent to them) or set to disable itself as it's exhausted (auto_disable) or to resume its chats a usage limit
+stopped as it resets (auto_resume: hostresume), a chat moved onto another (use: once it's on it, kept as the one a new
 chat on its provider's models takes, accounts.selected), a subscription's usage read (usage; a setup token's, which can't be asked, as its chats' turns last
 said it, with when: as_of), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
@@ -26,7 +27,7 @@ import urllib.parse
 import uuid
 from http.client import HTTPConnection, HTTPException, InvalidURL
 
-from baudelib import accounts, deps, hostlogin, wording
+from baudelib import accounts, deps, hostlogin, hostresume, wording
 from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
@@ -49,7 +50,8 @@ def state(server=None):
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
             "missing": missing, "last_usage": last, "codex_usage": True,
             "disabled": sorted(k for k, v in switches.items() if v["disabled"]),
-            "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"])}
+            "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"]),
+            "auto_resume": sorted(accounts.auto_resume())}
 
 
 def answer(server, conn, msg, reply):
@@ -93,13 +95,19 @@ def answer(server, conn, msg, reply):
             on = bool(msg.get("on"))
             accounts.set_switch(key, **{"disabled" if what == "disable" else "auto_disable": on})
             off = what == "disable" and on
-            if what == "auto_disable" and on and _spent(server, key):  # (exhausted already: disabled now)
-                accounts.set_switch(key, disabled=True)
+            if what == "auto_disable" and on and (limits := _spent(server, key)) is not None:  # (exhausted already:
+                reset = accounts.limits_reset(limits, accounts.key_provider(key))  # disabled now)
+                accounts.exhausted(key, hostresume.after(reset) if reset is not None else None)
                 off = True
             if off:
                 getattr(server, "subscription_disabled", lambda _key: None)(key)
             else:
                 getattr(server, "subscription_switched", lambda: None)()
+            return done()
+        if what == "auto_resume":  # (its chats a usage limit stopped carried on as it resets: hostresume)
+            key = accounts.usage_key((accounts.account(profile) or {}).get("provider", provider or "claude"), profile)
+            accounts.set_auto_resume(key, bool(msg.get("on")))
+            getattr(server, "subscription_switched", lambda: None)()
             return done()
         if what == "use":
             server.use_account(msg.get("session"), profile)
@@ -115,8 +123,8 @@ def answer(server, conn, msg, reply):
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
-    return done(error="accounts takes list, add, rename, token, remove, disable, auto_disable, use, usage, sign_in, code "
-                      "or callback")
+    return done(error="accounts takes list, add, rename, token, remove, disable, auto_disable, auto_resume, use, usage, "
+                      "sign_in, code or callback")
 
 
 def _for_chat(server, conn, msg, done):
@@ -137,19 +145,22 @@ def _for_chat(server, conn, msg, done):
 
 
 def _spent(server, key):
-    """Whether a subscription (usage key) is exhausted as it was last read, or as its chats' turns last said it."""
+    """The limits ([(key, percent, resets)]) that say a subscription (usage key) is exhausted, as it was last read or as
+    its chats' turns last said it, or None where they don't."""
     from baudelib.serverstate import state_home
     read = accounts.last_usage().get(key)
     seen = accounts.seen_limits(getattr(server, "state_dir", None) or state_home(), key)
     provider = accounts.key_provider(key)
-    return accounts.limits_exhausted(read[1] if read else None, provider) or \
-        accounts.limits_exhausted(seen[0] if seen else None, provider)
+    return next((limits for limits in (read[1] if read else None, seen[0] if seen else None)
+                 if accounts.limits_exhausted(limits, provider)), None)
 
 
 def _exhausted(server, key, limits, provider):
     """A usage read's limits (limits) that say a subscription's used up: disabled if it auto-disables (its chats
     stopped)."""
-    if accounts.limits_exhausted(limits, provider) and accounts.exhausted(key):
+    reset = accounts.limits_reset(limits, provider)
+    if accounts.limits_exhausted(limits, provider) and \
+            accounts.exhausted(key, hostresume.after(reset) if reset is not None else None):
         getattr(server, "subscription_disabled", lambda _key: None)(key)
 
 

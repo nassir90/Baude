@@ -1153,6 +1153,11 @@ class Session(Obj):
             in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent
             stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till
             it's enabled or another's picked.
+        resume_at (number or None): When its host sends it a message to carry on (seconds since 1970): its last
+            turn was stopped by a usage limit and the subscription it runs on has Auto Resume on Reset on
+            (accounts' auto_resume), so it's resumed a minute after the limit resets. Null once anything's sent
+            to it, it's cancelled (resume_cancel), or the subscription's disabled or no longer resumes its
+            chats.
         held (array of HeldMessage): Messages held for it, oldest first.
         senders (integer): Its sender store's revision (0 for none): what a head's copy is checked against.
         always_allow (array of string): The tools allowed whenever it asks for them, sorted.
@@ -1759,6 +1764,8 @@ class AccountsReply(Obj):
             for Claude's CLI's own sign-in, "codex" for Codex's): their chats can't send.
         auto_disable (array of string): The subscriptions whose auto-disable is on, by usage key: disabled as
             they're exhausted.
+        auto_resume (array of string): The subscriptions whose Auto Resume on Reset is on, by usage key: a chat
+            of theirs a usage limit stopped is sent a message to carry on once the limit resets.
         last_usage (object): Each Claude and Codex subscription's usage as the host last read it, by id ("" for
             Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it
             greyed till its own usage read answers.
@@ -2412,6 +2419,13 @@ class RestartPending(Obj):
     _refs = {"restart": "RestartState"}
 
 
+class ResumeCancelled(Obj):
+    """resume_cancel's answer.
+
+        session (string): The session's id.
+    """
+
+
 class Rotated(Obj):
     """rotate's answer.
 
@@ -2716,12 +2730,13 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
          "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
          "NotesReply": NotesReply, "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed,
-         "Relaying": Relaying, "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated,
-         "SeenSet": SeenSet, "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply, "Started": Started,
-         "Stopped": Stopped, "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer,
-         "TaskAnswered": TaskAnswered, "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply,
-         "TaskReported": TaskReported, "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted,
-         "TasksReply": TasksReply, "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
+         "Relaying": Relaying, "Renamed": Renamed, "RestartPending": RestartPending,
+         "ResumeCancelled": ResumeCancelled, "Rotated": Rotated, "SeenSet": SeenSet, "SendersReply": SendersReply,
+         "SignalNamesReply": SignalNamesReply, "Started": Started, "Stopped": Stopped,
+         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskAnswered": TaskAnswered,
+         "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply, "TaskReported": TaskReported,
+         "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted, "TasksReply": TasksReply,
+         "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
          "TelemetrySetReply": TelemetrySetReply, "TerminalEnd": TerminalEnd, "TerminalOpened": TerminalOpened,
          "TerminalOut": TerminalOut, "TerminalsReply": TerminalsReply, "ThemeRemoved": ThemeRemoved,
          "ThemeSaved": ThemeSaved, "ThemesReply": ThemesReply, "TranscriptReply": TranscriptReply,
@@ -3393,24 +3408,26 @@ class Ops(Area):
         sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-
         disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or
         extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so;
-        enabled again only by hand); use another for a chat (session, id; "" for the CLI's own sign-in: its agent
-        started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its
-        provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of
-        provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign
-        in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're
-        written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device
-        code's), its state coming as it goes (login: the page to open, and the device code's code to enter there);
-        then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this
-        connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser
-        sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave,
-        or error). Each other is answered with accounts.
+        enabled again only by hand); turn its auto-resume on or off (auto_resume: id or "" with provider, and on: a
+        chat of its a usage limit stopped is sent a message to carry on a minute after the limit resets, unless it's
+        disabled then); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again
+        under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's
+        models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's
+        where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again;
+        Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page
+        to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state
+        coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the
+        connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code:
+        no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one
+        this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is
+        answered with accounts.
 
-            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'disable' | 'auto_disable' | 'use' | 'usage'
-                | 'sign_in' | 'code' | 'callback'): What to do.
-            provider ('claude' | 'codex'): add, sign_in (a new account): whose. usage, disable and auto_disable
-                with id "": whose CLI's own sign-in (Claude's where left out).
-            id (string): rename, token, remove, disable, auto_disable, use, usage, sign_in: the account ("" for
-                the CLI's own sign-in, disable, auto_disable, use and usage only).
+            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'disable' | 'auto_disable' | 'auto_resume' |
+                'use' | 'usage' | 'sign_in' | 'code' | 'callback'): What to do.
+            provider ('claude' | 'codex'): add, sign_in (a new account): whose. usage, disable, auto_disable and
+                auto_resume with id "": whose CLI's own sign-in (Claude's where left out).
+            id (string): rename, token, remove, disable, auto_disable, auto_resume, use, usage, sign_in: the
+                account ("" for the CLI's own sign-in, disable, auto_disable, auto_resume, use and usage only).
             session (string): use: the chat whose account it is, one of the host's sessions whose model is the
                 account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in
                 (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat
@@ -3425,7 +3442,8 @@ class Ops(Area):
             folder (string): add (Claude): an existing Claude config folder on the host, signed in (claude auth
                 status says so, run with it).
             on (boolean): disable: true to disable it, false to enable it again; auto_disable: whether it's
-                disabled as it's exhausted.
+                disabled as it's exhausted. auto_resume: whether its chats a usage limit stopped are resumed as
+                it resets.
             code (string): code: what the sign-in page showed, pasted.
             method ('browser' | 'device'): sign_in, Codex's: browser (the default: codex login, its page sending
                 the browser back to the host's 127.0.0.1) or device (codex login --device-auth).
@@ -4158,6 +4176,14 @@ class Ops(Area):
                 short; pause: no restart while this head holds it (till it says free, or its connection goes).
         """
         return self._call("restart", {"do": do}, host, Obj)
+
+    def resume_cancel(self, *, session=None, host=None):
+        """resume_cancel (ResumeCancel): A session's resume after a usage limit (its listing's resume_at) let go of:
+        nothing's sent to it as the limit resets.
+
+            session (string): The session's id.
+        """
+        return self._call("resume_cancel", {"session": session}, host, Obj)
 
     def rotate(self, *, session=None, model=None, effort=None, host=None):
         """rotate (Rotate): A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-

@@ -28,7 +28,8 @@
     "Subscriptions.kt:CodexCard",
     "baudelib/accounts.py:set_switch",
     "baudelib/accounts.py:exhausted",
-    "baudelib/serversessions.py:subscription_disabled"
+    "baudelib/serversessions.py:subscription_disabled",
+    "baudelib/accounts.py:set_auto_resume"
   ],
   "copy": [
     "subscriptions",
@@ -90,7 +91,7 @@
           "actions": [
             {
               "by": "click ⋮",
-              "does": "Menu: an account's Rename…, Sign In Again… (Replace Token… for a token account); then every card's Disable (Enable where it's disabled) and Auto Disable on Exhaustion (a check item, ticked where it's on); then an account's Remove…. Disable and Enable, and Auto Disable on Exhaustion, are said to the host at once (accounts disable / auto_disable, the card's id, \"\" with provider for CLI default, and on), and the card drawn again from its answer (disabled, auto_disable)"
+              "does": "Menu: an account's Rename…, Sign In Again… (Replace Token… for a token account); then every card's Disable (Enable where it's disabled), Auto Disable on Exhaustion and Auto Resume on Reset (check items, ticked where they're on); then an account's Remove…. Disable and Enable, Auto Disable on Exhaustion and Auto Resume on Reset are said to the host at once (accounts disable / auto_disable / auto_resume, the card's id, \"\" with provider for CLI default, and on), and the card drawn again from its answer (disabled, auto_disable, auto_resume)"
             },
             {
               "by": "(none)",
@@ -119,6 +120,7 @@
             "subscriptions.disable",
             "subscriptions.enable",
             "subscriptions.auto_disable",
+            "subscriptions.auto_resume",
             "subscriptions.disabled"
           ],
           "decisions": [
@@ -213,6 +215,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#281"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#307, paraphrased) a chat that stops because its five-hour usage limit is used up should carry on by itself once the limit resets",
+              "rule": "Every app's Subscriptions page has Auto Resume on Reset in each subscription's ⋮ (a check item, off until turned on); while it's on, a chat on that subscription whose turn a usage limit stops is sent \"Continue where you left off: the usage limit has reset.\" by its host a minute after the limit resets, over a host restart, unless something is sent to it first, it's cancelled, the switch is turned off, or the subscription is disabled by hand (a subscription disabled by hand is never resumed onto or enabled again by itself). Where Auto Disable on Exhaustion is on too, the subscription that disabled itself as it was exhausted is enabled again a minute after the limit resets (a by-hand Enable or Disable forgets that it disabled itself), and its chats are resumed then; their line stays meanwhile. A chat whose resumes keep being refused again waits at least 5 minutes after each (doubling), and is let be after three in a row with no turn going through; a scheduled task run's chat isn't resumed (its schedule runs it again). Every app's chat says when at its end (\"Resumes at 3:20 PM\", with the day where it isn't today) with Cancel beside it.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#307"
                 }
               ]
             }

@@ -1568,6 +1568,19 @@ object Mesh {
         }
     }
 
+    /** A chat's resume after a usage limit (its resume_at) cancelled on its host, as Baude's cancel_resume: the line
+     * gone as its listing says so; why not, if it isn't. */
+    fun resumeCancel(chat: Chat) {
+        val c = conns[chat.hostId] ?: return
+        c.request(Msg.ResumeCancel(session = chat.sid).json()) { r ->
+            main.post {
+                if (r.optString("op") == Op.ERROR)
+                    Toast.makeText(app, Wording.LimitResume.notCancelled(why = Msg.Error.from(r).said.orEmpty()
+                        .ifBlank { Wording.BotBrowser.hostSaidNo }), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     /** The message made (base64 and all, off the main thread), with the uuid it's sent by: null if there's nothing
      * in it. */
     private fun build(id: String, text: String, files: List<Picked>): JSONObject? {

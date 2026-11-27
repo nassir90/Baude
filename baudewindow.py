@@ -823,7 +823,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.get_parent().remove(row)
         self.cut_row = None
         if not cut:
-            return
+            return self.show_resume(self.resume_state())
         row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
         row.add_css_class("cut-note")
         going = getattr(self, "cut_continuing", False)  # (Continue pressed, the turn not started yet: said, not asked)
@@ -839,6 +839,52 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.append(go)
         self.transcript.append(row)
         self.cut_row = row
+        self.show_resume(self.resume_state())  # (after it: last)
+
+    # ---- a turn a usage limit stopped, resumed by the chat's host once the limit resets (hostresume): said at the
+    # chat's end, with Cancel, till it's sent or cancelled
+    def resume_state(self):
+        """When this chat's host will carry it on after a usage limit (its listing's resume_at), or None."""
+        if self.remote is None:
+            return None
+        return (self.remote.sessions.get(self.session_id) or {}).get("resume_at")
+
+    def show_resume(self, at=None):
+        """The line at the chat's end that says when its host resumes it ("Resumes at 3:20 PM"), and its Cancel (at:
+        when, as resume_state; None, gone), put last again if it's there already."""
+        row = getattr(self, "resume_row", None)
+        if row is not None and row.get_parent() is not None:
+            row.get_parent().remove(row)
+        self.resume_row, self.resume_shown = None, at
+        if not at:
+            return
+        import subscriptionpage
+        row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
+        row.add_css_class("cut-note")
+        said = Gtk.Label(label=subscriptionpage.resume_line(at), xalign=0)
+        said.add_css_class("dim-label")
+        cancel = Gtk.Button(label=wording.say("common.cancel"))
+        cancel.connect("clicked", lambda *_: self.cancel_resume())
+        row.append(said)
+        row.append(cancel)
+        self.transcript.append(row)
+        self.resume_row = row
+
+    def cancel_resume(self):
+        """Cancel: the chat's host told not to resume it; the line gone as its listing says so."""
+        sid, r = self.session_id, self.remote
+        if r is None or not sid:
+            return
+        self.show_resume(None)
+
+        def done(answer):
+            from baudelib import wire
+            if answer.get("op") == "error":
+                widgets.toast(self, wording.say("limit_resume.not_cancelled",
+                                                why=wire.said(answer) or wording.say("bot_browser.host_said_no")))
+                if self.session_id == sid:
+                    self.show_resume(self.resume_state())
+        r.request({"op": "resume_cancel", "session": sid}, done)
 
     def continue_cut(self):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""

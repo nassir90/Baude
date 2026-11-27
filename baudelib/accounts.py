@@ -63,6 +63,8 @@ def database():
             db.execute("CREATE TABLE IF NOT EXISTS defaults (provider TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS switches (key TEXT PRIMARY KEY, disabled INTEGER, auto INTEGER)")
+            db.execute("CREATE TABLE IF NOT EXISTS resumes (key TEXT PRIMARY KEY)")  # (Auto Resume on Reset's: on)
+            db.execute("CREATE TABLE IF NOT EXISTS autooff (key TEXT PRIMARY KEY, until REAL)")  # (disabled by itself)
             yield db
     finally:
         db.close()
@@ -81,7 +83,9 @@ def _known():
             sessions = dict(db.execute("SELECT session,profile FROM sessions"))
             switches = {k: {"disabled": bool(d), "auto_disable": bool(a)}
                         for k, d, a in db.execute("SELECT key,disabled,auto FROM switches")}
-        _cache.update(mtime=mtime, sessions=sessions, switches=switches,
+            resumes = {k for (k,) in db.execute("SELECT key FROM resumes")}
+            autooff = dict(db.execute("SELECT key,until FROM autooff"))
+        _cache.update(mtime=mtime, sessions=sessions, switches=switches, resumes=resumes, autooff=autooff,
                       accounts={i: {"id": i, "provider": p, "name": n, "kind": k} for i, p, n, k, _c in rows},
                       folders={i: c for i, _p, _n, k, c in rows if k == "folder"})
     return _cache["accounts"], _cache["sessions"], _cache["folders"]
@@ -103,6 +107,39 @@ def disabled(key):
     return switches().get(key, {}).get("disabled", False)
 
 
+def auto_resume(key=None):
+    """Whether a subscription (usage key) resumes its chats a usage limit stopped once the limit resets (Auto Resume
+    on Reset); key None: the usage keys of every one that does."""
+    _known()
+    on = _cache.get("resumes", set())
+    return set(on) if key is None else key in on
+
+
+def set_auto_resume(key, on):
+    """A subscription's (usage key's) Auto Resume on Reset turned on or off."""
+    check_key(key)
+    with database() as db:
+        if on:
+            db.execute("INSERT OR REPLACE INTO resumes VALUES (?)", (key,))
+        else:
+            db.execute("DELETE FROM resumes WHERE key=?", (key,))
+
+
+def auto_off(key=None):
+    """Whether a subscription (usage key) was disabled by itself as it was exhausted (not by hand), and not enabled
+    since: {until} (seconds since 1970 it's to be enabled again, or None where that isn't known), else None; key None:
+    every such one's, by usage key."""
+    _known()
+    marks = {k: {"until": u} for k, u in _cache.get("autooff", {}).items() if switches().get(k, {}).get("disabled")}
+    return marks if key is None else marks.get(key)
+
+
+def mark_auto_off(key, until):
+    """A subscription (usage key) disabled by itself till when (seconds since 1970, or None: not known)."""
+    with database() as db:
+        db.execute("INSERT OR REPLACE INTO autooff VALUES (?,?)", (key, until))
+
+
 def check_key(key):
     """A usage key that names a subscription here: the CLI's own sign-in's ("" or CODEX_CLI), or an account's id;
     ValueError for one that doesn't."""
@@ -122,17 +159,21 @@ def set_switch(key, disabled=None, auto_disable=None):
             db.execute("INSERT OR REPLACE INTO switches VALUES (?,?,?)", (key, int(now[0]), int(now[1])))
         else:
             db.execute("DELETE FROM switches WHERE key=?", (key,))
+        if disabled is not None:  # (by hand, or enabled again: not disabled by itself)
+            db.execute("DELETE FROM autooff WHERE key=?", (key,))
 
 
-def exhausted(key):
+def exhausted(key, until=None):
     """A subscription (usage key) seen exhausted (its limit used up, or extra usage being billed): disabled, if
-    its auto-disable switch is on and it isn't already. Whether it was disabled now."""
+    its auto-disable switch is on and it isn't already, remembered as disabled by itself (auto_off) till until (seconds
+    since 1970 its limit resets, with a margin: None where that isn't known). Whether it was disabled now."""
     if not _path().exists():
         return False
     mine = switches().get(key)
     if not mine or not mine["auto_disable"] or mine["disabled"]:
         return False
     set_switch(key, disabled=True)
+    mark_auto_off(key, until)
     return True
 
 
@@ -144,6 +185,15 @@ def limits_exhausted(limits, provider="claude"):
     subscription's (WHOLE_WINDOWS), not a model's; any of Codex's own windows."""
     return any(isinstance(p, (int, float)) and p >= 100 and "overage" not in str(k) and
                (provider != "claude" or k in WHOLE_WINDOWS) for k, p, *_ in limits or ())
+
+
+def limits_reset(limits, provider="claude"):
+    """When the used-up windows of a subscription's limits (limits_exhausted) are all reset (the latest of them:
+    seconds since 1970), or None where none says."""
+    times = [r for k, p, *rest in limits or () for r in rest[:1] if isinstance(r, (int, float)) and
+             isinstance(p, (int, float)) and p >= 100 and "overage" not in str(k) and
+             (provider != "claude" or k in WHOLE_WINDOWS)]
+    return max(times) if times else None
 
 
 def codex_exhausted(snapshot):
@@ -317,6 +367,8 @@ def remove(profile, exe=None):
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
         db.execute("DELETE FROM switches WHERE key=?", (profile,))
+        db.execute("DELETE FROM resumes WHERE key=?", (profile,))
+        db.execute("DELETE FROM autooff WHERE key=?", (profile,))
     _drop_usage(profile, gone=True)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():

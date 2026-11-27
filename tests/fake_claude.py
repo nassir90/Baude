@@ -180,12 +180,26 @@ def record(line):
 OUT_LOCK = threading.Lock()  # background tasks write from timer threads
 
 
+def limited():
+    """When the five-hour limit refusing every turn resets (FAKE_CLAUDE_RESETS_AT, seconds since 1970, with
+    FAKE_CLAUDE_FIVE_HOUR 1 or more), while it's still to come; else None."""
+    at = float(os.environ.get("FAKE_CLAUDE_RESETS_AT") or 0)
+    return int(at) if float(os.environ.get("FAKE_CLAUDE_FIVE_HOUR") or 0) >= 1 and time.time() < at else None
+
+
 def rate_limit_event():
     """What claude says of its account's limits as a request's answer's headers say them (once per turn here, before
     its result): utilization a fraction, resetsAt in seconds since 1970; FAKE_CLAUDE_FIVE_HOUR, the five-hour
-    window's (1 or more: used up, extra usage billed)."""
+    window's (1 or more: used up, extra usage billed; with FAKE_CLAUDE_RESETS_AT, refused till then, and fresh after)."""
     now = int(time.time())
     used = float(os.environ.get("FAKE_CLAUDE_FIVE_HOUR") or 0.42)
+    if os.environ.get("FAKE_CLAUDE_RESETS_AT"):
+        refused = limited()
+        resets, used = (refused, used) if refused else (now + 5 * 3600, 0.01)
+        return {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "rejected" if refused else "allowed", "resetsAt": resets, "rateLimitType": "five_hour",
+            "utilization": used, "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled",
+            "isUsingOverage": False}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
     return {"type": "rate_limit_event", "rate_limit_info": {
         "status": "allowed", "resetsAt": now + 3 * 3600, "rateLimitType": "five_hour", "utilization": used,
         "unifiedWindows": {"five_hour": {"utilization": used, "resetsAt": now + 3 * 3600, "status": "allowed"},
@@ -376,6 +390,19 @@ def linger(n, slow):
 
 EXPIRED = ("Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` "
            "to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs")
+
+
+def refused(n):
+    """A turn the five-hour limit refuses, as claude says it (limited): its rate_limit_event rejected, the message
+    it writes in place of a reply, and the turn's error."""
+    at = time.localtime(limited())
+    said = f"You've hit your 5-hour limit · resets {time.strftime('%I:%M', at).lstrip('0')}" \
+           f"{time.strftime('%p', at).lower()} (Europe/Dublin)"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "error": "rate_limit",
+         "message": {"id": f"limit{n}", "model": "<synthetic>", "role": "assistant",
+                     "content": [{"type": "text", "text": said}]}})
+    out({"type": "result", "subtype": "success", "is_error": True, "session_id": SESSION, "result": said,
+         "total_cost_usd": 0, "num_turns": 1, "duration_ms": 90, "usage": {"input_tokens": 0, "output_tokens": 0}})
 
 
 def expired(n):
@@ -1047,7 +1074,9 @@ def main():
                 result("side answer")
                 continue
             answer = next((a for k, a in json.loads(os.environ.get("FAKE_ANSWERS") or "{}").items() if k in text), None)
-            if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
+            if limited() is not None:  # (the five-hour limit used up: every turn refused till it resets)
+                refused(turns)
+            elif answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
                 say(answer, f"answer{turns}")
                 result(answer)
             elif re.search(r"An instance of the '.*' task (failed|finished|asks:)|You haven't answered run", text):

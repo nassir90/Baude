@@ -469,6 +469,8 @@ class WindowRemote:
         self.update_session_state()
         if bool(self.cut_state()) != (getattr(self, "cut_row", None) is not None):
             self.show_cut(self.cut_state())
+        if self.resume_state() != getattr(self, "resume_shown", None):
+            self.show_resume(self.resume_state())
         self.tell_seen()  # (its turn's end listed, in front of you: seen)
 
     def remote_view(self):

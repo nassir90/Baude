@@ -4,8 +4,9 @@ Databases are), changed there through its accounts op (hostaccounts): for each p
 Token…, Remove…; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
-the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
-host has no claude, it's a token from claude setup-token. A Codex account is signed in to with codex login run
+the host with the account's own folder: the page to open shown as a link, and a box for the code it shows; or added
+with a pasted token from claude setup-token or an Anthropic API key (the only way where the host has no claude), or an
+existing signed-in folder there (_Source's Login | Token | Folder). A Codex account is signed in to with codex login run
 on the host, as a card (CodexLogin): the browser's by default (its page's link; for another machine's host, the
 address the browser ends on passed back to it), or the device code's (its page's link and the code to enter there),
 as the host says them. Also the chat's Sign in card's token box for a chat under a
@@ -354,7 +355,8 @@ class Page(Adw.PreferencesPage):
                 elif reply.get("usage"):
                     self.usage[profile] = _limits(reply["usage"])
                 else:
-                    self.usage[profile] = wording.say("subscriptions.usage_unavailable")
+                    self.usage[profile] = wording.say("subscriptions.no_limits" if reply.get("api_key") else
+                                                      "subscriptions.usage_unavailable")
                 self.fill_bars(profile)
             self.ask({"what": "usage", "provider": "codex", "id": ""} if profile == CODEX_CLI else
                      {"what": "usage", "id": profile}, done)
@@ -558,7 +560,8 @@ class MenuUsage(Gtk.Button):
         elif reply.get("usage"):
             self.show_read(_limits(reply["usage"]), None)
         else:
-            self.show_read(None, wording.say("subscriptions.usage_unavailable"))
+            self.show_read(None, wording.say("subscriptions.no_limits" if reply.get("api_key") else
+                                             "subscriptions.usage_unavailable"))
         return False
 
     def show_read(self, limits, said, stale=False):
@@ -620,46 +623,62 @@ def _send(page, dialog, submit, say, msg, inputs=()):
 
 
 class _Source:
-    """An Add account dialog's choice between a new login and an existing signed-in folder on the host: two linked
-    toggles (New login first, picked), the folder's box shown only under Existing folder; the dialog's button says
-    which it does (sign_in, else use)."""
+    """An Add account dialog's choice of how the account signs in: three linked toggles, Login (first, picked), Token
+    and Folder. Token shows a password box for a token or API key (hint), the dialog's button Add account, usable once
+    something's typed; Folder shows the existing signed-in folder's box (folder_hint), the button use; Login neither,
+    the button sign_in."""
 
-    def __init__(self, form, hint, submit, sign_in, use, save):
+    def __init__(self, form, folder_hint, token_hint, submit, sign_in, use, save):
         self.submit, self.sign_in, self.use, self.changed = submit, sign_in, use, None
         self.new = Gtk.ToggleButton(label=wording.say("subscriptions.new_login"), active=True)
-        self.existing = Gtk.ToggleButton(label=wording.say("subscriptions.existing_folder"), group=self.new)
+        self.keyed = Gtk.ToggleButton(label=wording.say("subscriptions.token_tab"), group=self.new)
+        self.existing = Gtk.ToggleButton(label=wording.say("common.folder"), group=self.new)
         self.tabs = Gtk.Box(css_classes=["linked"], homogeneous=True)
-        self.tabs.append(self.new)
-        self.tabs.append(self.existing)
-        self.folder = Gtk.Entry(placeholder_text=wording.say(hint), visible=False)
+        for t in (self.new, self.keyed, self.existing):
+            self.tabs.append(t)
+        self.token = Gtk.PasswordEntry(placeholder_text=wording.say(token_hint), show_peek_icon=True, visible=False)
+        self.token.connect("activate", save)
+        self.token.connect("changed", lambda *_: self.picked(False))
+        self.folder = Gtk.Entry(placeholder_text=wording.say(folder_hint), visible=False)
         self.folder.connect("activate", save)
-        self.existing.connect("toggled", lambda *_: self.picked())
+        for t in (self.keyed, self.existing):
+            t.connect("toggled", lambda t: t.get_active() and self.picked())
+        self.new.connect("toggled", lambda t: t.get_active() and self.picked())
         form.append(self.tabs)
+        form.append(self.token)
         form.append(self.folder)
         self.picked()
 
-    def picked(self):
+    def picked(self, moved=True):
         """The tab picked: its box and the dialog's button; a failed sign-in's card let go (changed), the dialog's
-        own button back in place of its Try Again."""
-        if self.changed is not None:
+        own button back in place of its Try Again. moved False: only the token typed changed."""
+        if moved and self.changed is not None:
             self.changed()
-        on = self.existing.get_active()
+        keyed, on = self.keyed.get_active(), self.existing.get_active()
+        self.token.set_visible(keyed)
         self.folder.set_visible(on)
-        self.submit.set_label(wording.say(self.use if on else self.sign_in))
-        if on:
+        self.submit.set_label(wording.say("subscriptions.add_account" if keyed else self.use if on else self.sign_in))
+        self.submit.set_sensitive(not keyed or bool(self.token.get_text().strip()))
+        if moved and keyed:
+            self.token.grab_focus()
+        elif moved and on:
             self.folder.grab_focus()
 
     def path(self):
-        """The folder typed, where Existing folder's picked; else ""."""
+        """The folder typed, where Folder's picked; else ""."""
         return self.folder.get_text().strip() if self.existing.get_active() else ""
 
+    def key(self):
+        """The token typed, trimmed, where Token's picked; else None."""
+        return self.token.get_text().strip() if self.keyed.get_active() else None
+
     def inputs(self):
-        return (self.new, self.existing, self.folder)
+        return (self.new, self.keyed, self.existing, self.token, self.folder)
 
 
 def add_claude(page):
-    """Add account (Claude): signed in with claude auth login run on the host with a folder of the account's own (or
-    an existing signed-in folder there); a token from claude setup-token where the host has no claude."""
+    """Add account (Claude): signed in with claude auth login run on the host with a folder of the account's own, a
+    pasted token or API key, or an existing signed-in folder there; only a token where the host has no claude."""
     if not page.claude_cli:
         return add_claude_token(page)
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_claude"),
@@ -671,6 +690,12 @@ def add_claude(page):
         label = name.get_text().strip()
         if not label:
             return name.grab_focus()
+        if (key := source.key()) is not None:
+            if not key:
+                return source.token.grab_focus()
+            login.cancelled()
+            return _send(page, dialog, submit, say, {"what": "add", "provider": "claude", "name": label,
+                                                     "token": key}, (name, *source.inputs()))
         if source.existing.get_active():
             if not source.path():
                 return source.folder.grab_focus()
@@ -679,8 +704,8 @@ def add_claude(page):
                                                      "folder": source.path()}, (name, *source.inputs()))
         say("")
         login.start({"what": "sign_in", "provider": "claude", "name": label})
-    source = _Source(form, "subscriptions.claude_folder_hint", submit, "sign_in.sign_in", "subscriptions.use_folder",
-                     save)
+    source = _Source(form, "subscriptions.claude_folder_hint", "subscriptions.token_hint", submit, "sign_in.sign_in",
+                     "subscriptions.use_folder", save)
     login = _ClaudeLogin(page, dialog, submit, (name, *source.inputs()), save)
     source.changed = login.dismiss
     for w in (login, status, submit):
@@ -810,15 +835,19 @@ class _ClaudeLogin(Gtk.Box):
 
 def add_claude_token(page):
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_claude"),
-                                              wording.say("subscriptions.save_account"))
+                                              wording.say("subscriptions.add_account"))
     name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
     token = Gtk.PasswordEntry(placeholder_text=wording.say("subscriptions.token_hint"), show_peek_icon=True)
+    submit.set_sensitive(False)
+    token.connect("changed", lambda *_: submit.set_sensitive(bool(token.get_text().strip())))
     for w in (name, token, status, submit):
         form.append(w)
 
     def save(*_):
         if not name.get_text().strip():
             return name.grab_focus()
+        if not token.get_text().strip():
+            return token.grab_focus()
         _send(page, dialog, submit, say, {"what": "add", "provider": "claude", "name": name.get_text().strip(),
                                           "token": token.get_text().strip()}, (name, token))
     submit.connect("clicked", save)
@@ -837,6 +866,12 @@ def add_codex(page):
         label = name.get_text().strip()
         if not label:
             return name.grab_focus()
+        if (key := source.key()) is not None:
+            if not key:
+                return source.token.grab_focus()
+            card.cancelled()
+            return _send(page, dialog, submit, say, {"what": "add", "provider": "codex", "name": label,
+                                                     "token": key}, (name, *source.inputs()))
         if source.existing.get_active():
             if not source.path():
                 return source.folder.grab_focus()
@@ -845,8 +880,8 @@ def add_codex(page):
                                                      "home": source.path()}, (name, *source.inputs()))
         say("")
         card.start({"what": "sign_in", "name": label}, label)
-    source = _Source(form, "subscriptions.codex_home_hint", submit, "sign_in.sign_in", "subscriptions.use_profile",
-                     save)
+    source = _Source(form, "subscriptions.codex_home_hint", "subscriptions.openai_key_hint", submit, "sign_in.sign_in",
+                     "subscriptions.use_profile", save)
     card = CodexLogin(page, submit, (name, *source.inputs()), save)
     source.changed = card.dismiss
     for w in (card, status, submit):

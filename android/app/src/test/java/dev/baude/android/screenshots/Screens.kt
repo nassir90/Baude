@@ -212,7 +212,7 @@ abstract class Screens(private val theme: String) {
         withMenus("05b-subscriptions-menu")
     }
 
-    // (Add account (Claude) on workshop, each step: New login, Existing folder, starting, the page's link with the code
+    // (Add account (Claude) on workshop, each step: Login, Token (empty, then typed), Folder, starting, the page's link with the code
     // box, a code typed, what claude said of it, failed)
     @Test fun subscriptionsSignIn() {
         accountsFixture()
@@ -224,6 +224,13 @@ abstract class Screens(private val theme: String) {
         }
         laidOut()
         screen("05c-subscriptions-claude-new-login")
+        login.keyed.value = true
+        laidOut()
+        screen("05c-subscriptions-claude-token-empty")
+        login.token.value = "sk-ant-oat01-fixture"
+        laidOut()
+        screen("05c-subscriptions-claude-token")
+        login.keyed.value = false
         login.existing.value = true
         login.folder.value = "/srv/claude-work"
         laidOut()
@@ -248,7 +255,7 @@ abstract class Screens(private val theme: String) {
         login.failed.value = "Login failed: Invalid code"
         laidOut()
         screen("05d-subscriptions-sign-in-failed")
-        tap("Existing folder") // (the dialog's own button back in place of Try Again)
+        tap("Folder") // (the dialog's own button back in place of Try Again)
         laidOut()
         screen("05d-subscriptions-sign-in-failed-then-folder")
     }
@@ -266,6 +273,11 @@ abstract class Screens(private val theme: String) {
         }
         laidOut()
         screen("05k-codex-new-login")
+        login.keyed.value = true
+        login.token.value = "sk-proj-fixture-not-a-real-key"
+        laidOut()
+        screen("05k-codex-token")
+        login.keyed.value = false
         login.existing.value = true
         login.home.value = "/srv/codex-work"
         laidOut()

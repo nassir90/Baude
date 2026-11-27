@@ -109,7 +109,8 @@
             "subscriptions.weekly_limit",
             "subscriptions.weekly_limit_today",
             "subscriptions.other_limit",
-            "subscriptions.other_limit_today"
+            "subscriptions.other_limit_today",
+            "subscriptions.no_limits"
           ],
           "decisions": [
             {
@@ -192,12 +193,11 @@
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a two-way switcher, New login (picked) and Existing folder; under Existing folder only, \"Signed-in Claude folder\"; the accent button Sign in (Use signed-in folder under Existing folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste a token from claude setup-token or an API key\" and the accent button Add account (usable once something is typed), which adds the account on the host with that token (a setup token, sk-ant-oat…, or an Anthropic API key, sk-ant-api…; anything else is refused with \"Enter a Claude setup token or an Anthropic API key\" under the fields); under Folder only, \"Signed-in Claude folder\"; the accent button Sign in under Login (Use signed-in folder under Folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry \"Paste a token from claude setup-token or an API key\", Add account (usable once something is typed), Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
         "subscriptions.token_hint",
-        "subscriptions.save_account",
         "common.close",
         "subscriptions.claude_folder_hint",
         "subscriptions.use_folder",
@@ -211,17 +211,20 @@
         "subscriptions.no_claude",
         "subscriptions.not_signed_in_folder",
         "subscriptions.new_login",
-        "subscriptions.existing_folder",
+        "common.folder",
         "common.continue",
         "common.cancel",
         "common.try_again",
         "sign_in.signing_in",
-        "sign_in.failed"
+        "sign_in.failed",
+        "subscriptions.token_tab",
+        "subscriptions.add_account",
+        "subscriptions.enter_token"
       ],
       "decisions": [
         {
           "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
-          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token (or an API key) can also be pasted on any host (the Token tab), and is the only way where claude can't be guaranteed: a host without claude, and the phone as a host",
           "decided": "2026-11-25",
           "source": [
             {
@@ -229,19 +232,34 @@
               "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
             }
           ]
+        },
+        {
+          "said": "We need TOKEN auth in addition so -> Login | Token | Folder.",
+          "rule": "Every app's Add account dialog (Claude's and Codex's) has three tabs, Login | Token | Folder, Login picked when it opens. Token takes a pasted secret in a masked box, with one accent button, Add account, usable once something is typed: for Claude a long-lived token from claude setup-token or an Anthropic API key (told apart by its sk-ant-api start), for Codex an OpenAI API key. The host checks it (trimmed, non-empty, its known start) and says plainly why one is refused; it is kept only on the host, owner-only, and never said back on the wire, in listings, logs or meta. An API-key account's usage says it has no subscription limits instead of an error",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "cbf5d0ed-bd77-4270-ab92-65bc911f3f39"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Add Codex account dialog",
-      "shows": "Heading \"Add Codex account\"; \"Account name\"; a two-way switcher, New login (picked) and Existing folder; under Existing folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in (Use signed-in profile under Existing folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it.",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste an OpenAI API key\" and the accent button Add account (usable once something is typed), which adds the account on the host as a new CODEX_HOME of its own whose auth.json holds the key as codex login --with-api-key writes it (anything not starting sk- is refused with \"Enter an OpenAI API key\"); under Folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in under Login (Use signed-in profile under Folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it.",
       "copy": [
         "subscriptions.add_codex",
         "subscriptions.codex_home_hint",
         "sign_in.sign_in",
         "subscriptions.use_profile",
         "subscriptions.new_login",
-        "subscriptions.existing_folder"
+        "common.folder",
+        "subscriptions.token_tab",
+        "subscriptions.openai_key_hint",
+        "subscriptions.add_account",
+        "subscriptions.enter_openai_key"
       ],
       "parts": [
         {
@@ -463,7 +481,7 @@
     },
     {
       "said": "(BaudeInternal#279, paraphrased) Claude's sign-in shows Send beside Sign In, which is redundant; once sign-in has started, Sign In should give way to the next step (Continue, the accent button, where a code is needed), as Codex's does; both sign-in flows should make sense",
-      "rule": "Every app's Claude and Codex sign-ins (Add account, Sign In Again, and a chat's Sign in card) go one step at a time, the same shape for both: the dialog's own button (Sign in, or Use signed-in folder/profile) goes once sign-in starts, and the sign-in shows as a card (a bold title, a line, then what can be done now). At each step at most one button is the accent one, labelled for what it does next: Continue beside the code box (Claude, shown once the page's link is) or the address box (Codex), usable once something is typed and not while what was sent is checked; Copy beside a device code; Try Again once it failed; changing New login / Existing folder after a failure puts the dialog's own button back in its place. No two buttons do the same thing; Cancel, Use a device code instead and Close are never the accent one. While the sign-in only waits on the browser, no button is the accent one",
+      "rule": "Every app's Claude and Codex sign-ins (Add account, Sign In Again, and a chat's Sign in card) go one step at a time, the same shape for both: the dialog's own button (Sign in, or Use signed-in folder/profile) goes once sign-in starts, and the sign-in shows as a card (a bold title, a line, then what can be done now). At each step at most one button is the accent one, labelled for what it does next: Continue beside the code box (Claude, shown once the page's link is) or the address box (Codex), usable once something is typed and not while what was sent is checked; Copy beside a device code; Try Again once it failed; changing Login / Token / Folder after a failure puts the dialog's own button back in its place. No two buttons do the same thing; Cancel, Use a device code instead and Close are never the accent one. While the sign-in only waits on the browser, no button is the accent one",
       "decided": "2026-11-27",
       "source": [
         {
@@ -473,7 +491,7 @@
     },
     {
       "said": "(BaudeInternal#279, paraphrased) the existing folder path box is always shown though it's rarely filled in; a tab-like choice between New login and an existing folder would be better",
-      "rule": "Every app's Add account dialog (Claude's on a host with claude, and Codex's) puts a two-way switcher under the account name: New login (first, picked when it opens) and Existing folder; the folder's path box shows only under Existing folder, and the dialog's button says Sign in or Use signed-in folder/profile to match; with Existing folder picked and its box empty, the button focuses the box",
+      "rule": "Every app's Add account dialog (Claude's on a host with claude, and Codex's) puts a switcher under the account name: Login (first, picked when it opens), Token and Folder; the folder's path box shows only under Folder, the token's only under Token, and the dialog's button says Sign in, Add account or Use signed-in folder/profile to match; with Folder picked and its box empty, the button focuses the box",
       "decided": "2026-11-27",
       "source": [
         {

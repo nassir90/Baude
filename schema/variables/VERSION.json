@@ -1,4 +1,4 @@
 {
   "description": "The wire's version, as a host's hello says it.",
-  "const": 32
+  "const": 33
 }

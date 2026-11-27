@@ -103,6 +103,7 @@ class HostAccounts(val hostId: String) {
                 usage[id] = when {
                     error != null -> Usage(null, error)
                     limits != null -> Usage(limits(limits), null)
+                    Msg.AccountsReply.from(r).apiKey == true -> Usage(null, Wording.Subscriptions.noLimits)
                     else -> Usage(null, Wording.Subscriptions.usageUnavailable)
                 }
             }
@@ -422,7 +423,7 @@ private fun AccountMenu(a: Msg.Account, pick: (String) -> Unit) {
  * while a card in it says what can be done). */
 @Composable
 private fun Form(heading: String, submit: String?, done: () -> Unit, said: String?, busy: Boolean, go: () -> Unit,
-                 fields: @Composable () -> Unit) {
+                 ready: Boolean = true, fields: @Composable () -> Unit) {
     val c = LocalBaude.current
     AlertDialog(
         onDismissRequest = done,
@@ -433,7 +434,7 @@ private fun Form(heading: String, submit: String?, done: () -> Unit, said: Strin
                 said?.let { SelectionContainer { Text(it, style = Type.body, color = c.fg) } }
             }
         },
-        confirmButton = { if (submit != null) Button(submit, suggested = true, enabled = !busy, onClick = go) },
+        confirmButton = { if (submit != null) Button(submit, suggested = true, enabled = !busy && ready, onClick = go) },
         dismissButton = { Button(Wording.Common.close, onClick = done) },
         containerColor = c.dialog,
     )
@@ -471,10 +472,10 @@ private fun AddAccount(host: HostAccounts, provider: String, done: () -> Unit) {
     var said by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val go = {
-        if (name.isNotBlank()) send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(), token = token.trim()),
-            { busy = it }, { said = it }, done)
+        if (name.isNotBlank() && token.isNotBlank()) send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(),
+            token = token.trim()), { busy = it }, { said = it }, done)
     }
-    Form(Wording.Subscriptions.addClaude, Wording.Subscriptions.saveAccount, done, said, busy, go) {
+    Form(Wording.Subscriptions.addClaude, Wording.Subscriptions.addAccount, done, said, busy, go, ready = token.isNotBlank()) {
         NameField(name, { name = it }, Wording.Subscriptions.nameHint, go)
         SecretField(token, { token = it }, Wording.Subscriptions.tokenHint, go)
     }
@@ -533,7 +534,9 @@ private fun RemoveAccount(host: HostAccounts, a: Msg.Account, done: () -> Unit) 
 class CodexLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val home = mutableStateOf("")
-    val existing = mutableStateOf(false) // (Existing folder picked over New login)
+    val existing = mutableStateOf(false) // (Folder picked over Login)
+    val keyed = mutableStateOf(false) // (Token picked over Login)
+    val token = mutableStateOf("")
     val login = mutableStateOf<Msg.ChatLogin?>(null)
     val said = mutableStateOf<String?>(null) // (a signed-in CODEX_HOME's add: why it wasn't)
     val busy = mutableStateOf(false)
@@ -604,8 +607,8 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
     }
 }
 
-/** Add account (Codex) and Sign In Again… (a Codex account, id): an existing signed-in CODEX_HOME on the host (a new
- * account's only), or Codex's device-code sign-in run there (CodexLogin), as a card (CodexCard); Close lets go of it,
+/** Add account (Codex) and Sign In Again… (a Codex account, id): an OpenAI API key pasted or an existing signed-in
+ * CODEX_HOME on the host (a new account's only), or Codex's device-code sign-in run there (CodexLogin), as a card (CodexCard); Close lets go of it,
  * which stops it there. name: a new account's ("" to start), null for one signed in to again. */
 @Composable
 internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: () -> Unit,
@@ -615,12 +618,16 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
     var label by login.name
     var home by login.home
     var existing by login.existing
+    var keyed by login.keyed
+    var token by login.token
     var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
     val account = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty()
     val state = login.login.value
     val go = {
         when {
             fresh && label.isBlank() -> Unit
+            fresh && keyed -> if (token.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
+                name = label.trim(), token = token.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             fresh && existing && home.isBlank() -> { empty += 1 }
             fresh && existing -> if (home.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
                 name = label.trim(), home = home.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
@@ -628,29 +635,33 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
         }
     }
     val heading = if (fresh) Wording.Subscriptions.addCodex else Wording.Subscriptions.signInHeading(name = account)
-    Form(heading, if (state != null) null else if (fresh && existing) Wording.Subscriptions.useProfile
-        else Wording.SignIn.signIn, { login.stop(); done() }, login.said.value, login.busy.value, go) {
+    Form(heading, if (state != null) null else if (fresh && keyed) Wording.Subscriptions.addAccount
+        else if (fresh && existing) Wording.Subscriptions.useProfile else Wording.SignIn.signIn, { login.stop(); done() },
+        login.said.value, login.busy.value, go, ready = !(fresh && keyed) || token.isNotBlank()) {
         if (fresh) {
             val open = state == null || state.state == "failed"
             NameField(label, { label = it }, Wording.Subscriptions.nameHint, go, enabled = open)
-            NewOrExisting(existing, open) {
-                existing = it
+            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open) {
+                keyed = it == 1
+                existing = it == 2
                 if (state?.state == "failed") login.cancel() // (the dialog's own button back in place of Try Again)
             }
+            if (keyed) SecretField(token, { token = it }, Wording.Subscriptions.openaiKeyHint, go)
             if (existing) key(empty) { NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, enabled = open) }
         }
         if (state != null) CodexCard(login, if (fresh) label.trim() else account, go)
     }
 }
 
-/** An Add account dialog's choice between a new login and an existing signed-in folder on the host, as two segments
- * (New login first), the folder's box under it only where Existing folder's picked (subscriptionpage._Source). */
+/** An Add account dialog's choice of how the account signs in, as three segments: Login (first), Token (a token or API
+ * key's box under it, the button Add account, usable once something's typed) and Folder (an existing signed-in folder
+ * on the host: its box under it) (subscriptionpage._Source). tab: 0, 1 or 2. */
 @Composable
-private fun NewOrExisting(existing: Boolean, enabled: Boolean, pick: (Boolean) -> Unit) {
+private fun SignInTabs(tab: Int, enabled: Boolean, pick: (Int) -> Unit) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))) {
-        for ((label, on) in listOf(Wording.Subscriptions.newLogin to false, Wording.Subscriptions.existingFolder to true))
-            Box(Modifier.weight(1f).background(if (existing == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+        for ((on, label) in listOf(Wording.Subscriptions.newLogin, Wording.Subscriptions.tokenTab, Wording.Common.folder).withIndex())
+            Box(Modifier.weight(1f).background(if (tab == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
                 .clickable(enabled = enabled) { pick(on) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 Text(label, style = Type.bold, color = c.fg)
             }
@@ -736,7 +747,9 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
 class ClaudeLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val folder = mutableStateOf("")
-    val existing = mutableStateOf(false) // (Existing folder picked over New login)
+    val existing = mutableStateOf(false) // (Folder picked over Login)
+    val keyed = mutableStateOf(false) // (Token picked over Login)
+    val token = mutableStateOf("")
     val code = mutableStateOf("")
     val url = mutableStateOf<String?>(null)
     val active = mutableStateOf(false)
@@ -816,9 +829,9 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     }
 }
 
-/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): New login (claude auth login
- * run there with the account's own folder: ClaudeLogin, as a card, ClaudeCard) or, a new account's only, Existing
- * folder (a signed-in Claude folder on the host); Close stops it. */
+/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): Login (claude auth login
+ * run there with the account's own folder: ClaudeLogin, as a card, ClaudeCard) or, a new account's only, Token (a setup
+ * token or API key pasted) or Folder (a signed-in Claude folder on the host); Close stops it. */
 @Composable
 internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, login: ClaudeLogin = remember { ClaudeLogin(host, id) }) {
     DisposableEffect(login) { onDispose { login.stop() } }
@@ -826,11 +839,15 @@ internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, log
     var name by login.name
     var folder by login.folder
     var existing by login.existing
+    var keyed by login.keyed
+    var token by login.token
     var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
     val carded = login.active.value || login.failed.value != null
     val go = {
         when {
             fresh && name.isBlank() -> Unit
+            fresh && keyed -> if (token.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
+                name = name.trim(), token = token.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             fresh && existing && folder.isBlank() -> { empty += 1 }
             fresh && existing -> if (folder.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
                 name = name.trim(), folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
@@ -839,15 +856,18 @@ internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, log
     }
     val heading = if (fresh) Wording.Subscriptions.addClaude
         else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
-    Form(heading, if (carded) null else if (fresh && existing) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
-        { login.stop(); done() }, login.said.value, login.busy.value, go) {
+    Form(heading, if (carded) null else if (fresh && keyed) Wording.Subscriptions.addAccount
+        else if (fresh && existing) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
+        { login.stop(); done() }, login.said.value, login.busy.value, go, ready = !(fresh && keyed) || token.isNotBlank()) {
         if (fresh) {
             val open = !login.active.value
             NameField(name, { name = it }, Wording.Subscriptions.nameHint, go, enabled = open)
-            NewOrExisting(existing, open) {
-                existing = it
+            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open) {
+                keyed = it == 1
+                existing = it == 2
                 if (login.failed.value != null) login.cancel() // (the dialog's own button back in place of Try Again)
             }
+            if (keyed) SecretField(token, { token = it }, Wording.Subscriptions.tokenHint, go)
             if (existing) key(empty) { NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, enabled = open) }
         }
         if (carded) ClaudeCard(login, go)

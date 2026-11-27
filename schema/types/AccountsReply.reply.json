@@ -54,6 +54,10 @@
       },
       "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's)."
     },
+    "api_key": {
+      "type": "boolean",
+      "description": "usage: true where the account is signed in with an API key (paid per use), so it has no subscription limits (usage null)."
+    },
     "line": {
       "type": "string",
       "description": "sign_in (Claude's): a line the sign-in wrote (the page to open among them)."

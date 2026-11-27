@@ -146,7 +146,7 @@ def heal(head, sid):
     """A failure handed to the Bot (the fake claude) as the run's over: it sets the task's script and runs it again
     in that turn, not waiting on it; the new run's ask waits for that turn's end, answered by a turn of its own."""
     tid = head.ask({"op": "tasks", "session": sid, "set": {
-        "name": "Heal", "runtime": "python", "fallback": True, "timeout_s": 20,
+        "name": "Heal", "runtime": "python", "notify_failure": True, "timeout_s": 20,
         "script": 'print("HEAL ME")\nraise SystemExit(3)\n'}})["saved"]
     first = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]
     failed = ended(head, sid, first["id"])
@@ -167,7 +167,7 @@ def pushes(head, srv, sid, repo):
     """Two pushes while a push's run is going: both deployed, by one run after it (from the head it ran to the
     latest)."""
     tid = head.ask({"op": "tasks", "session": sid, "set": {
-        "name": "Deploy", "runtime": "python", "fallback": False, "timeout_s": 20,
+        "name": "Deploy", "runtime": "python", "notify_failure": False, "timeout_s": 20,
         "script": 'import time\nimport baudetask as task\ntask.say("deploying", task.payload["after"])\n'
                   'time.sleep(3)\n',
         "triggers": [{"kind": "git_push", "repo": repo, "branch": "main", "poll_s": 10}]}})["saved"]
@@ -218,7 +218,7 @@ def agents(head, srv, sid):
     run's log saying so too."""
     oneshot = os.path.join(os.path.dirname(HERE), "baude_oneshot.py")
     tid = head.ask({"op": "tasks", "session": sid, "set": {
-        "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "name": "Deploy with fallback", "runtime": "python", "notify_failure": False, "timeout_s": 30,
         "script": AGENTS % {"oneshot": oneshot}}})["saved"]
     rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
     got = ended(head, sid, rid)
@@ -244,7 +244,7 @@ def agents(head, srv, sid):
     assert {x["session"] for x in log} == set(chats), log
     # run by a member of the mesh: the chat it starts is judged as that member (its started_by), as its tools are
     head.ask({"op": "tasks", "session": sid, "set": {
-        "id": tid, "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "id": tid, "name": "Deploy with fallback", "runtime": "python", "notify_failure": False, "timeout_s": 30,
         "script": 'import baudetask as task\ntask.agent("Look into it.", wait=False)\n'}})
     member = {"id": "member-a", "verified": True}
     with srv.lock:
@@ -264,7 +264,7 @@ def agents(head, srv, sid):
     # a chat whose first turn is stopped: the Bot told so, and told again as its next turn finishes; not after that
     os.environ["FAKE_ANSWERS"] = json.dumps({"HELD again": "Found it: the key expired."})
     head.ask({"op": "tasks", "session": sid, "set": {
-        "id": tid, "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "id": tid, "name": "Deploy with fallback", "runtime": "python", "notify_failure": False, "timeout_s": 30,
         "script": 'import baudetask as task\ntask.agent("SUBAGENT OPEN look", wait=False, title="Held")\n'}})
     rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
     chat = ended(head, sid, rid)["run"]["chats"][0]
@@ -313,7 +313,7 @@ def restarted(head, srv, sid):
     started again tells it. The new host, once it has."""
     from baudelib.server import Server
     tid = head.ask({"op": "tasks", "session": sid, "set": {
-        "name": "Told after a restart", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "name": "Told after a restart", "runtime": "python", "notify_failure": False, "timeout_s": 30,
         "script": 'import baudetask as task\ntask.agent("HELD again", title="Told later")\n'}})["saved"]
     with srv.lock:  # (busy: what the chat says waits)
         srv.sessions[sid].busy = True
@@ -370,7 +370,7 @@ def main():
         set_ = head.ask({"op": "tasks", "session": sid, "set": {"name": f"Round {n}", "runtime": runtime,
                                                                  "script": script, "form": form,
                                                                  "triggers": triggers, "timeout_s": 20,
-                                                                 "fallback": rng.random() < 0.7}})
+                                                                 "notify_failure": rng.random() < 0.7}})
         assert set_["op"] == "tasks", set_
         fits("TasksReply", set_)
         tid = set_["saved"]

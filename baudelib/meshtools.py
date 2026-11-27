@@ -84,7 +84,8 @@ SCHEMAS = {
                                                                "fills: {field: payload key}. A git push's payload: repo, "
                                                                "branch, before, after, commit, message, author",
                                "items": {"type": "object"}},
-                  "fallback": {"type": "boolean", "description": "A failed run is handed to you (default true)"},
+                  "notify_failure": {"type": "boolean", "description": "A failed run is sent to you (default true)"},
+                  "notify_exit": {"type": "boolean", "description": "A run that finishes with exit 0 is told to you, for your information (default false)"},
                   "timeout_s": {"type": "integer"}, "paused": {"type": "boolean"},
                   "delete": {"type": "boolean", "description": "Delete the task (id)"}}, []),
     "run_task": ("Run one of your tasks now, its form filled with inputs (the rest by default). Your own task's run is started and given at once (wait true: waited for until it ends or asks you, "
@@ -450,12 +451,12 @@ class Mesh:
         if a.get("delete"):
             self.request(self.local, {"op": "tasks", "session": sid, "delete": a.get("id") or ""})
             return {"deleted": a.get("id")}
-        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "fallback", "timeout_s",
-                                  "paused") if k in a}
+        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "notify_failure", "notify_exit",
+                                  "timeout_s", "paused") if k in a}
         if a.get("id"):  # (fields left out: as they were)
             old = self.request(self.local, {"op": "task", "session": sid, "id": a["id"]})["task"]
-            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "fallback", "timeout_s",
-                                               "paused")}, **task}
+            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "notify_failure", "notify_exit",
+                                               "timeout_s", "paused")}, **task}
         got = self.request(self.local, {"op": "tasks", "session": sid, "set": task})
         return next(t for t in got["tasks"] if t["id"] == got.get("saved"))
 

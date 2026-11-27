@@ -66,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of one switch row, 'Hand failures to the Bot', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of two switch rows, 'Notify on failure' and 'Notify on graceful exit', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -74,7 +74,8 @@
         "common.delete",
         "tasks.delete_heading",
         "common.cancel",
-        "tasks.fallback",
+        "tasks.notify_failure",
+        "tasks.notify_exit",
         "tasks.triggers",
         "signal_card.inputs",
         "tasks.runs"
@@ -99,25 +100,37 @@
       ],
       "parts": [
         {
-          "name": "hand failures",
-          "shows": "Above the groups, its own small boxed list of one switch row titled 'Hand failures to the Bot' (no subtitle, title not markup), on while a failed run is handed to the Bot.",
+          "name": "notify switches",
+          "shows": "Above the groups, its own small boxed list of two switch rows (no subtitles, titles not markup). 'Notify on failure' is on while a failed run is sent to the Bot (on for a new task). 'Notify on graceful exit' is on while a run that finishes with exit 0, not stopped, is told to the Bot, for its information: the Bot isn't asked to act (off for a new task). A task kept before there were two has its one switch's value as 'Notify on failure', and 'Notify on graceful exit' off.",
           "copy": [
-            "tasks.fallback"
+            "tasks.notify_failure",
+            "tasks.notify_exit"
           ],
           "actions": [
             {
               "by": "toggle the switch",
-              "does": "saves the task at once on the host with its fallback as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
+              "does": "saves the task at once on the host with its two switches as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
             }
           ],
           "decisions": [
             {
               "said": "Hand failures to the bot toggle should be on the main task page not in some pen field.",
-              "rule": "Every app puts the 'Hand failures to the Bot' switch on the task's page, saved the moment it is flipped, and not in the Change Task dialog",
+              "rule": "Every app puts the 'Notify on failure' and 'Notify on graceful exit' switches on the task's page, saved the moment one is flipped, and not in the Change Task dialog",
               "decided": "2026-11-26",
               "source": [
                 {
                   "issue": "BaudeInternal#259"
+                }
+              ]
+            },
+            {
+              "said": "\"Hand failures to the Bot\" -> \"Notify on failure\" + \"Notify on graceful exit\"",
+              "rule": "Every app has two switches on a task's page, 'Notify on failure' (the old 'Hand failures to the Bot', its value kept for a task made before) and 'Notify on graceful exit' (off unless set). A run that finishes with exit 0 and isn't stopped, of a task with the second on, sends its Bot a message in a failure's shape, 'An instance of the '<task>' task finished', the same table, and the last thing the run said (else the end of its output); the Bot isn't asked to act. The Bot's set_task takes both.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "ac39f1b5-2d5e-43fe-800a-2fff32a7fc8c"
                 }
               ]
             }
@@ -251,7 +264,7 @@
     },
     {
       "name": "task dialog",
-      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether failures go to the Bot (a switch on the task's page): those are the Bot's to change or have a place of their own.",
+      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether it notifies the Bot (switches on the task's page): those are the Bot's to change or have a place of their own.",
       "copy": [
         "tasks.change_heading",
         "common.name",
@@ -261,7 +274,7 @@
       "actions": [
         {
           "by": "click Save",
-          "does": "saves its name on the host, its script, runtime, inputs, triggers and fallback as they are"
+          "does": "saves its name on the host, its script, runtime, inputs, triggers and notify switches as they are"
         },
         {
           "by": "click Cancel / key Esc",

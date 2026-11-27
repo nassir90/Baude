@@ -53,12 +53,19 @@
       },
       "description": "What starts it."
     },
-    "fallback": {
+    "notify_failure": {
       "type": [
         "boolean",
         "null"
       ],
-      "description": "A run that fails is handed to its Bot, with its log."
+      "description": "A run that fails is sent to its Bot, with its log."
+    },
+    "notify_exit": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "A run that finishes, exit 0 and not stopped, is told to its Bot, with the end of its output; the Bot isn't asked to act."
     },
     "timeout_s": {
       "type": [

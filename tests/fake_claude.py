@@ -314,6 +314,8 @@ def task_answer(n, text):
             values[m[1]] = json.loads(re.findall(r'"(?:[^"\\]|\\.)*"', kind)[-1]) if kind.startswith("one of") \
                 else 7 if kind.startswith("a number") else True if kind.startswith("true") else "filled"
         answer = json.dumps(values)
+    elif "task finished" in text:
+        answer = "Noted."
     else:
         answer = "Looked into it: the script's fine, the input wasn't."
     say(answer, f"task{n}")
@@ -756,7 +758,7 @@ def main():
             if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
                 say(answer, f"answer{turns}")
                 result(answer)
-            elif re.search(r"An instance of the '.*' task (failed|asks:)", text):
+            elif re.search(r"An instance of the '.*' task (failed|finished|asks:)", text):
                 task_answer(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)

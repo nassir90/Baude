@@ -17,7 +17,8 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 | `version` | the first 12 hex of the script's SHA-256; every run records the version it ran |
 | `form` | its inputs, each `{name, label?, type: text, number, bool or choice, choices?, default?, required?}` |
 | `triggers` | below |
-| `fallback` | true: a failed run (non-zero exit, timeout) is handed to the Bot with its log |
+| `notify_failure` | true: a failed run (non-zero exit, timeout) is handed to the Bot with its log |
+| `notify_exit` | true: a run that exits 0 is told to the Bot, for its information, with the end of its output (default false) |
 | `timeout_s` | the most a run may take (default an hour); it's stopped after |
 | `paused` | its triggers don't fire; it can still be run by hand |
 
@@ -85,10 +86,10 @@ except Conflict as e:
   form. A reply that doesn't fit is sent back to the Bot once with what was wrong (a format check); still wrong, the
   ask fails. The run is `asking` meanwhile.
 - `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far. The host refuses it
-  for a task whose `fallback` is off.
+  for a task whose `notify_failure` is off.
 - `@task.main` runs a function with the inputs; an exception's traceback is printed and the script exits 1, so the run
   fails and the host hands it over (below).
-- Any runtime, Python or not: with `fallback` on, a run that exits non-zero or times out is handed to the Bot by the
+- Any runtime, Python or not: with `notify_failure` on, a run that exits non-zero or times out is handed to the Bot by the
   host (its exit, the task's id, its version and the log's last lines, and where the script is), and the Bot's answer
   goes in the log. The run is over first: kept as `failed` and no longer running before the Bot's turn is sent, so the
   Bot may run the task again in that turn.

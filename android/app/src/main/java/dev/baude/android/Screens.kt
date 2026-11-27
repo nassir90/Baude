@@ -392,7 +392,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
-            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
+            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
         SummaryPin(list, Gap.chatH + side, Modifier.align(Alignment.TopStart))

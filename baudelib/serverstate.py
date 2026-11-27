@@ -236,9 +236,9 @@ class Session:
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
         self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
+        self.writing = None       # (the id of the message its agent last began to stream: took_queued's)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid, conn that sent it) sent at a turn, kept once it's over (Server.keep)
-        self.codex_queue = []     # (msg, conn that sent it): Codex runs each follow-up as a separate turn.
         self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
         self.reverting = {}       # request id sent on -> the message a revert takes back (what it drops of Senders)
         self.senders = None       # (its sender store as it's kept, {uuid: sender}, once it's read: Server.senders)

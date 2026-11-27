@@ -3611,6 +3611,7 @@ A host's telemetry: on or off, line profiling on or off, and what each process o
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean | yes | Events kept and the machine sampled. |
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
 | `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
 
@@ -3702,7 +3703,6 @@ One of a subscription's limits, as Claude Code's get_usage says it, or Codex's A
 
 A subscription's usage as its host last read it: its limits and when.
 
-| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `usage` | array of UsageLimit | yes | The limits as that read said them. |

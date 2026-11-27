@@ -6,7 +6,8 @@ import FoundationModels
 // Of the flags Baude passes it takes --resume (the session id it reports) and --permission-mode (bypassPermissions
 // skips the permission question); and, as claude does for Meta, --system-prompt (the model's instructions, in place
 // of its own), --tools (Exec only if Bash is among them) and --mcp-config (stdio servers, whose tools the model calls,
-// each told to Baude as claude's are: mcp__<server>__<tool>).
+// each told to Baude as claude's are: mcp__<server>__<tool>); and --append-system-prompt (a Bot's name and memory,
+// added after the instructions, whether its own or --system-prompt's).
 // It answers rewind_conversation as claude does (a revert of a message of yours): the model's session made again from
 // its transcript as it was before that message, so the model sees only what came before it.
 
@@ -161,6 +162,10 @@ final class Agent: @unchecked Sendable {
     }
 
     static let maxCommands = 8
+    /// The model's instructions: --system-prompt, or its own, with --append-system-prompt after.
+    static var told: String {
+        [flag("--system-prompt") ?? instructions, flag("--append-system-prompt")].compactMap { $0 }.joined(separator: "\n\n")
+    }
     static let instructions = """
         You are a helpful assistant working in the user's project folder (\(toldCwd)). You can run shell commands there \
         with the \(execAllowed ? "Exec" : "Bash") tool. Run a command when you need to look at files or the system, \
@@ -339,7 +344,7 @@ final class Agent: @unchecked Sendable {
                 return true
             } else if let kept {
                 var entries = [Transcript.Entry.instructions(Transcript.Instructions(
-                    segments: [.text(Transcript.TextSegment(content: flag("--system-prompt") ?? Agent.instructions))],
+                    segments: [.text(Transcript.TextSegment(content: Agent.told))],
                     toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }))]
                 for item in kept {
                     let text = item["text"] as? String ?? ""
@@ -363,7 +368,7 @@ final class Agent: @unchecked Sendable {
         let tools = await tools()
         return lock.withLock {
             if let session { return session }
-            let s = LanguageModelSession(tools: tools, instructions: flag("--system-prompt") ?? Agent.instructions)
+            let s = LanguageModelSession(tools: tools, instructions: Agent.told)
             session = s
             return s
         }

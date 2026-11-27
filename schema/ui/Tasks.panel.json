@@ -439,7 +439,7 @@
         },
         {
           "by": "type in the field",
-          "does": "narrows the list; Save (or Enter) binds the variable to the text typed, if it isn't a row's name"
+          "does": "narrows the list; Save (or Enter) binds the variable to the row whose name or value is exactly the text typed (case aside), else to the text typed"
         },
         {
           "by": "click Save",

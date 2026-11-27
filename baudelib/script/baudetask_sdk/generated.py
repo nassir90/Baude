@@ -1,7 +1,7 @@
 """The task-script SDK's generated half: made by baudelib/tasksdk.py from schema/types and the Bot's own tools'
 definitions (baudelib/emissiontools.py, baudelib/multiplextools.py). Don't change it here: change those, and run
 `python3 -m baudelib.tasksdk` again."""
-from .client import Area, Obj
+from .client import Area, Obj, waited
 
 
 class AccessChat(Obj):
@@ -638,10 +638,14 @@ class Info(Obj):
             set_permission_mode, set_model).
         telemetry (TelemetryState): Its telemetry state: the apps on its machine tell it telemetry only while
             it's on, and profile what it says.
+        front (array of TelemetryFront): The chats in front on its machine now, as its apps' telemetry says
+            (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off.
+            No head notifies of a chat in front on any machine of the mesh.
         tool_names (ToolNames): How its MCP tools are named: what every head shows for one ("Mesh / Tasks").
     """
     _refs = {"heads": "Head", "update": "Update", "restart": "RestartState", "providers": "Provider",
-             "mesh": "MeshView", "telemetry": "TelemetryState", "tool_names": "ToolNames"}
+             "mesh": "MeshView", "telemetry": "TelemetryState", "front": "TelemetryFront",
+             "tool_names": "ToolNames"}
 
 
 class KubeColumn(Obj):
@@ -1382,8 +1386,9 @@ class TelemetryEvent(Obj):
         app ('host' | 'baude' | 'record' | 'phone'): What saw it: Baude, Record, the phone's app, or the chat's
             host itself (a turn's end, as it ran there: what tokens are added up from).
         kind ('chat_opened' | 'chat_front' | 'chat_left' | 'turn_sent' | 'turn_ended'): What happened: a chat
-            opened in a window or screen; a chat came in front (its window or screen in front, showing it); it
-            stopped being in front; a turn sent in it; a turn of it ended.
+            opened in a window or screen; a chat came in front (its window or screen in front, showing it, with
+            someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in
+            it; a turn of it ended.
         host (string): The id of the host the chat is on.
         session (string): The chat's session id.
         seconds (number or None): A turn_ended's: how long the turn took.
@@ -1393,6 +1398,15 @@ class TelemetryEvent(Obj):
         effort (string or None): A turn_ended's: the effort it ran at.
         tokens_in (integer or None): A turn_ended's: the tokens it read (input, cache reads and writes).
         tokens_out (integer or None): A turn_ended's: the tokens it wrote.
+    """
+
+
+class TelemetryFront(Obj):
+    """A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone
+    at the machine.
+
+        host (string): The id of the host the chat is on.
+        session (string): The chat's session id.
     """
 
 
@@ -2356,7 +2370,8 @@ class Rotated(Obj):
     """rotate's answer.
 
         session (Session): The Bot, as it's listed now: in its new conversation.
-        thread (Session): Its past thread, as it's listed now: archived.
+        thread (Session or None): Its past thread, as it's listed now: archived; null if it was only moved onto
+            another model, nothing said yet.
     """
     _refs = {"session": "Session", "thread": "Session"}
 
@@ -2631,27 +2646,27 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding, "TaskChoice": TaskChoice, "TaskField": TaskField,
          "TaskLogLine": TaskLogLine, "TaskRun": TaskRun, "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger,
          "TaskVariable": TaskVariable, "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent,
-         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
-         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
-         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
-         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
-         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
-         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
-         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
-         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
-         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
-         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
-         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
-         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
-         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
-         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
-         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
-         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
-         "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
-         "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
-         "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
-         "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd,
-         "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
+         "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
+         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
+         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
+         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
+         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
+         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
+         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
+         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
+         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
+         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
+         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
+         "Deactivated": Deactivated, "Decided": Decided, "DecidersReply": DecidersReply, "Deleted": Deleted,
+         "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd, "DockerReply": DockerReply,
+         "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply, "EditsReply": EditsReply,
+         "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply, "EmissionServing": EmissionServing,
+         "EmissionWatchEnd": EmissionWatchEnd, "EmissionWatching": EmissionWatching, "Error": Error,
+         "FeedbackFiled": FeedbackFiled, "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply,
+         "GitReply": GitReply, "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData,
+         "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts,
+         "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
          "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
          "NotesReply": NotesReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
          "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated, "SeenSet": SeenSet,
@@ -2828,7 +2843,7 @@ class Kube(Area):
         """
         return self._call("kube", {"what": "exec", "context": context, "server": server, "namespace": namespace,
                                    "name": name, "container": container, "command": command,
-                                   "timeout": timeout}, host, KubeReply)
+                                   "timeout": timeout}, host, KubeReply, waited(timeout))
 
 
 class Docker(Area):
@@ -2935,7 +2950,7 @@ class Docker(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": "exec", "context": context, "page": page, "id": id, "command": command,
-                                     "timeout": timeout}, host, DockerReply)
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
 
 class Databases(Area):
@@ -3283,7 +3298,7 @@ class Terminal(Area):
             timeout (number):
         """
         return self._tool("multiplex", {"op": "wait", "terminal": terminal, "pattern": pattern, "quiet": quiet,
-                                        "timeout": timeout}, host)
+                                        "timeout": timeout}, host, waited(timeout))
 
     def close(self, *, terminal=None, host=None):
         """End a terminal's program (as closing its tab would) and close it. (the close_terminal tool)
@@ -3605,7 +3620,8 @@ class Ops(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": what, "context": context, "page": page, "id": id, "format": format,
-                                     "tail": tail, "command": command, "timeout": timeout}, host, DockerReply)
+                                     "tail": tail, "command": command,
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
     def docker_follow(self, *, what=None, context=None, page=None, id=None, host=None):
         """docker_follow (DockerFollow): A container's or a Compose project's log, followed (logs): one a connection,
@@ -3916,7 +3932,7 @@ class Ops(Area):
                                    "selector": selector, "namespaces": namespaces, "since": since, "fresh": fresh,
                                    "namespace": namespace, "name": name, "kind": kind, "force": force,
                                    "manifest": manifest, "container": container, "previous": previous, "tail": tail,
-                                   "command": command, "timeout": timeout}, host, KubeReply)
+                                   "command": command, "timeout": timeout}, host, KubeReply, waited(timeout))
 
     def kube_follow(self, *, what=None, context=None, server=None, page=None, crd=None, namespace=None, pod=None,
                     container=None, previous=None, host=None):
@@ -4077,14 +4093,18 @@ class Ops(Area):
         """
         return self._call("restart", {"do": do}, host, Obj)
 
-    def rotate(self, *, session=None, host=None):
+    def rotate(self, *, session=None, model=None, effort=None, host=None):
         """rotate (Rotate): A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-
-        only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks,
-        browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+        only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its
+        id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its
+        tasks is asking it.
 
             session (string): The Bot's session id.
+            model (string or None): The model the Bot carries on on, of whatever program (null: its own). Given,
+                a Bot with nothing said yet is moved onto it without a past thread.
+            effort (string or None): Its effort on model, if model's program has one (null: the Bot's own).
         """
-        return self._call("rotate", {"session": session}, host, Obj)
+        return self._call("rotate", {"session": session, "model": model, "effort": effort}, host, Obj)
 
     def run_task(self, *, session=None, id=None, inputs=None, waited=None, host=None):
         """run_task (RunTask): One of a Bot's tasks run now, by hand.

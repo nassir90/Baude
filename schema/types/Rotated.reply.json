@@ -16,10 +16,17 @@
       "description": "The Bot, as it's listed now: in its new conversation."
     },
     "thread": {
-      "$ref": "Session.json",
-      "description": "Its past thread, as it's listed now: archived."
+      "anyOf": [
+        {
+          "$ref": "Session.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its past thread, as it's listed now: archived; null if it was only moved onto another model, nothing said yet."
     }
   },
-  "required": ["op", "session", "thread"],
+  "required": ["op", "session"],
   "additionalProperties": false
 }

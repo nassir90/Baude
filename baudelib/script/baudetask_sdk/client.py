@@ -17,6 +17,7 @@ import baudetask
 PING_S = 5  # (a long wait: the host told it's still here this often)
 IDLE_S = 10  # (a connection quiet this long between calls: another made for the next; the host lets one go at 16 s)
 WAIT_S = 130  # (a call's answer waited for this long, by default: Emission's start and a page's load, and then some)
+MARGIN_S = 30  # (a call given a timeout: its answer waited for that long and this much more)
 
 
 class Refused(baudetask.Refused):
@@ -103,6 +104,8 @@ class Conn:
             if self.where is not None:  # (through this host to a member of the mesh: from the run's Bot)
                 self._send({"op": "relay", "to": self.where, "req": 0})
                 got = self.line(end + 20)
+                while got.get("op") == "ping" or got.get("req") != 0:  # (a ping, or what isn't the relay's: passed by)
+                    got = self.line(end + 20)
                 if got.get("op") != "relayed":
                     raise refused(got, "relay", self.where)
                 self.info = self._hello(end + 20, task=False)
@@ -213,6 +216,12 @@ def where(host):
             if host in (m.get("id"), m.get("name")) and m.get("id") and m["id"] not in (view.get("inactive") or []):
                 return m["id"]
     raise Refused(f"no host {host!r} in the mesh (hosts() lists them)")
+
+
+def waited(timeout):
+    """How long a call that runs on its host for timeout seconds is waited for: WAIT_S at least."""
+    ok = isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0
+    return max(WAIT_S, timeout + MARGIN_S) if ok else WAIT_S
 
 
 def call(op, fields, host=None, timeout=WAIT_S):

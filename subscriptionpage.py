@@ -630,11 +630,35 @@ def _limits(usage):
     return [(u.get("key", ""), u["name"], u["percent"], u.get("resets")) for u in usage]
 
 
+class _Fields(Gtk.Box):
+    """A dialog's form, its rows stacked: Tab goes through them top to bottom, but last (a row, or None) after all the
+    others (an Add account dialog's tabs: Tab from the account name goes past them to the box picked)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.last = None
+
+    def do_focus(self, direction):
+        if direction not in (Gtk.DirectionType.TAB_FORWARD, Gtk.DirectionType.TAB_BACKWARD):
+            return Gtk.Box.do_focus(self, direction)
+        rows = list(_children(self))
+        if self.last in rows:
+            rows.remove(self.last)
+            rows.append(self.last)
+        if direction == Gtk.DirectionType.TAB_BACKWARD:
+            rows.reverse()
+        if (at := self.get_focus_child()) in rows:
+            if at.child_focus(direction):
+                return True
+            rows = rows[rows.index(at) + 1:]
+        return any(row.child_focus(direction) for row in rows)
+
+
 def _form(page, heading, submit_label):
     """An AlertDialog over page whose form (returned with its status line and submit button) stays open till what's
     sent is done: Close is its only response."""
     dialog = Adw.AlertDialog(heading=heading, close_response="cancel")
-    form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, width_request=360)  # (room for the token's hint)
+    form = _Fields(orientation=Gtk.Orientation.VERTICAL, spacing=8, width_request=360)  # (room for the token's hint)
     status = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
     submit = Gtk.Button(label=submit_label, css_classes=["suggested-action"])
     dialog.set_extra_child(form)
@@ -686,6 +710,7 @@ class _Source:
             t.connect("toggled", lambda t: t.get_active() and self.picked())
         self.new.connect("toggled", lambda t: t.get_active() and self.picked())
         form.append(self.tabs)
+        form.last = self.tabs
         form.append(self.token)
         form.append(self.folder)
         self.picked()

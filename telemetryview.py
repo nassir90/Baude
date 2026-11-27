@@ -14,9 +14,12 @@ import weakref
 from gi.repository import Adw, GLib, Gtk
 
 from baudelib import lineprofile, providers, wording
+import widgets
 
 PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
+FRONT_IDLE_S = 300  # (no input for this long, or the screen locked, or the display asleep: nobody's at the chat in front)
+AWAY_LOOK_S = 5  # (how often whether anyone's still at the chat in front is looked at)
 APP_NAMES = {"host": "telemetry.host_process", "baude": "mesh_versions.baude", "record": "mesh_versions.record",
              "emission": "mesh_versions.emission", "multiplex": "deps.multiplex", "phone": "mesh_versions.baude"}
 APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission", "multiplex": "multiplex",
@@ -25,6 +28,7 @@ LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
 LINES_SHOWN = 10
+GROUPS = ("error", "tokens", "models", "machine", "processes", "profiling", "lines")  # (the page's, in this order)
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
 
@@ -76,6 +80,7 @@ class Recorder:
         self.front = None  # (the chat in front, in which window: (win ref, chat))
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
+        self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
         network.listen(self.heard)
         app.connect("shutdown", lambda *_: self.quit())
         self.heard()
@@ -110,12 +115,20 @@ class Recorder:
                 self.hello()
                 for win in list(self.windows):
                     self.look(win)
+                self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
             else:
                 self.queue.clear()
                 self.opened.clear()
                 self.front, self.sent_at = None, {}
+                if self.away_timer is not None:
+                    GLib.source_remove(self.away_timer)
+                    self.away_timer = None
         elif on and pid != self.host_pid:
             self.hello()  # (a host started again: its samples of this process begin again)
+            if self.host_pid is not None:  # (and the chat in front told it again: it knows none)
+                self.front = None
+                for win in list(self.windows):
+                    self.look(win)
         self.host_pid = pid
         functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name), [])
         if functions != self.profiler.functions:
@@ -133,10 +146,14 @@ class Recorder:
 
     # ---- chats
     def look(self, win, gone=False):
-        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told."""
+        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told. In front
+        means with someone at the machine (widgets.user_present, within FRONT_IDLE_S): what its host tells every head
+        of the mesh, which notifies of no chat in front anywhere (Info's front)."""
         if not self.on:
             return
         open_, front = (set(), None) if gone else chats_in(win)
+        if front is not None and widgets.user_present(FRONT_IDLE_S) is False:
+            front = None
         before = self.opened.get(win, set())
         for chat in open_ - before:
             self.event("chat_opened", chat)
@@ -151,6 +168,17 @@ class Recorder:
         elif was is not None and was[0]() in (win, None):
             self.event("chat_left", was[1])
             self.front = None
+
+    def look_away(self):
+        """Every AWAY_LOOK_S while it's on: the window in front looked at again, for whether anyone's still at it."""
+        if not self.on:
+            self.away_timer = None
+            return False
+        held = self.front[0]() if self.front is not None else None
+        for win in list(self.windows):
+            if win is held or win.is_active():
+                self.look(win)
+        return True
 
     def turn_sent(self, win):
         if not self.on:
@@ -438,7 +466,13 @@ class Page(Adw.PreferencesPage):
         self.collect.connect("notify::active", lambda *_: self.switched())
         top.add(self.collect)
         self.add(top)
+        self.made, self.rows = {}, {}
+        for key in GROUPS:  # (made once, in their order, shown as they're answered: never taken out and put back,
+            # so a row being typed in keeps its place, and the page where it's scrolled to)
+            self.made[key] = Adw.PreferencesGroup(visible=False)
+            self.add(self.made[key])
         self.state, self.taking, self.groups, self.shown_app = None, False, {}, "host"
+        self.profiling_rows, self.profiling_text = None, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
@@ -470,27 +504,25 @@ class Page(Adw.PreferencesPage):
         self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
 
-    def group(self, key, title, rows=(), at=None):
-        """The group key (made, or emptied), titled, with rows."""
-        g = self.groups.get(key)
-        if g is not None:
-            self.remove(g)
-        g = Adw.PreferencesGroup(title=GLib.markup_escape_text(title) if title else None)
+    def group(self, key, title, rows=()):
+        """The group key shown, titled, with rows (in place of those it had)."""
+        g = self.made[key]
+        for r in self.rows.get(key, ()):
+            g.remove(r)
+        self.rows[key] = list(rows)
         for r in rows:
             g.add(r)
+        g.set_title(GLib.markup_escape_text(title) if title else "")
+        g.set_visible(True)
         self.groups[key] = g
-        self.add(g)
-        order = ["error", "tokens", "models", "machine", "processes", "profiling", "lines"]
-        for k in order[order.index(key) + 1:]:  # (kept in their order however they're answered)
-            if (later := self.groups.get(k)) is not None:
-                self.remove(later)
-                self.add(later)
         return g
 
     def drop(self, key):
-        """The group key taken out, if it's there."""
-        if (g := self.groups.pop(key, None)) is not None:
-            self.remove(g)
+        """The group key emptied and hidden, if it's shown."""
+        if self.groups.pop(key, None) is not None:
+            for r in self.rows.pop(key, ()):
+                self.made[key].remove(r)
+            self.made[key].set_visible(False)
 
     def failed(self, reply):
         if reply.get("error"):
@@ -524,7 +556,6 @@ class Page(Adw.PreferencesPage):
         u = reply.get("usage") or {"days": [], "models": [], "combos": []}
         self.grid.show(u["days"])
         models = self.host_models()
-        g = self.group("tokens", wording.say("telemetry.tokens_by_day"))
         box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
         grid_row = Gtk.ListBoxRow(activatable=False, child=self.grid)
         if self.grid.get_parent() is not None:
@@ -538,7 +569,7 @@ class Page(Adw.PreferencesPage):
                                    effort=effort_said(c.get("effort"))))
             most.set_tooltip_text(providers.model_slug(c["model"], models) if isinstance(c["model"], str) else None)
             box.append(most)
-        g.add(box)
+        self.group("tokens", wording.say("telemetry.tokens_by_day"), [box])
         self.group("models", wording.say("telemetry.models") if u["models"] else None,
                    [model_row(m["model"], models,
                               wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
@@ -606,31 +637,58 @@ class Page(Adw.PreferencesPage):
             return
         self.deps_for, self.missing_shown = (self.where.get("host"), True), None
         on = bool(self.state.get("on"))
-        if "profiling" in self.groups and getattr(self, "profiling_shown", None) == (
-                self.shown_app, repr(self.state.get("profiling")), on):
+        if self.profiling_rows is not None and self.rows.get("profiling") == self.profiling_rows and getattr(
+                self, "profiling_shown", None) == (self.shown_app, repr(self.state.get("profiling")), on):
             return self.show_lines()
         self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")), on)
-        mine = next((p for p in self.state.get("profiling") or [] if p["app"] == self.shown_app), {"functions": []})
+        if self.profiling_rows is None:
+            self.make_profiling()
+        switch, process, entry, error = self.profiling_rows
+        mine = self.mine()
+        self.taking = True
+        process.set_selected(PROFILED.index(self.shown_app))
+        if self.profiling_text != (self.shown_app, mine["functions"]):  # (the host's list, as it's told again or
+            # another process is picked; not what's being typed, as anything else is told)
+            self.profiling_text = (self.shown_app, mine["functions"])
+            if entry.get_text() != ", ".join(mine["functions"]):  # (as typed and applied: the caret where it is)
+                entry.set_text(", ".join(mine["functions"]))
+        switch.set_active(on and bool(mine["functions"]))
+        self.taking = False
+        self.profiling_sensitive()
+        error.set_title(GLib.markup_escape_text(mine.get("error") or ""))
+        error.set_visible(bool(mine.get("error")))
+        if self.rows.get("profiling") != self.profiling_rows:
+            self.group("profiling", None, self.profiling_rows)
+        self.show_lines()
+
+    def mine(self):
+        """What the host profiles of the process picked."""
+        return next((p for p in (self.state or {}).get("profiling") or [] if p["app"] == self.shown_app),
+                    {"functions": []})
+
+    def make_profiling(self):
+        """Line Profiling, the process profiled and its functions: made once, then told what the host says."""
         process = Adw.ComboRow(title=wording.say("telemetry.process"), model=Gtk.StringList.new(
             [wording.say(APP_NAMES[a]) for a in PROFILED]), selected=PROFILED.index(self.shown_app))
-        process.connect("notify::selected", lambda r, _p: self.picked(PROFILED[r.get_selected()]))
-        entry = Adw.EntryRow(title=wording.say("telemetry.functions"), text=", ".join(mine["functions"]),
-                             show_apply_button=True)
-        entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": [
-            f.strip() for f in e.get_text().split(",") if f.strip()]}))
-        collecting = on
-        on = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"), active=collecting and bool(mine["functions"]),
-                           sensitive=collecting and bool(mine["functions"] or entry.get_text().strip()))
-        entry.connect("changed", lambda e: on.set_sensitive(
-            collecting and bool(mine["functions"] or e.get_text().strip())))
-        on.connect("notify::active", lambda r, _p: r.get_active() != bool(mine["functions"]) and self.set({
-            "app": self.shown_app, "functions": [f.strip() for f in entry.get_text().split(",") if f.strip()]
-            if r.get_active() else []}))
-        rows = [on, process, entry]
-        if mine.get("error"):
-            rows.append(row(mine["error"], sensitive=False))
-        self.group("profiling", None, rows)
-        self.show_lines()
+        process.connect("notify::selected", lambda r, _p: self.taking or self.picked(PROFILED[r.get_selected()]))
+        entry = Adw.EntryRow(title=wording.say("telemetry.functions"), show_apply_button=True)
+        entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": self.typed()}))
+        entry.connect("changed", lambda e: self.profiling_sensitive())
+        switch = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"))
+        switch.connect("notify::active", lambda r, _p: self.taking or r.get_active() == bool(
+            self.mine()["functions"]) or self.set({"app": self.shown_app,
+                                                   "functions": self.typed() if r.get_active() else []}))
+        error = row("", sensitive=False)
+        self.profiling_rows = [switch, process, entry, error]
+
+    def typed(self):
+        return [f.strip() for f in self.profiling_rows[2].get_text().split(",") if f.strip()]
+
+    def profiling_sensitive(self):
+        """Line Profiling can be switched on while telemetry's collected and there's something to profile."""
+        switch, _process, entry, _error = self.profiling_rows
+        switch.set_sensitive(bool(self.state and self.state.get("on")) and bool(
+            self.mine()["functions"] or entry.get_text().strip()))
 
     def picked(self, app):
         self.shown_app = app
@@ -651,14 +709,15 @@ class Page(Adw.PreferencesPage):
         if "lines" in self.groups and self.lines_shown == (self.shown_app, repr(top)):
             return
         self.lines_shown = (self.shown_app, repr(top))
-        g = self.group("lines", wording.say("telemetry.top_lines") if top else None)
+        rows = []
         for x in top:
             r = row(f"{os.path.basename(x['file'])}:{x['line']}  {x.get('code') or x['function']}",
                     wording.say("telemetry.hits_seconds", hits=f"{x['hits']:,}", seconds=f"{x['seconds']:.3f}"),
                     mono=True)
             r.set_title_lines(1)
             r.set_tooltip_text(f"{x['file']}:{x['line']} ({x['function']})")
-            g.add(r)
+            rows.append(r)
+        self.group("lines", wording.say("telemetry.top_lines") if top else None, rows)
 
     def took_deps(self, reply):
         import depsview

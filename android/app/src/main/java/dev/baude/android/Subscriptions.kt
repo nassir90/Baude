@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
@@ -696,6 +697,7 @@ private fun SignInTabs(tab: Int, enabled: Boolean, pick: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))) {
         for ((on, label) in listOf(Wording.Subscriptions.newLogin, Wording.Subscriptions.tokenTab, Wording.Common.folder).withIndex())
             Box(Modifier.weight(1f).background(if (tab == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+                .focusProperties { canFocus = false } // (Tab: the account name straight to the box under it; picked by touch)
                 .clickable(enabled = enabled) { pick(on) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 Text(label, style = Type.bold, color = c.fg)
             }

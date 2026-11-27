@@ -37,7 +37,7 @@ class Group(Adw.PreferencesGroup):
         if reply.get("op") != "deciders" and self.loaded:  # (a change refused: why, the list kept)
             return self.toast(reply.get("error") or "")
         self.loaded = reply.get("op") == "deciders"
-        for r in (*self.rows, self.name, self.url, self.adding):
+        for r in self.rows:
             self.remove(r)
         self.rows = []
         if reply.get("op") != "deciders":  # (the host couldn't be asked)
@@ -47,8 +47,9 @@ class Group(Adw.PreferencesGroup):
         elif reply.get("what") == "add":
             self.name.set_text("")
         self.rows += [self.row(d) for d in reply.get("deciders") or [] if d.get("host") is None]
-        for r in (*self.rows, self.name, self.url, self.adding):
-            self.add(r)
+        for i, r in enumerate(self.rows):  # (put in over Name, which with URL stays where it is: what's being typed
+            # there keeps its place, and the page where it's scrolled to)
+            self.name.get_parent().insert(r, i)
         return False
 
     def toast(self, text):

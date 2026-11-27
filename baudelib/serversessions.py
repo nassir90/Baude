@@ -247,9 +247,11 @@ class ServerSessions:
                     extra += [flag, *(value if isinstance(value, list) else [value])]
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
-        if s.meta.get("bot") and run["program"] in ("claude", "pi"):  # (who it is, and its memory, each start)
-            mem = self.bot_memory(s)
+        told = None
+        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex", "apple"):  # (who it is, and its memory, each
+            mem = self.bot_memory(s)                                              # start)
             told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+        if told is not None and run["program"] in ("claude", "pi"):
             if run["program"] == "claude" and "--append-system-prompt" in extra:  # (one: its own system with it)
                 at = extra.index("--append-system-prompt") + 1
                 extra[at] = extra[at] + "\n\n" + told
@@ -264,31 +266,7 @@ class ServerSessions:
                     extra[at:at] = rules
                 else:
                     extra += ["--allowedTools", *rules]
-        if run["program"] in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every
-            servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable,  # chat's)
-                                                        agentproxy.HEADLESS)}
-            rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
-        else:
-            servers, rules = {}, []
-        if s.mesh_tools() and run["program"] in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
-            servers |= {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools",
-                                                                            "--socket",
-                                                                            os.path.abspath(self.socket_path)],
-                                        "env": {"BAUDE_SESSION": s.id}}}
-            if s.meta.get("bot"):  # (a Bot's browser too: its own Emission profile, on any host)
-                servers[emissiontools.NAME] = {"command": sys.executable,
-                                               "args": [agentproxy.HEADLESS, "emission-tools", "--socket",
-                                                        os.path.abspath(self.socket_path)],
-                                               "env": {"BAUDE_SESSION": s.id}}
-                servers[multiplextools.NAME] = {"command": sys.executable,  # (and its terminals: Multiplex's)
-                                                "args": [agentproxy.HEADLESS, "multiplex-tools", "--socket",
-                                                         os.path.abspath(self.socket_path)],
-                                                "env": {"BAUDE_SESSION": s.id}}
-            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS  # (never asked about, a Bot's or Meta's;
-                      if t not in meshtools.ASKED]                          # but those that run code here, as Bash is)
-            if s.meta.get("bot"):
-                rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
-                rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+        servers, rules = self.agent_tools(s, run["program"])
         if servers:
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
             if run["program"] == "claude":  # (its tools never asked about)
@@ -310,6 +288,7 @@ class ServerSessions:
                 extra[at:at] = rules
             else:
                 extra += ["--allowedTools", *rules]
+        s.bot_note = None  # (what it's told as it starts: a Bot's, in its system prompt)
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
@@ -324,7 +303,7 @@ class ServerSessions:
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
                 profile=profile,
                 env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
-                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s),
+                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s), instructions=told,
                 servers={meshtools.NAME: {"command": sys.executable, "args": [
                     agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
                     "answer_task"], "env": {"BAUDE_SESSION": s.id},
@@ -345,6 +324,82 @@ class ServerSessions:
         # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
+
+    def agent_tools(self, s, program):
+        """(lock held) The MCP servers a session's agent has of this host ({name: its --mcp-config entry}), and the
+        rules allowing their tools without asking (claude's --allowedTools): chattools, every chat's; the mesh's
+        (baudelib.meshtools), a Bot's and Meta's; a Bot's browser and terminals too. None but for claude and pi."""
+        if program in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every chat's)
+            servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable, agentproxy.HEADLESS)}
+            rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
+        else:
+            servers, rules = {}, []
+        if s.mesh_tools() and program in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
+            for name, cmd in [(meshtools.NAME, "mesh-tools")] + (  # (a Bot's browser too: its own Emission profile,
+                    [(emissiontools.NAME, "emission-tools"), (multiplextools.NAME, "multiplex-tools")]  # on any host;
+                    if s.meta.get("bot") else []):                                                       # its terminals)
+                servers[name] = {"command": sys.executable, "args": [agentproxy.HEADLESS, cmd, "--socket",
+                                                                     os.path.abspath(self.socket_path)],
+                                 "env": {"BAUDE_SESSION": s.id}}
+            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS  # (never asked about, a Bot's or Meta's;
+                      if t not in meshtools.ASKED]                          # but those that run code here, as Bash is)
+            if s.meta.get("bot"):
+                rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
+                rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+        return servers, rules
+
+    def grow_agent(self, s):
+        """(lock held) A chat just made a Bot: its agent, running, given a Bot's tools as it runs (mcp_set_servers: the
+        whole set of servers, the ones it has with them), its conversation and its cache going on; what a Bot's told
+        at its start (bot_system) put before the next message it's sent (take_input). Its Bot's tools and its folder's
+        files are allowed it as they're asked for (from_claude). Only Claude Code's can: pi-claude's servers are fixed
+        as it starts. Has it nothing more to do (none running, or given them)?"""
+        proc = getattr(s, "proc", None)
+        if proc is None:
+            return True
+        if getattr(proc, "stopping", False) or not isinstance(proc, claude.ClaudeProc) or \
+                models.model_program(s.meta.get("model")) != "claude" or s.meta.get("ephemeral"):
+            return False
+        servers, _rules = self.agent_tools(s, "claude")
+        if s.app_tools is not None:
+            servers |= s.app_tools.config()
+        mem = self.bot_memory(s)
+        s.bot_note = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+        on = f"srv_{next(self.rids)}"
+        s.routes[on] = (None, lambda ok, said=None: (ok and not (said or {}).get("errors") and
+                                                    not (said or {}).get("removed")) or
+                                 self.grow_refused(s, proc, said), None)
+        proc.send({"type": "control_request", "request_id": on,
+                   "request": {"subtype": "mcp_set_servers", "servers": servers}})
+        return True
+
+    def grow_refused(self, s, proc, said):
+        """(lock held) An agent that wouldn't take a Bot's tools as it ran (grow_agent): started again for them."""
+        self.log(f"{s.id}: its agent didn't take a Bot's tools as it ran ({said}): started again for them")
+        if s.proc is proc and s.meta.get("bot"):
+            s.bot_note = None
+            self.renew_agent(s)
+
+    def bot_told(self, s, msg):
+        """(lock held) A user message to a session's agent with what a Bot's told (grow_agent's note) before it, in a
+        reminder every app reads past (transcripts.strip_reminders), if it has one waiting: once."""
+        note, s.bot_note = getattr(s, "bot_note", None), None
+        if not note or msg.get("type") != "user":
+            return msg
+        head = f"<system-reminder>\n{note}\n</system-reminder>\n\n"
+        message = msg.get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            content = head + content
+        else:
+            blocks = list(content or [])
+            at = next((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text"), None)
+            if at is None:
+                blocks.insert(0, {"type": "text", "text": head.rstrip()})
+            else:
+                blocks[at] = {**blocks[at], "text": head + (blocks[at].get("text") or "")}
+            content = blocks
+        return {**msg, "message": {**message, "content": content}}
 
     def send_user(self, s, content, sender=None):
         """(lock held) A session's first message (start's prompt), from sender if it isn't its user's (take_input)."""
@@ -393,7 +448,8 @@ class ServerSessions:
                         not s.meta.get("account_picked"):  # (its account: the default as it's first written in, picked since it was made too; one picked for it kept)
                     s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
-            self.ensure_proc(s).send(msg)
+            proc = self.ensure_proc(s)
+            proc.send(self.bot_told(s, msg))
             if at_turn and s.kept():  # (taken into the turn it's sent at, or after it: kept as it is, took_queued)
                 s.queued.append((msg.get("message") or {}, msg.get("uuid"), conn))
             elif at_turn:  # (claude's own to take into the turn, or after it: an account picked waits for it)
@@ -562,7 +618,9 @@ class ServerSessions:
                     proc.respond(msg.get("request_id"), {"behavior": "allow",  # (always allowed, a head said:
                                                          "updatedInput": request.get("input") or {}})  # whoever's here)
                     return
-                if self.edits_memory(s, request):  # (a Bot's memory is its own to keep: pi's and others' too)
+                if self.edits_memory(s, request) or s.meta.get("bot") and \
+                        request.get("tool_name") in self.agent_tools(s, "claude")[1]:  # (a Bot's memory is its own
+                    # to keep: pi's and others' too; and its tools, given it as it ran too: grow_agent)
                     proc.respond(msg.get("request_id"), {"behavior": "allow",
                                                          "updatedInput": request.get("input") or {}})
                     return
@@ -637,6 +695,7 @@ class ServerSessions:
                 s.meta.pop("cut", None)
                 self.save(s)
             if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
+                self.move_bot_folder(s)
                 self.restart_agent(s)
             if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
                 self.drop_waits(s)

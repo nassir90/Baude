@@ -1575,6 +1575,46 @@ def _(app):
     return win
 
 
+TASK_REMINDED = '''import baudetask as task
+got = task.ask("Proceed with the deploy? SKIP THE TOOL", form=[{"name": "verdict", "type": "choice",
+                                                              "choices": ["proceed", "override", "fail"]}])
+task.say("verdict", got["verdict"])
+'''
+
+
+@scene("57g-task-reminded", "A Bot's chat (Juniper's) asked by its task's run, its turn ending without the answer_task "
+                            "tool: reminded once, in one sentence, then answered with the tool",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = "{}"
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_REMINDED})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] in ("done", "failed"), "the run, reminded and answered", 30)
+
+    def gone(*_):
+        with server.lock:
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  x.get_mapped())) >= 2, "the ask and its reminder", 20)
+    T.pump(2)
+    return win
+
+
 TASK_VARS = '''import baudetask as task
 model = task.vars.translation_model
 task.say("translating with", model.label, model.effort)

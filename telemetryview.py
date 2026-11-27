@@ -38,8 +38,10 @@ USED_KINDS = ("part", "menu", "screen")  # (what the user used: Most Used)
 TIMED_KINDS = ("part", "menu", "op", "callback")  # (what's run for them: Slowest, by its time each)
 ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
-PROCS_BACK_S = 150  # (as far back as the page first looks for a sample with its processes: they're taken every 2
-# minutes at the most, with nobody at the machine)
+PROCS_HISTORY_S = 600  # (how far back each process's CPU and memory are drawn; the page first reads this far back,
+# farther than the 2 minutes processes may be apart with nobody at the machine)
+PROCS_GAP_S = 300  # (samples of a process further apart than this: a gap in its line)
+SPARK_W, SPARK_H = 150, 26
 _RECORDER = []
 
 
@@ -469,29 +471,104 @@ def logo(app):
     return Gtk.Image(icon_name=f"baude-app-{APP_LOGOS.get(app, 'baude')}-symbolic", pixel_size=LOGO_PX)
 
 
-def proc_rows(procs):
-    """The rows of procs (sorted): each's app's logo, its name (numbered where the app has several: "Emission (2)"),
-    and its CPU and memory after them; then a bold Total row, its CPU and memory the processes' added up."""
-    count, seen = {}, {}
+def proc_names(procs):
+    """(proc, name) for each of procs, in APP_NAMES' order, those of one app by pid and numbered where the app has
+    several ("Emission (2)"), so a process keeps its name however the table is sorted."""
+    procs = sorted(procs, key=lambda p: (list(APP_NAMES).index(p["app"]) if p.get("app") in APP_NAMES else 99,
+                                         p.get("pid") or 0))
+    count, seen, out = {}, {}, []
     for p in procs:
         count[p.get("app")] = count.get(p.get("app"), 0) + 1
-    rows = []
     for p in procs:
         app = p.get("app")
         name = wording.say(APP_NAMES[app]) if app in APP_NAMES else str(app)
         if count[app] > 1:
             seen[app] = seen.get(app, 0) + 1
             name = wording.say("telemetry.process_n", name=name, n=seen[app])
-        r = row(name, wording.say(
-            "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
-        r.add_prefix(logo(app))
-        rows.append(r)
+        out.append((p, name))
+    return out
+
+
+def proc_sorted(named, key):
+    """named (proc_names') busiest first by key ("cpu" or "rss"), a process that gave none last."""
+    return sorted(named, key=lambda pn: pn[0].get(key) is None and 1 or -pn[0][key])
+
+
+def said_cpu(cpu):
+    return wording.say("telemetry.cpu_percent", cpu="–" if cpu is None else f"{cpu:.1f}")
+
+
+class ProcSpark(Gtk.Widget):
+    """How one process's CPU or memory went over the last PROCS_HISTORY_S (to end): a line in the Kubernetes history's
+    colour, each sample at its time, on a scale shared with the other processes' (top), so the busiest stands out; a
+    gap where samples are PROCS_GAP_S apart. Nothing is drawn with fewer than two samples."""
+
+    def __init__(self, points, end, top):
+        super().__init__(width_request=SPARK_W, height_request=SPARK_H, valign=Gtk.Align.CENTER)
+        self.add_css_class("proc-spark")
+        self.points, self.end, self.top = points, end, top or 1
+
+    def do_snapshot(self, snap):
+        w, h = self.get_width(), self.get_height()
+        if len(self.points) < 2 or w <= 2:
+            return
+        from gi.repository import Graphene
+        cr = snap.append_cairo(Graphene.Rect().init(0, 0, w, h))
+        color = self.get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
+        cr.set_line_width(1.5)
+        before = None
+        for at, v in self.points:
+            x = 1 + (w - 2) * (1 - (self.end - at) / PROCS_HISTORY_S)
+            y = h - 2 - (h - 4) * min(v / self.top, 1)
+            cr.line_to(x, y) if before is not None and at - before <= PROCS_GAP_S else cr.move_to(x, y)
+            before = at
+        cr.stroke()
+
+
+def proc_table(procs, history, sort, resort):
+    """Processes as a table in a card: a line each of procs, busiest first by sort ("cpu" or "rss"): its app's logo and
+    its name, then its CPU over the last PROCS_HISTORY_S (history: pid -> [(at, cpu, rss)]) and now, then its memory
+    the same; under a rule, a bold Total, the processes' CPU and memory added up (one that gave none left out). The
+    CPU and Memory headings sort by theirs: resort(key)."""
+    grid = Gtk.Grid(column_spacing=12, hexpand=True, margin_start=12, margin_end=12, margin_top=6, margin_bottom=8)
+    frame = Gtk.Frame(child=grid, css_classes=["card", "proc-table"])
+    grid.attach(Gtk.Label(label=wording.say("telemetry.process"), xalign=0, hexpand=True,
+                          css_classes=["dim-label", "proc-head"]), 0, 0, 1, 1)
+    for col, key, title in ((1, "cpu", "telemetry.cpu_history"), (3, "rss", "telemetry.memory_history")):
+        box = Gtk.Box(spacing=2)
+        box.append(Gtk.Label(label=wording.say(title), css_classes=["proc-head"]))
+        if key == sort:
+            box.append(Gtk.Image(icon_name="pan-down-symbolic", pixel_size=12))
+        b = Gtk.Button(child=box, css_classes=["flat", "dim-label", "proc-sort"], halign=Gtk.Align.START)
+        b.connect("clicked", lambda _b, key=key: resort(key))
+        grid.attach(b, col, 0, 2, 1)
+    points = {k: [x for pid in history for x in history[pid]] for k in ("cpu", "rss")}
+    end = max((x[0] for x in points["cpu"]), default=time.time())
+    top_cpu = max((x[1] for x in points["cpu"] if x[1] is not None), default=0) * 1.05
+    top_rss = max((x[2] for x in points["rss"] if x[2] is not None), default=0) * 1.05
+    y = 1
+    for p, name in proc_sorted(proc_names(procs), sort):
+        cell = Gtk.Box(spacing=10, margin_top=4, margin_bottom=4)
+        cell.append(logo(p.get("app")))
+        cell.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
+        grid.attach(cell, 0, y, 1, 1)
+        hist = history.get(p.get("pid")) or []
+        grid.attach(ProcSpark([(a, c) for a, c, _r in hist if c is not None], end, top_cpu), 1, y, 1, 1)
+        grid.attach(Gtk.Label(label=said_cpu(p.get("cpu")), xalign=1, css_classes=["numeric"]), 2, y, 1, 1)
+        grid.attach(ProcSpark([(a, r) for a, _c, r in hist if r is not None], end, top_rss), 3, y, 1, 1)
+        grid.attach(Gtk.Label(label=said_size(p.get("rss")), xalign=1, css_classes=["numeric"]), 4, y, 1, 1)
+        y += 1
+    grid.attach(Gtk.Separator(margin_top=4, margin_bottom=4), 0, y, 5, 1)
     cpus = [p["cpu"] for p in procs if p.get("cpu") is not None]
     rsses = [p["rss"] for p in procs if p.get("rss") is not None]
-    rows.append(row(wording.say("telemetry.total"), wording.say(
-        "telemetry.cpu_rss", cpu=f"{sum(cpus):.1f}" if cpus else "–", rss=said_size(sum(rsses) if rsses else None)),
-        bold=True))
-    return rows
+    grid.attach(Gtk.Label(label=wording.say("telemetry.total"), xalign=0, css_classes=["heading"], margin_top=4,
+                          margin_bottom=4), 0, y + 1, 1, 1)
+    grid.attach(Gtk.Label(label=said_cpu(sum(cpus) if cpus else None), xalign=1, css_classes=["heading", "numeric"]),
+                2, y + 1, 1, 1)
+    grid.attach(Gtk.Label(label=said_size(sum(rsses) if rsses else None), xalign=1,
+                          css_classes=["heading", "numeric"]), 4, y + 1, 1, 1)
+    return frame
 
 
 def where_said(screen, part):
@@ -629,7 +706,8 @@ def row(title, *values, sensitive=True, mono=False, bold=False, visible=True, fi
 class Page(Adw.PreferencesPage):
     """Settings → Telemetry: the host picked beside New session (as Dependencies has it), Collect Telemetry, then what
     that host keeps: its tokens by day over a year with the most used model and effort and each model's, its machine
-    now, its processes now (each with its app's logo, its CPU and memory), and line profiling (switched on or off; what
+    now, its processes now (a table: each with its app's logo, its CPU and memory over the last minutes and now), and
+    line profiling (switched on or off; what
     each process profiles is Baude's own pick, lineprofile.DEFAULTS, or what telemetry_set named for it) with every
     process's top lines."""
 
@@ -659,6 +737,7 @@ class Page(Adw.PreferencesPage):
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
         self.errors_shown = self.counts_shown = None
         self.error_rows = {}  # (the Errors group's rows, by app and fingerprint)
+        self.procs, self.proc_history, self.proc_sort, self.procs_at = [], {}, "cpu", None  # (history: pid -> [(at, cpu, rss)])
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -747,7 +826,7 @@ class Page(Adw.PreferencesPage):
     def ask(self):
         now = time.time()
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
-        self.read({"from": now - PROCS_BACK_S, "what": ["metrics"], "limit": 60}, self.took_metrics)
+        self.read({"from": now - PROCS_HISTORY_S, "what": ["metrics"], "limit": 300}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         self.read_errors()
         self.read_counts()
@@ -859,16 +938,34 @@ class Page(Adw.PreferencesPage):
         if s.get("memory_pressure") or s.get("memory_stall") is not None:
             rows.append(row(wording.say("telemetry.memory_pressure"), said_pressure(s)))
         self.group("machine", wording.say("telemetry.machine"), rows)
-        with_procs = next((x for x in reversed(samples) if "procs" in x), None)
-        if with_procs is None:  # (the latest with its processes: they're taken less often than the machine)
+        with_procs = [x for x in samples if "procs" in x]  # (they're taken less often than the machine)
+        if not with_procs:
             return False
-        procs = sorted((p for p in with_procs.get("procs") or [] if p.get("app") in APP_NAMES),
-                       key=lambda p: (list(APP_NAMES).index(p["app"]), p.get("pid") or 0))
-        if procs:
-            self.group("processes", wording.say("side_panel.processes"), proc_rows(procs))
+        if with_procs[-1]["at"] == self.procs_at:  # (the read's inclusive bound sends it again: the table stays as it is)
+            return False
+        self.procs_at = with_procs[-1]["at"]
+        for x in with_procs:
+            for p in x.get("procs") or []:
+                hist = self.proc_history.setdefault(p.get("pid"), [])
+                if not hist or x["at"] > hist[-1][0]:
+                    hist.append((x["at"], p.get("cpu"), p.get("rss")))
+        since = with_procs[-1]["at"] - PROCS_HISTORY_S
+        self.proc_history = {pid: kept for pid, h in self.proc_history.items() if (kept := [x for x in h if x[0] >= since])}
+        self.procs = [p for p in with_procs[-1].get("procs") or [] if p.get("app") in APP_NAMES]
+        self.show_procs()
+        return False
+
+    def show_procs(self):
+        """Processes as the latest sample with them has them, sorted by proc_sort."""
+        if self.procs:
+            self.group("processes", wording.say("side_panel.processes"),
+                       [proc_table(self.procs, self.proc_history, self.proc_sort, self.resort)])
         else:
             self.drop("processes")
-        return False
+
+    def resort(self, key):
+        self.proc_sort = key
+        self.show_procs()
 
     def took_profiles(self, reply):
         if self.failed(reply):

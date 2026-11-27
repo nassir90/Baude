@@ -11,13 +11,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -35,9 +40,14 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -304,7 +314,7 @@ private fun CountRow(c: Msg.TelemetryCount, slow: Boolean) {
     ActionRow(countTitle(c), null, titleLines = 3,
         prefix = { Icon(APP_LOGOS[c.app] ?: Adwaita.AppBaude, null, tint = k.fg, modifier = Modifier.size(16.dp.icon)) },
         suffix = { Text(values.joinToString("  "), style = Type.body, color = k.dim, maxLines = 2, textAlign = TextAlign.End,
-            modifier = Modifier.widthIn(max = 120.dp)) })
+            modifier = Modifier.widthIn(max = 72.dp)) })
 }
 private const val ERRORS_DAYS = 7
 
@@ -360,25 +370,69 @@ private fun valueRow(title: String, value: String?, slug: String? = null, ago: S
     }
 }
 
-/** A process's row (telemetryview.proc_rows): its app's logo, its name (numbered where its app has several), its CPU
- * and memory after them. */
+/** Processes as a table (telemetryview.proc_table, without its lines over time: no room on a phone): Process, PID, CPU
+ * and Memory, a line each of numbered (each with its name, numbered where its app has several), busiest first by sort
+ * ("cpu" or "rss"; CPU's and Memory's headings sort by theirs), its app's logo before its name; under a rule, a bold
+ * Total, the processes' CPU and memory added up (one that gave none left out). */
 @Composable
-private fun ProcessRow(p: Msg.TelemetryProc, n: Int?) {
+private fun ProcTable(numbered: List<Pair<Msg.TelemetryProc, String>>, sort: String, resort: (String) -> Unit) {
     val c = LocalBaude.current
-    val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
-    ActionRow(if (n == null) name else Wording.Telemetry.processN(name = name, n = n), null,
-        prefix = { Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) },
-        suffix = { Text(Wording.Telemetry.cpuRss(cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–",
-            rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
-}
-
-/** The Total row ending the processes (telemetryview.proc_rows): bold, its CPU and memory the processes' added up. */
-@Composable
-private fun TotalRow(cpus: List<Double>, rsses: List<Long>) {
-    val c = LocalBaude.current
-    ActionRow(Wording.Telemetry.total, null, bold = true,
-        suffix = { Text(Wording.Telemetry.cpuRss(cpu = if (cpus.isEmpty()) "–" else String.format(Locale.ROOT, "%.1f", cpus.sum()),
-            rss = saidSize(if (rsses.isEmpty()) null else rsses.sum())), style = Type.body, color = c.fg, maxLines = 1) })
+    fun cpu(x: Double?) = Wording.Telemetry.cpuPercent(cpu = x?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "–")
+    val sorted = numbered.sortedBy { (p, _) -> -((if (sort == "cpu") p.cpu?.toDouble() else p.rss?.toDouble()) ?: -1.0) }
+    val cpus = numbered.mapNotNull { it.first.cpu?.toDouble() }
+    val rsses = numbered.mapNotNull { it.first.rss?.toLong() }
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    fun widest(style: TextStyle, texts: List<String>): Dp =
+        with(density) { (texts.maxOfOrNull { measurer.measure(it, style, softWrap = false, maxLines = 1).size.width } ?: 0).toDp() }
+    val icon = 12.dp.icon
+    val pids = numbered.map { (p, _) -> p.pid?.toString() ?: "–" }
+    val cpuTexts = numbered.map { cpu(it.first.cpu?.toDouble()) } + cpu(if (cpus.isEmpty()) null else cpus.sum())
+    val rssTexts = numbered.map { saidSize(it.first.rss?.toLong()) } + saidSize(if (rsses.isEmpty()) null else rsses.sum())
+    val pidW = maxOf(widest(Type.body, pids), widest(Type.folder, listOf(Wording.Telemetry.pid)))
+    val cpuW = maxOf(widest(Type.bold, cpuTexts), widest(Type.folder, listOf(Wording.Telemetry.cpu)) + icon)
+    val rssW = maxOf(widest(Type.bold, rssTexts), widest(Type.folder, listOf(Wording.BotMemory.title)) + icon)
+    @Composable fun RowScope.Cell(text: String, w: Dp, bold: Boolean = false, dim: Boolean = false) =
+        Text(text, style = if (bold) Type.bold else Type.body, color = if (dim) c.dim else c.fg, textAlign = TextAlign.End,
+            maxLines = 1, softWrap = false, modifier = Modifier.width(w))
+    @Composable fun RowScope.Head(text: String, w: Dp, key: String?) =
+        Row(Modifier.width(w).then(if (key != null) Modifier.clickable { resort(key) } else Modifier),
+            horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            Text(text, style = Type.folder, color = c.dim, maxLines = 1, softWrap = false)
+            if (key == sort) Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
+        }
+    val gap = Arrangement.spacedBy(8.dp)
+    BoxedList(listOf(Unit), "") {
+        BoxWithConstraints {
+            val nameW = maxOf(maxWidth - 24.dp - pidW - cpuW - rssW - 24.dp, 72.dp)
+            val tableW = nameW + pidW + cpuW + rssW + 24.dp
+            val line = Modifier.width(tableW).heightIn(min = 36.dp)
+            Column(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Row(line.padding(bottom = 4.dp), horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Text(Wording.Telemetry.process, style = Type.folder, color = c.dim, maxLines = 1, softWrap = false, modifier = Modifier.width(nameW))
+                    Head(Wording.Telemetry.pid, pidW, null)
+                    Head(Wording.Telemetry.cpu, cpuW, "cpu")
+                    Head(Wording.BotMemory.title, rssW, "rss")
+                }
+                for ((p, name) in sorted) Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(nameW), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                        Text(name, style = Type.body, color = c.fg, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                    }
+                    Cell(p.pid?.toString() ?: "–", pidW, dim = true)
+                    Cell(cpu(p.cpu?.toDouble()), cpuW)
+                    Cell(saidSize(p.rss?.toLong()), rssW)
+                }
+                Box(Modifier.width(tableW).padding(vertical = 4.dp).height(1.dp).background(c.rule))
+                Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Text(Wording.Telemetry.total, style = Type.bold, color = c.fg, maxLines = 1, softWrap = false, modifier = Modifier.width(nameW))
+                    Spacer(Modifier.width(pidW))
+                    Cell(cpu(if (cpus.isEmpty()) null else cpus.sum()), cpuW, bold = true)
+                    Cell(saidSize(if (rsses.isEmpty()) null else rsses.sum()), rssW, bold = true)
+                }
+            }
+        }
+    }
 }
 
 /** Settings → Telemetry (telemetryview.Page), Settings' fourth page: the host picked beside New session (this phone's
@@ -393,6 +447,7 @@ fun TelemetryPage() {
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var procsAt by remember(hostId) { mutableStateOf<Msg.TelemetrySample?>(null) }
+    var procSort by remember { mutableStateOf("cpu") }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var counted by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
@@ -481,13 +536,10 @@ fun TelemetryPage() {
                 Heading(Wording.SidePanel.processes)
                 val numbered = procs.mapIndexed { i, p ->
                     val same = procs.filter { it.app == p.app }
-                    p to if (same.size > 1) procs.subList(0, i).count { it.app == p.app } + 1 else null
+                    val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
+                    p to if (same.size > 1) Wording.Telemetry.processN(name = name, n = procs.subList(0, i).count { it.app == p.app } + 1) else name
                 }
-                val cpus = procs.mapNotNull { it.cpu?.toDouble() }
-                val rsses = procs.mapNotNull { it.rss?.toLong() }
-                BoxedList(numbered + (null to null), "") { (p, n) ->
-                    if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
-                }
+                ProcTable(numbered, procSort) { procSort = it }
             }
         }
         counted?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->

@@ -25,7 +25,7 @@ TYPES = (("text", "tasks.text"), ("number", "tasks.number"), ("bool", "tasks.yes
 KINDS = (("schedule", "tasks.schedule"), ("git_push", "tasks.git_push"))
 PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "after", "commit", "message", "author")}
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
-                "skipped": "go-next-symbolic"}
+                "skipped": "go-next-symbolic", "asking": "baude-waiting-symbolic"}
 GOING = ("running", "asking")
 REPORTS_S = 3600  # (a run's page looks for what the chats it started said till this long after it's over, at most)
 INVALID = object()  # (a number field's value while its text isn't a number)
@@ -88,10 +88,11 @@ def took(seconds):
 
 
 def status_icon(run):
-    """A run's state, as an icon (a spinner while it's going; nothing for none)."""
+    """A run's state, as an icon (a spinner while it's running, an hourglass in the warning colour while it waits
+    for input; nothing for none)."""
     if run is None:
         return Gtk.Box(width_request=16)
-    if run.get("status") in GOING:
+    if run.get("status") == "running":
         w = Spinner(width_request=16, height_request=16, valign=Gtk.Align.CENTER)
     else:
         w = Gtk.Image(icon_name=STATUS_ICONS.get(run.get("status"), "object-select-symbolic"))
@@ -99,6 +100,8 @@ def status_icon(run):
             w.add_css_class("error")
         elif run.get("status") == "done":
             w.add_css_class("success")
+        elif run.get("status") == "asking":
+            w.add_css_class("warning")
     w.set_tooltip_text(wording.say("tasks.status", status=run.get("status") or ""))
     return w
 

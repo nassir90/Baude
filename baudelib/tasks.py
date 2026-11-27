@@ -36,7 +36,8 @@ LOG_MAX = 4 * 1024 * 1024  # (a run's log, at most: what's written after, droppe
 TIMEOUT_S, TIMEOUT_MAX = 3600, 24 * 3600
 LOG_ENDING = 10  # (lines of a finished run's log its Bot is told, if it said nothing)
 ENDING_MAX = 1500  # (characters of them)
-ASK_S = 3600  # (an ask of its Bot waited for this long, at most)
+ASK_S = 7 * 24 * 3600  # (an ask of its Bot waited for this long, at most; its run waiting for input meanwhile)
+BUSY_SAID_S = 3600  # (a chat's report its Bot's been too busy to take for this long: said on the run)
 RETELL_S = 5  # (a chat's report its Bot couldn't take: tried again after this long)
 GRACE_S = 5  # (a run stopped: its script's given this long to stop, then killed)
 MIN_EVERY, MAX_EVERY = 5, 60 * 24 * 31  # (a schedule's minutes: no more often than 5, no less often than a month)
@@ -247,15 +248,16 @@ def fill(task, payload=None, fills=None, given=None):
     return out, missing
 
 
-def answered(text, form):
-    """(values, None) from a Bot's answer to an ask with a form (a JSON object in it), or (None, what's wrong)."""
-    start, end = (text or "").find("{"), (text or "").rfind("}")
-    try:
-        got = json.loads(text[start:end + 1]) if 0 <= start < end else None
-    except ValueError:
-        got = None
+def answered(got, form):
+    """(values, None) from an answer to an ask with a form (the answer_task tool's answer: an object of its fields, or
+    that as JSON), or (None, what's wrong)."""
+    if isinstance(got, str):
+        try:
+            got = json.loads(got)
+        except ValueError:
+            pass
     if not isinstance(got, dict):
-        return None, "the answer has no JSON object"
+        return None, "the answer isn't an object of the form's fields"
     values, wrong = {}, []
     for f in form:
         if f["name"] not in got:
@@ -266,17 +268,38 @@ def answered(text, form):
             values[f["name"]] = coerce(f, got[f["name"]])
         except ValueError as e:
             wrong.append(str(e))
+            continue
+        if f.get("required") and values[f["name"]] == "":
+            wrong.append(f"{f['name']} is required: it can't be empty")
+    wrong += [f"{k} isn't one of the form's fields" for k in got if k not in {f["name"] for f in form}]
     return (None, "; ".join(wrong)) if wrong else (values, None)
 
 
-def form_said(form):
-    """How a form's asked for, of a Bot."""
-    def one(f):
-        kind = {"choice": "one of " + ", ".join(json.dumps(c) for c in f.get("choices", ())), "number": "a number",
-                "bool": "true or false", "text": "text"}[f["type"]]
-        return f"- {f['name']}: {kind}" + (f" ({f['label']})" if f.get("label") else "") + \
-            (" (required)" if f.get("required") else "")
-    return "Answer with only a JSON object with these fields:\n" + "\n".join(one(f) for f in form)
+def in_reply(text, form):
+    """answered for a Bot with no answer_task tool (its agent has no mesh tools): the JSON object in what it said."""
+    start, end = (text or "").find("{"), (text or "").rfind("}")
+    try:
+        got = json.loads(text[start:end + 1]) if 0 <= start < end else None
+    except ValueError:
+        got = None
+    return answered(got, form) if isinstance(got, dict) else (None, "the answer has no JSON object")
+
+
+def _field_said(f):
+    kind = {"choice": "one of " + ", ".join(json.dumps(c) for c in f.get("choices", ())), "number": "a number",
+            "bool": "true or false", "text": "text"}[f["type"]]
+    return f"- {f['name']}: {kind}" + (f" ({f['label']})" if f.get("label") else "") + \
+        (" (required)" if f.get("required") else "")
+
+
+def form_said(form, tool=True):
+    """How an ask's to be answered, said to its Bot: with its answer_task tool, and the form's fields (or text); not
+    tool (a Bot whose agent has no mesh tools): a JSON object of the form's fields in its reply."""
+    if not tool:
+        return wording.say("tasks.answer_json") + "\n" + "\n".join(_field_said(f) for f in form)
+    if not form:
+        return wording.say("tasks.answer_with_text")
+    return wording.say("tasks.answer_with") + "\n" + "\n".join(_field_said(f) for f in form)
 
 
 def from_routine(r):
@@ -481,14 +504,14 @@ class Store:
 
 class Tasks:
     """Every Bot's tasks on a host (server: its Server): read and set over the wire, run as they're asked for or due,
-    their scripts' asks carried to their Bots and answered at their turns' ends."""
+    their scripts' asks carried to their Bots and answered with their answer_task tools."""
 
     def __init__(self, server):
         self.server = server
         self.lock = threading.RLock()  # (taken after the server's lock, never before)
         self.stores = {}  # (a Bot's session id: its Store)
         self.running = {}  # (a run's id: {sid, task, proc, token, stop})
-        self.waiting = {}  # (a Bot's session id: the ask sent it, waiting on its turn's end)
+        self.waiting = {}  # (a Bot's session id: the ask sent it, waiting on its answer, or its turn's end)
         self.polled = {}  # ((sid, trigger id): when it was last looked at)
         self.turns = {}  # (a Bot's session id: held while one ask of it waits on its turn: one at a time)
         self.notices = {}  # (a Bot's session id: {task id: its finished run's notice, till sent: deliver})
@@ -604,6 +627,12 @@ class Tasks:
                "command": command(task, st.script_path(task))}
         with self.lock:
             if self.going(s.id, task["id"]):
+                last = (st.latest(task["id"], 1) or [None])[0]
+                if last and last["status"] == "skipped" and last.get("kind") == kind and \
+                        last.get("trigger") == run["trigger"]:  # (fired again while the same run goes, as one
+                    n = (last.get("skips") or 1) + 1                 # waiting for input may for days: one record)
+                    return self._update(st, last["id"], skips=n, ended=now,
+                                        error=wording.say("tasks.still_running_n", n=n))
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
                 st.put_run(run)
                 return run
@@ -634,7 +663,7 @@ class Tasks:
         try:
             if task["runtime"] == "bot":
                 self._cwd(sid, st)
-                text, failed = self.ask(run["id"], st.script(task), task["name"])
+                text, failed, _values = self.ask(run["id"], st.script(task), task["name"])
                 error = wording.say("tasks.bot_failed") if failed else None
             else:
                 code, error = self._script(sid, st, task, run, token, self._cwd(sid, st))
@@ -733,8 +762,8 @@ class Tasks:
 
     def _script(self, sid, st, task, run, token, cwd):
         """A python or shell task's script run (its Bot's, sid: the chats it starts nested under it, BAUDE_SPAWNED_BY):
-        (its exit code, why it failed or None). Stopped or out of time: its process group told to stop, and killed
-        after GRACE_S whether or not its script's gone."""
+        (its exit code, why it failed or None). Stopped or out of time (its timeout_s, the time it waited for input
+        not counted): its process group told to stop, and killed after GRACE_S whether or not its script's gone."""
         path = st.script_path(task)
         argv = [*runner(task), path]
         env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
@@ -761,12 +790,12 @@ class Tasks:
                    threading.Thread(target=read, args=(p.stderr, "err"), daemon=True)]
         for t in readers:
             t.start()
-        end, code, timed_out = time.monotonic() + task["timeout_s"], None, False
+        begun, code, timed_out = time.monotonic(), None, False
         while code is None and not held.get("stop"):
             try:
                 code = p.wait(timeout=0.25)
             except subprocess.TimeoutExpired:
-                if time.monotonic() > end:
+                if time.monotonic() - begun - self.input_s(held) > task["timeout_s"]:
                     timed_out = True
                     break
         if timed_out or held.get("stop"):  # (its script gone already or not: its group's what's killed)
@@ -831,13 +860,16 @@ class Tasks:
     def busy(self):
         """[{session, what}] for each run going (what a restart waits for)."""
         with self.lock:
-            return [{"session": r["sid"], "what": wording.say("tasks.task_running")} for r in self.running.values()]
+            return [{"session": r["sid"], "what": wording.say("tasks.waiting_input" if r.get("asking") else
+                                                              "tasks.task_running")} for r in self.running.values()]
 
     def blocking(self):
-        """Each run going, as a pending restart lists it (RestartBlocker): [{kind, session, task, run, name, what}]."""
+        """Each run going, as a pending restart lists it (RestartBlocker): [{kind, session, task, run, name, what,
+        waiting}], waiting: one waiting for input (an ask of its Bot), which a restart would stop."""
         with self.lock:
             return [{"kind": "task", "session": r["sid"], "task": r["task"], "run": rid, "name": r.get("name") or "",
-                     "what": wording.say("tasks.task_running")} for rid, r in self.running.items()]
+                     "what": wording.say("tasks.waiting_input" if r.get("asking") else "tasks.task_running"),
+                     **({"waiting": True} if r.get("asking") else {})} for rid, r in self.running.items()]
 
     # ---- a script's
     def held(self, msg):
@@ -855,8 +887,8 @@ class Tasks:
         got[1].log(msg["run"], "say", msg.get("say") or "")
 
     def script_ask(self, msg):
-        """task_ask's answer (text, values), once its Bot's turn ends: ValueError if it can't be (a failure handed
-        over by a task whose failures aren't handed to its Bot, too)."""
+        """task_ask's answer (text, values), once its Bot's answered it with its answer_task tool: ValueError if it
+        can't be (a failure handed over by a task whose failures aren't handed to its Bot, too)."""
         got = self.held(msg)
         if got is None:
             raise ValueError(wording.say("host_errors.no_run"))
@@ -869,53 +901,123 @@ class Tasks:
             if not task.get("notify_failure"):
                 raise ValueError(wording.say("host_errors.task_no_fallback"))
             self._update(st, msg["run"], handed=True)  # (the script's handed its failure over: the host doesn't again)
-        said, failed = self.ask(msg["run"], text, task["name"], form=form, error=bool(msg.get("error")))
+        tool = self.has_tool(held["sid"])
+        said, failed, values = self.ask(msg["run"], text, task["name"], form=form, error=bool(msg.get("error")),
+                                        tool=tool)
         if failed:
             raise ValueError(said or wording.say("tasks.bot_failed"))
-        if not form:
-            return said, None
-        values, wrong = answered(said, form)
-        if wrong:  # (once more, told what was wrong with it)
-            said, failed = self.ask(msg["run"], wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" +
-                                    form_said(form), task["name"])
-            values, wrong = (None, said) if failed else answered(said, form)
+        if tool or not form:
+            return said, values if form else None
+        values, wrong = in_reply(said, form)  # (no tool: the JSON in what it said; once more, told what was wrong)
+        if wrong:
+            said, failed, _values = self.ask(msg["run"], wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" +
+                                             form_said(form, tool=False), task["name"])
+            values, wrong = (None, said) if failed else in_reply(said, form)
             if wrong:
                 raise ValueError(wording.say("tasks.not_as_asked", wrong=wrong))
         st.log(msg["run"], "answer", json.dumps(values), values=values)
         return said, values
 
-    def ask(self, rid, text, name, form=None, error=False, held=None):
-        """(what the Bot said, failed) for text given a run's Bot as a turn of its own, from its task (name), waited
-        for till that turn ends; the ask and its answer in the run's log. held: an ended run's (its failure handed
-        on), else the run's as it's going. One ask of a Bot at a time, each sent as it's idle: the turn it ends
-        is that ask's, not one going on as it was sent (a user's, a stopped run's)."""
+    def has_tool(self, sid):
+        """Has the Bot sid's agent the answer_task tool (the mesh's tools: not an Apple model's)?"""
+        from baudelib import models
+        with self.server.lock:
+            s = self.server.sessions.get(sid)
+            return s is not None and models.model_program(s.meta.get("model")) in ("claude", "pi", "codex")
+
+    def ask(self, rid, text, name, form=None, error=False, held=None, tool=False):
+        """(what the Bot said, failed, values) for text given a run's Bot as a turn of its own, from its task (name);
+        the ask and its answer in the run's log. tool: answered with its answer_task tool (answer: what that's given,
+        text, or a form's values), as soon as it's called; a turn that ends without it reminded once, then failed. Not
+        tool: what it said as that turn ends. held: an ended run's (its failure handed on), else the run's as it's
+        going. One ask of a Bot at a time, each sent as it's idle: the turn it ends is that ask's, not one going on as
+        it was sent (a user's, a stopped run's). A run going waits for input till it's answered (ASK_S at most):
+        asking, its clock stopped (input_s)."""
         live = held is None
         with self.lock:
             held = self.running.get(rid) if live else held
             turn = self.turns.setdefault(held["sid"], threading.Lock()) if held else None
+            st = self.stores.get(held["sid"]) if held else None
         if held is None:
-            return wording.say("host_errors.no_run"), True
-        end = time.monotonic() + ASK_S
-        while not turn.acquire(timeout=0.25):  # (stopped meanwhile: let go of at once)
-            if held.get("stop") or time.monotonic() > end:
-                return held.get("stop") or wording.say("tasks.no_answer"), True
+            return wording.say("host_errors.no_run"), True, None
+        if live:
+            self._waiting(st, rid, held, True)
         try:
-            return self._ask(rid, held, text, name, form, error, live, end)
+            end = time.monotonic() + ASK_S
+            while not turn.acquire(timeout=0.25):  # (stopped meanwhile: let go of at once)
+                if held.get("stop") or time.monotonic() > end:
+                    return held.get("stop") or wording.say("tasks.no_answer"), True, None
+            try:
+                return self._ask(rid, held, text, name, form, error, live, end, tool)
+            finally:
+                turn.release()
         finally:
-            turn.release()
+            if live:
+                self._waiting(st, rid, held, False)
 
-    def _ask(self, rid, held, text, name, form, error, live, end):
+    def _waiting(self, st, rid, held, on):
+        """A run going waiting for input (on: an ask of its Bot begun; asks of one run may overlap), or not any more
+        (its last ask over): asking, its clock stopped meanwhile (input_s), or running again. Heads told."""
+        with self.lock:
+            n = held["asking"] = held.get("asking", 0) + (1 if on else -1)
+            now = time.monotonic()
+            if on and n == 1:
+                held["asked_at"] = now
+            elif not on and n == 0:
+                held["input_s"] = held.get("input_s", 0.0) + now - held.pop("asked_at", now)
+            if st is not None and rid in self.running and (n == 1 if on else n == 0) and \
+                    (st.runs.get(rid) or {}).get("status") in ("running", "asking"):  # (not one that's over)
+                self._update(st, rid, status="asking" if on else "running")
+        self.server.changed()
+
+    def input_s(self, held):
+        """How long a run's waited for input, all told (its asks of its Bot): what its timeout_s doesn't count."""
+        with self.lock:
+            return held.get("input_s", 0.0) + (time.monotonic() - held["asked_at"] if held.get("asking") else 0.0)
+
+    def asks_of(self, sid):
+        """The messages (their uuids) the Bot sid's been sent by its tasks' runs going, each run waiting for input
+        till the turn it began ends: TaskAsks, as its listing has them."""
+        with self.lock:
+            return [w["said"] for w in self.waiting.get(sid, []) if w.get("live") and w.get("said")]
+
+    def _ask(self, rid, held, text, name, form, error, live, end, tool):
         with self.lock:
             st = self.stores.get(held["sid"])
             if live and rid not in self.running or st is None or held.get("stop"):
-                return held.get("stop") or wording.say("host_errors.no_run"), True
+                return held.get("stop") or wording.say("host_errors.no_run"), True, None
         sid = held["sid"]
         st.log(rid, "ask", text, error=error or None)
         if live:
-            self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
-        wait = {"run": rid, "done": threading.Event(), "text": None, "failed": False}
+            self._update(st, rid, asks=(st.runs[rid].get("asks") or 0) + 1)
+        wait = {"run": rid, "name": name, "done": threading.Event(), "text": None, "failed": False,
+                "said": str(uuid.uuid4()), "live": live, "tool": tool, "form": form or [], "answered": False,
+                "values": None, "refused": None}
         said = asked_head(name, held.get("task") or "", st.runs.get(rid) or {"id": rid}, error) + "\n\n" + \
-            text + ("\n\n" + form_said(form) if form else "")
+            text + ("\n\n" + form_said(form) if tool else "\n\n" + form_said(form, tool=False) if form else "")
+        reminded = False
+        while True:
+            failed = self._send(st, sid, rid, held, wait, said, name, end)
+            if failed is not None:
+                return failed[0], failed[1], None
+            if not tool or wait["answered"] or wait["failed"] or reminded:
+                break
+            reminded = True  # (its turn ended without the tool: told once more, then it's failed)
+            wait["done"].clear()
+            said = wording.say("tasks.answer_reminder", run=rid) + "\n\n" + form_said(form)
+            wait["said"] = str(uuid.uuid4())  # (a message of its own: its from line says the run waits on it)
+        if tool and not wait["answered"] and not wait["failed"]:
+            wait["text"], wait["failed"] = wording.say("tasks.answer_refused", wrong=wait["refused"]) \
+                if wait["refused"] else wording.say("tasks.not_answered"), True
+        if wait["failed"] or not form:
+            st.log(rid, "answer", wait["text"] or "", error=wait["failed"] or None)
+        elif tool:  # (not tool: its values, once script_ask's found them in what it said)
+            st.log(rid, "answer", json.dumps(wait["values"]), values=wait["values"])
+        return wait["text"] or "", wait["failed"], wait["values"]
+
+    def _send(self, st, sid, rid, held, wait, said, name, end):
+        """said sent the Bot sid once it's idle (wait waiting on it: its next turn's end, or its answer_task tool),
+        and waited for: None, or (why, True) if it couldn't be sent."""
         srv, sent = self.server, False
         while not sent:  # (sent once its Bot's idle: its next turn's end is this one's)
             with srv.lock:
@@ -926,7 +1028,7 @@ class Tasks:
                     with self.lock:
                         self.waiting.setdefault(sid, []).append(wait)
                     try:
-                        srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                        srv.take_input(None, s, {"type": "user", "uuid": wait["said"],
                                                  "message": {"role": "user", "content": said}},
                                        {"kind": "host", "name": wording.say("tasks.sender", name=name),
                                         "host": srv.me["id"], "host_name": srv.me["name"], "session": sid,
@@ -940,20 +1042,43 @@ class Tasks:
                     continue
             if held.get("stop") or time.monotonic() > end:
                 wait["text"], wait["failed"] = held.get("stop") or wording.say("tasks.no_answer"), True
-                break
+                return None
             time.sleep(0.25)
-        if sent:
-            wait["done"].wait(max(0.0, end - time.monotonic()))
+        while not wait["done"].wait(0.25):  # (stopped meanwhile: let go of)
+            if held.get("stop") or time.monotonic() > end:
+                break
         with self.lock:
             if wait in self.waiting.get(sid, []):
                 self.waiting[sid].remove(wait)
-        if not wait["done"].is_set() and not wait["failed"]:
-            wait["text"], wait["failed"] = wording.say("tasks.no_answer"), True
-        if not form or wait["failed"]:
-            st.log(rid, "answer", wait["text"] or "", error=wait["failed"] or None)
-        if live and rid in self.running:
-            self._update(st, rid, status="running")
-        return wait["text"] or "", wait["failed"]
+            if not wait["done"].is_set() and not wait["failed"]:
+                wait["text"], wait["failed"] = held.get("stop") or wording.say("tasks.no_answer"), True
+        return None
+
+    def answer(self, s, msg):
+        """(server's lock held) answer_task: the ask of the run msg names that's waiting on the Bot s, answered (an
+        answer, the form's fields; or text, an ask with no form), its run going on at once: (the answer's op, its
+        fields), or ValueError, what's wrong with it (said to the model, which may try again)."""
+        rid = msg.get("run")
+        with self.lock:
+            wait = next((w for w in self.waiting.get(s.id, []) if w["run"] == rid and w["tool"]), None)
+            if wait is None:
+                raise ValueError(wording.say("host_errors.task_not_asking", run=str(rid)))
+            values, text = None, ""
+            if wait["form"]:
+                values, wrong = answered(msg.get("answer"), wait["form"])
+                if wrong:
+                    wait["refused"] = wrong
+                    raise ValueError(wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" + form_said(wait["form"]))
+            else:
+                text = msg.get("text") if isinstance(msg.get("text"), str) else ""
+                if not text.strip():
+                    wait["refused"] = wording.say("tasks.answer_no_text")
+                    raise ValueError(wording.say("tasks.not_as_asked", wrong=wait["refused"]))
+            wait.update(answered=True, values=values, text=text)
+            self.waiting[s.id].remove(wait)
+            wait["done"].set()
+        return "task_answered", {"session": s.id, "run": rid, "task": wait["name"],
+                                 **({"values": values} if values is not None else {"text": text})}
 
     def asking(self, sid):
         """Is an ask of one of the Bot sid's tasks waiting on it (sent, or to be sent once it's idle)?"""
@@ -961,9 +1086,17 @@ class Tasks:
             turn = self.turns.get(sid)
             return bool(self.waiting.get(sid)) or turn is not None and turn.locked()
 
+    def agent_gone(self, s):
+        """(server's lock held) s's agent ended with its tasks' asks sent it unanswered: each failed at once (its turn
+        will never end), not left for the next turn's end to answer."""
+        with self.lock:
+            for w in self.waiting.pop(s.id, []):
+                w["text"], w["failed"] = wording.say("tasks.agent_gone"), True
+                w["done"].set()
+
     def turn_over(self, s, msg):
         """(server's lock held) s's turn ended (its result, msg): the ask it was sent for, answered with what it
-        said."""
+        said; one to be answered with its answer_task tool and not yet: over, unanswered (or failed, its turn's)."""
         with self.lock:
             for w in self.waiting.pop(s.id, []):
                 w["text"], w["failed"] = str(msg.get("result") or ""), bool(msg.get("is_error"))
@@ -1035,7 +1168,7 @@ class Tasks:
         """The chat cid's pending reports given its Bot, each as a message from cid, once the Bot's idle and no ask of
         its tasks is waiting on it (one at a time: ask's turn, taken for each look only), oldest first; each let go of
         once it's taken (its uuid the report's: taken once, even if it's sent again after a restart). The Bot busy
-        past ASK_S: said on the run, and still waited for; one it can't take (Elsewhere, its agent not starting):
+        past BUSY_SAID_S: said on the run, and still waited for; one it can't take (Elsewhere, its agent not starting):
         said on the run, and tried again after RETELL_S. Gone, the chat or its Bot: let go of. The host stopping:
         kept, for its next start."""
         srv, said, at, begun, retry = self.server, set(), None, 0.0, 0.0
@@ -1083,7 +1216,7 @@ class Tasks:
                                 came["pending"] = [r for r in came.get("pending") or [] if r.get("id") != at] or None
                                 srv.save(c)
                                 continue
-                        elif c is not None and b is not None and time.monotonic() - begun > ASK_S and \
+                        elif c is not None and b is not None and time.monotonic() - begun > BUSY_SAID_S and \
                                 ("busy", at) not in said:
                             said.add(("busy", at))
                             self._said(b, came, wording.say("tasks.agent_waiting", bot=self._bot(b),

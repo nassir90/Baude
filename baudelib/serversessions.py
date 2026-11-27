@@ -322,7 +322,12 @@ class ServerSessions:
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
                 profile=profile,
                 env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
-                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s))
+                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s),
+                servers={meshtools.NAME: {"command": sys.executable, "args": [
+                    agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
+                    "answer_task"], "env": {"BAUDE_SESSION": s.id},
+                    "enabled_tools": ["answer_task"],  # (never asked about: Codex's own per-tool approval)
+                    "tools": {"answer_task": {"approval_mode": "approve"}}}} if s.meta.get("bot") else None)
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -888,6 +893,7 @@ class ServerSessions:
                                      wording.say("host_errors.claude_exited", code=code),
                                      "stopped" if stopping else "failed")  # (a task's run's, stopped or gone before
                 # its turn's end: its Bot told)
+            self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()

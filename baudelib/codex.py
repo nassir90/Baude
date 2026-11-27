@@ -321,6 +321,7 @@ class CodexProc(AppServer):
         self.asks, self.streams, self.patches = {}, {}, {}
         self.tools = set()
         self.inputs = deque()
+        self.steers = []  # (messages sent as a turn's being started: given it once it has (steer))
         self.indices = itertools.count()
         self.thread = self.turn = None
         self.last_text = ""
@@ -411,6 +412,10 @@ class CodexProc(AppServer):
                 self.starting = False
                 if self.interrupting:
                     self.interrupt()
+                else:
+                    for msg in self.steers:
+                        self.steer(msg)
+                self.steers.clear()
             self.emit("system", subtype="codex_turn_started", session_id=self.thread)
         elif method == "turn/completed":
             turn = params["turn"]
@@ -453,6 +458,8 @@ class CodexProc(AppServer):
         self.last_text = ""
         with self.lock:
             self.starting = False
+            self.inputs.extend(self.steers)  # (sent as a turn that never started was: turns of their own)
+            self.steers.clear()
         self.advance()
 
     def advance(self):
@@ -483,6 +490,23 @@ class CodexProc(AppServer):
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return
             self.result(error)
+
+    def steer(self, msg):
+        """(lock held) A message sent at the turn going on given to it (turn/steer): Codex takes it in as the turn goes
+        on, with no turn of its own; one the turn's over before it's taken (or that Codex won't take into it)
+        runs as the next turn."""
+        def refused(_error):
+            with self.lock:
+                self.inputs.append(msg)
+            self.advance()
+        try:
+            params = {"threadId": self.thread, "expectedTurnId": self.turn,
+                      "input": user_input(msg["message"]["content"])}
+        except (KeyError, ValueError):
+            return refused(None)  # (said as the turn it runs as fails, advance)
+        if msg.get("uuid"):
+            params["clientUserMessageId"] = msg["uuid"]
+        self.rpc("turn/steer", params, lambda _: None, refused)
 
     def interrupt(self):
         self.interrupting = not self.turn and (self.starting or bool(self.inputs))
@@ -547,8 +571,12 @@ class CodexProc(AppServer):
 
     def send(self, msg):
         kind = msg.get("type")
-        if kind == "user":
+        if kind == "user":  # (at a turn: given it, steer; else a turn of its own)
             with self.lock:
+                if self.turn and not self.interrupting:
+                    return self.steer(msg)
+                if self.starting and self.thread and not self.interrupting and not self.inputs:
+                    return self.steers.append(msg)
                 self.inputs.append(msg)
             self.advance()
         elif kind == "control_response":

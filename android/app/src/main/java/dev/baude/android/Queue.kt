@@ -102,16 +102,11 @@ object Queue {
         chat.send(text, files, turns.singleOrNull()?.uuid)
     }
 
-    /** ↑ on a queued message: it and those before it sent together, now, or once the interrupted turn has ended. */
-    fun sendNow(chat: Chat, q: Queued, working: Boolean) {
-        if (working) {
-            val now = chat.queueUpto
-            if (now == null || chat.queued.indexOf(q) > chat.queued.indexOf(now)) chat.queueUpto = q
-            interrupt(chat)
-        } else {
-            chat.queueUpto = q
-            flush(chat)
-        }
+    /** ↑ on a queued message: it and those before it sent together, now: to the turn going on, which takes it in and
+     * goes on (as Baude's send_at_turn), or as a turn of its own. */
+    fun sendNow(chat: Chat, q: Queued) {
+        chat.queueUpto = q
+        flush(chat)
     }
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -328,7 +323,7 @@ private fun Revealed(shown: Boolean, modifier: Modifier, buttons: @Composable ()
  * no to, sent by itself: a warning beside it, saying why; it goes again only by ↑. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
+fun QueuedRow(chat: Chat, q: Queued) {
     val c = LocalBaude.current
     var shown by remember { mutableStateOf(false) }
     val level = rememberLastLine()
@@ -344,7 +339,7 @@ fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
             TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
-            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q, working) }) { UpArrow() }
+            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q) }) { UpArrow() }
             TurnButton(Wording.ChatTurns.queuedEdit, {
                 chat.queued.remove(q)
                 chat.edit.value = q.text

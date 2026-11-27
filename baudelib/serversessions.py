@@ -355,15 +355,15 @@ class ServerSessions:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg, sender=None, shown=None, again=False):
+    def take_input(self, conn, s, msg, sender=None, shown=None):
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
         (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
         answer's). One whose uuid it's taken already (a head sending it again, its connection gone as it first sent
         it) taken once: the last TAKEN kept in its meta. Those attached live but conn are told it as it's given its agent
-        and kept (tell_said). again: one taken already, held for the turn going on (codex_queue)."""
+        and kept (tell_said)."""
         kind = msg.get("type")
-        if kind == "user" and not again:
+        if kind == "user":
             desktopchats.refuse_or_resync(s)  # (a Desktop chat someone else is writing: Elsewhere, said)
             if wire.is_id(msg.get("uuid") or ""):
                 taken = s.meta.setdefault("taken", [])
@@ -377,12 +377,8 @@ class ServerSessions:
             msg = {**msg, "message": {**message, "content": wire.said_by(sender, message.get("content"))}}
             self.stamp(s, msg["uuid"], sender, shown)
         if kind == "user":
-            is_codex = models.model_program(s.meta.get("model")) == "codex"
-            if is_codex:
+            if models.model_program(s.meta.get("model")) == "codex":
                 codex.user_input((msg.get("message") or {}).get("content", ""))
-            if is_codex and s.busy:
-                s.codex_queue.append((msg, conn))
-                return
             if conn is not None and wire.clean_sender(sender) is None:  # (its user wrote in it from a head: what it
                 self.saw(s)  # last said has been seen; not a follow-up kept over a restart, sent by the host itself)
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
@@ -393,9 +389,9 @@ class ServerSessions:
                     s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
-            if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
+            if at_turn and s.kept():  # (taken into the turn it's sent at, or after it: kept as it is, took_queued)
                 s.queued.append((msg.get("message") or {}, msg.get("uuid"), conn))
-            elif at_turn:  # (claude's own to take after the turn it's sent in: an account picked waits for it)
+            elif at_turn:  # (claude's own to take into the turn, or after it: an account picked waits for it)
                 s.sent_at_turn = True
             else:
                 self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
@@ -613,6 +609,13 @@ class ServerSessions:
                     self.cut(s)
                     self.cutting.add(s.id)
                 self.changed()
+            started = (msg.get("event") or {}).get("message") or {} if kind == "stream_event" and \
+                (msg.get("event") or {}).get("type") == "message_start" else None
+            if s.queued and not msg.get("parent_tool_use_id") and models.program(s.meta.get("model"))["steers"] and (
+                    started is not None or kind == "assistant" and (msg.get("message") or {}).get("id") != s.writing):
+                self.took_queued(s)  # (the turn's next message, the first after them: what's sent at it, taken)
+            if started is not None and not msg.get("parent_tool_use_id"):
+                s.writing = started.get("id")
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
                 self.ask_context(s, soon=True)  # (a reply, a tool's result: the window filling through a turn)
@@ -671,20 +674,22 @@ class ServerSessions:
                 hostlogin.heard(self, s, msg)  # told after what claude said, so a head's card follows its turn)
             for message, said, by in told:
                 self.tell_said(s, message, said, by)
-            if kind == "result" and s.codex_queue:
-                if self.stopped.is_set() or s.deleting or getattr(proc, "stopping", False):
-                    s.codex_queue.clear()
-                else:
-                    held, by = s.codex_queue.pop(0)
-                    self.take_input(by, s, held, again=True)
             if kind == "result":
                 followed, s.sent_at_turn = bool(told) or s.sent_at_turn, False
                 if s.account_after_turn and proc is s.proc:  # (another account picked at the turn: moved onto it,
                     self.account_after(s, FOLLOW_UP_WAIT if followed else 0)  # follow-ups sent at it answered first)
 
+    def took_queued(self, s):
+        """(lock held) Messages sent at a session's turn (queued), its program taking them in as the turn goes on
+        (PROGRAMS' steers): kept where they're taken, before the turn's next message, and told those attached."""
+        for message, said, by in s.queued:
+            self.keep(s, "user", message, said)
+            self.tell_said(s, message, said, by)
+        s.queued = []
+
     def tell_said(self, s, message, said, conn=None):
         """(lock held) A message given a session's agent, as it's kept (take_input; one taken at a turn, as the turn
-        ends: queued, codex_queue), told those attached live but conn, who sent it ({type: "_said"}), as its claude
+        ends: queued), told those attached live but conn, who sent it ({type: "_said"}), as its claude
         never says it back; with who it's from (sender: with what's shown of it) if its sender store says."""
         told = {"type": "_said", "uuid": said, "message": message}
         if (sender := (self.senders(s) or {}).get(said)) is not None:
@@ -896,7 +901,6 @@ class ServerSessions:
                 # its turn's end: its Bot told)
             self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
-            s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()
@@ -1076,7 +1080,7 @@ class ServerSessions:
 
     def switch_account(self, s):
         """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor
-        waiting for it (a turn, follow-ups sent at it: queued, codex_queue; till then account_after_turn, and this again
+        waiting for it (a turn, follow-ups sent at it: queued; till then account_after_turn, and this again
         as the turn's over): its record carried to the account (accounts.carry_chat), the lock not held as it's copied,
         then, if nothing's written it meanwhile, the account kept as its own and its agent started again under it with
         what's sent it next. OSError if the copy fails (the chat left as it was)."""
@@ -1085,7 +1089,7 @@ class ServerSessions:
                 to = s.account_to
                 if to is None or s.deleting or s.deleted:
                     return
-                if s.busy or s.queued or s.codex_queue or tries == CARRY_TRIES - 1:  # (written to all along: taken
+                if s.busy or s.queued or tries == CARRY_TRIES - 1:  # (written to all along: taken
                     s.account_after_turn = True  # after its next turn)
                     return
                 program = models.model_program(s.meta.get("model"))
@@ -1102,7 +1106,7 @@ class ServerSessions:
                 self.log(f"{s.id}: not moved to another account: {e}")
                 raise OSError(str(e)) from e
             with self.lock:
-                if s.account_to != to or s.busy or s.queued or s.codex_queue or \
+                if s.account_to != to or s.busy or s.queued or \
                         accounts.carry_seen(seen) != seen:
                     continue  # (picked again, or written or sent to as it was copied: looked at again)
                 s.meta.setdefault("profiles", {})[program] = to
@@ -1123,7 +1127,7 @@ class ServerSessions:
         """(lock held) A chat's turn over, or its agent gone, with an account picked for it meanwhile: moved onto it on
         a thread of its own (switch_account; the copy can take a while), if nothing waits for it still. wait: s given
         its claude first to begin the turn a follow-up sent at the last one starts (one begun: moved after it)."""
-        if s.account_to is None or s.busy or s.queued or s.codex_queue:
+        if s.account_to is None or s.busy or s.queued:
             return
 
         def run():

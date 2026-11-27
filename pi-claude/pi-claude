@@ -752,8 +752,8 @@ class Engine:
         cmd = {"type": "prompt", "message": text}
         if images:
             cmd["images"] = images
-        if busy:
-            cmd["streamingBehavior"] = "followUp"
+        if busy:  # (sent at the turn: taken into it once its tools' calls are done, before the model's next reply)
+            cmd["streamingBehavior"] = "steer"
 
         def accepted(r):
             if not r.get("success") and self.turn:

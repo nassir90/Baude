@@ -12,6 +12,7 @@
     "chatparts.py:QueuedTurn",
     "windowproc.py:WindowProc.queue_message",
     "windowproc.py:WindowProc.queue_send",
+    "windowproc.py:WindowProc.send_at_turn",
     "windowproc.py:WindowProc.queue_edit",
     "windowproc.py:WindowProc.queue_drop",
     "windowproc.py:WindowProc.flush_queue",
@@ -93,7 +94,19 @@
         },
         {
           "by": "click ↑",
-          "does": "Interrupts the running turn, then sends this message and every queued message before it, together as one message (their texts joined by a blank line, their attachments together). Tooltip \"Send now: interrupt the chat, then send this and the queued messages before it\"."
+          "does": "Sends this message and every queued message before it at once, together as one message (their texts joined by a blank line, their attachments together), to the turn going on, which isn't stopped: claude, Codex and pi take it in between the turn's steps and go on; Apple's on-device model, which answers in one call, takes it once its turn is over. The sent message is drawn as sent where the chat has got to. With a revert waiting to be made, the revert is made first, as sending does, stopping the turn, and the messages go after it. Tooltip \"Send now: send this and the queued messages before it, without stopping the chat\".",
+          "decisions": [
+            {
+              "said": "Agents still seem to stop on send queeud message, this is not ideal",
+              "rule": "Every app's send-now on a queued message gives it to the agent's turn going on without stopping it, for every agent that can take a message mid-turn; one that can't takes it as its turn ends",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#292"
+                }
+              ]
+            }
+          ]
         },
         {
           "by": "click the revert icon",
@@ -121,7 +134,7 @@
           ]
         }
       ],
-      "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself (all of it as one message, or up to the one whose ↑ was pressed)."
+      "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself: all of it as one message."
     },
     {
       "name": "another chat opened",
@@ -141,7 +154,7 @@
     },
     {
       "name": "turn ends while another chat is open",
-      "shows": "The left chat's queue is sent to it as its turn ends, by itself or stopped, as if it were open: all of it as one message, or up to the one whose ↑ stopped the turn. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
+      "shows": "The left chat's queue is sent to it as its turn ends, by itself or stopped, as if it were open: all of it as one message. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
     },
     {
       "name": "in history",

@@ -5,9 +5,11 @@ Speaks just enough of the stream-json protocol: answers `initialize` with
 commands, models and the permission mode, and replays one scripted turn per user message (thinking,
 streamed markdown, a Bash tool call that needs permission, the tool result,
 a closing message and a `result`). Every line it receives is appended to
-$FAKE_CLAUDE_LOG, plus a START line with its cwd and argv.
+$FAKE_CLAUDE_LOG, plus a START line with its cwd and argv. Its stdin is read as it
+comes (INBOX), so a turn can take a message sent while it runs, as claude does (steps).
 """
 import json
+import queue
 import re
 import os
 import subprocess
@@ -229,7 +231,7 @@ def turn(n):
          "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "ls -la"},
                      "tool_use_id": tid}})
     while True:  # wait for the permission answer (ignore anything else)
-        line = sys.stdin.readline()
+        line = next_line()
         if not line:
             sys.exit(0)
         record(line)
@@ -273,7 +275,7 @@ def ask_question(n):
         "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": {"questions": QUESTIONS},
         "tool_use_id": tid}})
     while True:
-        line = sys.stdin.readline()
+        line = next_line()
         if not line:
             sys.exit(0)
         record(line)
@@ -728,42 +730,123 @@ def reader(text):
          "total_cost_usd": 0.002 * k, "num_turns": 3, "duration_ms": 900, "usage": {"input_tokens": 50, "output_tokens": 40}})
 
 
+INBOX = queue.Queue()  # (stdin's lines as they come, "" once it's closed: read by a thread of its own, main)
+
+
+def next_line(timeout=None):
+    """stdin's next line ("" once it's closed); None if none came within timeout."""
+    try:
+        return INBOX.get(timeout=timeout)
+    except queue.Empty:
+        return None
+
+
+def control(msg):
+    """A control request answered, and done."""
+    sub = msg["request"].get("subtype")
+    if sub == "set_permission_mode" and msg["request"].get("mode") == "bypassPermissions" and not can_bypass():
+        out({"type": "control_response", "response": {
+            "subtype": "error", "request_id": msg["request_id"], "error": "Cannot set permission mode to "
+            "bypassPermissions because the session was not launched with --dangerously-skip-permissions"}})
+        return
+    resp = control_reply(msg["request"])
+    out({"type": "control_response",
+         "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})
+    if sub == "set_permission_mode":
+        out({"type": "system", "subtype": "status", "status": None,
+             "permissionMode": msg["request"]["mode"], "session_id": SESSION})
+    if sub == "stop_task" and msg["request"].get("task_id") in TASKS:
+        t = TASKS[msg["request"]["task_id"]]
+        if t.get("timer"):
+            t["timer"].cancel()
+        finish_task(msg["request"]["task_id"], "killed", "Stopped by the user")
+    if sub == "interrupt":
+        interrupted()
+    if sub == "initialize":
+        state["spares_tasks"] = msg["request"].get("perTaskStopAffordance") is True
+    if sub == "rename_session":
+        system("session_title_changed", title=msg["request"].get("title"))
+    if sub == "initialize":
+        out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
+             "model": "fake-model", "tools": ["Bash", "Read"]})
+
+
+def keep_queued(msg):
+    """A message sent while a turn runs, kept as claude 2.1 keeps one it takes into the turn: an attachment
+    (queued_command) by the message's uuid, not a user record."""
+    folder = kept_in()
+    if folder is None:
+        return
+    rec = {"parentUuid": None, "isSidechain": False, "type": "attachment", "uuid": str(uuid.uuid4()),
+           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "sessionId": SESSION,
+           "cwd": os.getcwd(), "attachment": {"type": "queued_command", "prompt": msg["message"]["content"],
+                                              "commandMode": "prompt", "source_uuid": msg.get("uuid"),
+                                              "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}}
+    with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+def steps(n):
+    """"STEPS": a turn of FAKE_STEPS Bash calls (4), each FAKE_STEP_S seconds (2), that takes in a message sent while
+    it runs, as claude 2.1 does: between its steps, after a tool's result, said in its next message, and goes on; an
+    interrupt meanwhile stops it (error_during_execution)."""
+    took = []
+    count = int(os.environ.get("FAKE_STEPS") or 4)
+    for i in range(1, count + 1):
+        tid = f"step{n}_{i}"
+        say(f"Step {i} of {count}." + (f" Also doing what you sent: {took[-1]}" if took and i > 1 and
+                                        state.pop("fresh", False) else ""), f"steps{n}_{i}")
+        out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION,
+             "message": {"id": f"steps{n}_{i}t", "model": "fake", "role": "assistant", "content": [
+                 {"type": "tool_use", "id": tid, "name": "Bash",
+                  "input": {"command": f"./build.sh --part {i}", "description": f"Build part {i}"}}]}})
+        end = time.time() + float(os.environ.get("FAKE_STEP_S") or 2)
+        while (left := end - time.time()) > 0:
+            line = next_line(left)
+            if line is None:
+                break
+            if not line:
+                sys.exit(0)
+            record(line)
+            msg = json.loads(line)
+            if msg.get("type") == "user":  # (taken into the turn, after this step: kept as claude keeps it)
+                keep_queued(msg)
+                content = msg["message"]["content"]
+                took.append(content if isinstance(content, str) else " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)))
+                state["fresh"] = True
+            elif msg.get("type") == "control_request" and msg["request"].get("subtype") == "interrupt":
+                control(msg)
+                out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
+                     "total_cost_usd": 0.001, "num_turns": i, "duration_ms": 300,
+                     "usage": {"input_tokens": 10, "output_tokens": 5}})
+                return
+            elif msg.get("type") == "control_request":
+                control(msg)
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "is_error": False, "content": f"part {i} built"}]}})
+    done = f"All {count} steps done" + (f", and {len(took)} message(s) you sent taken in." if took else ".")
+    say(done, f"steps{n}_end")
+    result(done)
+
+
 def main():
     record(f"START cwd={os.getcwd()} argv={json.dumps(sys.argv[1:])}")
     fork_transcript()
     state["model"] = arg("--model") or "opus"
     state["effort"] = arg("--effort") or ("medium" if state["model"] not in NO_EFFORT else None)
+
+    def read():
+        for got in sys.stdin:
+            INBOX.put(got)
+        INBOX.put("")
+    threading.Thread(target=read, daemon=True).start()
     turns = 0
-    for line in sys.stdin:
+    for line in iter(next_line, ""):
         record(line)
         msg = json.loads(line)
         if msg.get("type") == "control_request":
-            sub = msg["request"].get("subtype")
-            if sub == "set_permission_mode" and msg["request"].get("mode") == "bypassPermissions" and not can_bypass():
-                out({"type": "control_response", "response": {
-                    "subtype": "error", "request_id": msg["request_id"], "error": "Cannot set permission mode to "
-                    "bypassPermissions because the session was not launched with --dangerously-skip-permissions"}})
-                continue
-            resp = control_reply(msg["request"])
-            out({"type": "control_response",
-                 "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})
-            if sub == "set_permission_mode":
-                out({"type": "system", "subtype": "status", "status": None,
-                     "permissionMode": msg["request"]["mode"], "session_id": SESSION})
-            if sub == "stop_task" and msg["request"].get("task_id") in TASKS:
-                t = TASKS[msg["request"]["task_id"]]
-                if t.get("timer"):
-                    t["timer"].cancel()
-                finish_task(msg["request"]["task_id"], "killed", "Stopped by the user")
-            if sub == "interrupt":
-                interrupted()
-            if sub == "initialize":
-                state["spares_tasks"] = msg["request"].get("perTaskStopAffordance") is True
-            if sub == "rename_session":
-                system("session_title_changed", title=msg["request"].get("title"))
-            if sub == "initialize":
-                out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
-                     "model": "fake-model", "tools": ["Bash", "Read"]})
+            control(msg)
         elif msg.get("type") == "user":
             keep("user", msg["message"], **({"uuid": msg["uuid"]} if msg.get("uuid") else {}))  # (as claude: its uuid)
             turns += 1
@@ -802,6 +885,8 @@ def main():
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:
                 subagent(turns, delay, "OPEN" in text)
+            elif "STEPS" in text:
+                steps(turns)
             elif "LINGER" in text or state.get("linger"):
                 linger(turns, "LINGER" in text)
             else:

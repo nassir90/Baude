@@ -416,8 +416,8 @@ class Here:
 
 
 def guard_keys(root):
-    """A window of Baude's kept from keys that aren't its own (a page's that has them; a Bot's, handed back by its
-    page, or the text they made): MacWeb.page_has_keys. GTK's own widgets clicked: the keys theirs again. Once."""
+    """A window of Baude's kept from keys that aren't its own (a Bot's, handed back by its page, or the text they
+    made; a page's that has them, but a ⌘ or Ctrl key runs the window's or the app's shortcut): MacWeb.page_has_keys. GTK's own widgets clicked: the keys theirs again. Once."""
     if getattr(root, "keys_back", False):
         return
     root.keys_back = True
@@ -427,7 +427,7 @@ def guard_keys(root):
     root.add_controller(clicks)
     keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
     for signal in ("key-pressed", "key-released"):
-        keys.connect(signal, lambda c, kv, *_: emissionmac.MacWeb.page_has_keys(root, c.get_current_event_time(), kv))
+        keys.connect(signal, lambda c, kv, _code, st: emissionmac.MacWeb.page_has_keys(root, c.get_current_event_time(), kv, st))
     root.add_controller(keys)
 
 
@@ -1647,7 +1647,8 @@ class BrowserPane(Gtk.Box):
         if key is None:
             return False
         self.flush_typing()
-        if mods == [PRIMARY] and key in ("c", "x", "v"):  # (the page's clipboard yours, not its Emission's)
+        if mods == [PRIMARY] and not state & Gdk.ModifierType.SHIFT_MASK and key in ("c", "x", "v"):  # (the page's
+            # clipboard yours, not its Emission's; Ctrl+Shift+C and V are the page's keys)
             return self.clipboard(key)
         combo = "+".join([*self.mods(state), key]) if key in KEYS.values() else "+".join([*mods, key])
         self.ask({"op": "key", "tab": self.tab(), "keys": combo})
@@ -1656,7 +1657,8 @@ class BrowserPane(Gtk.Box):
     def clipboard(self, key):
         """⌘C, ⌘X or ⌘V (Ctrl on Linux) on a streamed page: what's selected there put on this machine's clipboard
         (cut: taken out of the page too), or what's on it pasted there. The Bot's Emission has a clipboard of its own,
-        elsewhere or on a display of its own, that the keys alone would use."""
+        elsewhere or on a display of its own, that the keys alone would use. Ctrl+C with nothing selected (and no
+        copy handler on the page) is sent as the key, a web terminal's interrupt."""
         if key == "v":
             def got(clip, res):
                 try:
@@ -1669,8 +1671,12 @@ class BrowserPane(Gtk.Box):
             return True
 
         def copied(r):
-            if isinstance(r, dict) and r.get("text"):
+            if not isinstance(r, dict):
+                return
+            if r.get("text"):
                 self.get_clipboard().set(r["text"])
+            elif key == "c" and PRIMARY == "ctrl" and not r.get("handled"):
+                self.ask({"op": "key", "tab": self.tab(), "keys": "ctrl+c"})
         self.ask({"op": "copy", "tab": self.tab(), "cut": key == "x"}, copied)
         return True
 

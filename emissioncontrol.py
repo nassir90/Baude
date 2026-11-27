@@ -691,16 +691,26 @@ class Control:
                 "field, or give its ref'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
 
     def op_copy(self, msg, answer):
-        """The text selected in the page (in the focused field, its selection there; none from a password's), for a
-        watcher's own clipboard (its ⌘C or Ctrl+C); cut: taken out of the page too, as cutting does."""
-        t = self.tab(msg)
-        self.js(t, "const el = document.activeElement; let text = '';"
-                   "if (el && el.type === 'password') return '';"
-                   "if (el && 'value' in el && typeof el.selectionStart === 'number')"
-                   "  text = el.value.slice(el.selectionStart, el.selectionEnd);"
-                   "else text = String(getSelection());"
-                   f"if (text && {json.dumps(bool(msg.get('cut')))}) document.execCommand('delete');"
-                   "return text", answer, lambda text: answer({**self.describe(t), "text": text or ""}))
+        """The text for a watcher's own clipboard (its ⌘C or Ctrl+C): what the page's own copy (cut: cut) handler
+        puts in a DataTransfer, else the text selected in the page (in the focused field, its selection there; none
+        from a password's); cut: taken out of the page too, as cutting does, unless its handler took the event.
+        handled: the page's handler took the event itself."""
+        t, cut = self.tab(msg), bool(msg.get("cut"))
+        self.js(t, "const el = document.activeElement;"
+                   "if (el && el.type === 'password') return {text: '', handled: false};"
+                   "const data = new DataTransfer();"
+                   f"const ev = new ClipboardEvent({json.dumps('cut' if cut else 'copy')}, "
+                   "{clipboardData: data, bubbles: true, cancelable: true});"
+                   "const handled = !(el || document.body).dispatchEvent(ev);"
+                   "let text = data.getData('text/plain');"
+                   "if (!text && !handled) {"
+                   "  if (el && 'value' in el && typeof el.selectionStart === 'number')"
+                   "    text = el.value.slice(el.selectionStart, el.selectionEnd);"
+                   "  else text = String(getSelection());"
+                   f"  if (text && {json.dumps(cut)}) document.execCommand('delete');"
+                   "}"
+                   "return {text: text || '', handled}",
+                answer, lambda r: answer({**self.describe(t), "text": r["text"], "handled": r["handled"]}))
 
     def op_paste(self, msg, answer):
         """text, from a watcher's own clipboard (its ⌘V or Ctrl+V), pasted where the page has its caret: offered the

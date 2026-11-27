@@ -117,6 +117,22 @@ abstract class TasksMockups(private val theme: String) {
         shoot("run")
     }
 
+    /** A task whose run waits for input: its row, its run's row and the run's page, each with the hourglass. */
+    @Test fun waitingList() {
+        show(TaskFixtures.waitingList())
+        shoot("waiting-list")
+    }
+
+    @Test fun waitingTask() {
+        show(TaskFixtures.waitingPage())
+        shoot("waiting-task")
+    }
+
+    @Test fun waitingRun() {
+        show(TaskFixtures.waitingRun())
+        shoot("waiting-run")
+    }
+
     /** A run that started one-shot agents: Started, each with its state, and what the done one said. */
     @Test fun runStarted() {
         dev.baude.android.Mesh.sessions["h1"] = TaskFixtures.started
@@ -154,8 +170,14 @@ abstract class TasksMockups(private val theme: String) {
     }
 
     /** A Bot's chat asked by its task's run (a form to fill), answered with its answer_task tool (the Answered card), then
-     * handed the run's failure: each heads with what the task did and a table of the run, then the script's words. */
-    @Test fun asked() {
+     * handed the run's failure: each heads with what the task did and a table of the run, then the script's words. The
+     * Bot's first turn answers in words only, so it's reminded, then answers with the tool. */
+    @Test fun asked() = asked(false)
+
+    /** asked, as it is while the run waits on the reminder (its from line says so), before the tool's answer. */
+    @Test fun reminded() = asked(true)
+
+    private fun asked(waiting: Boolean) {
         val answer = dev.baude.android.Call("a1", dev.baude.android.ANSWER_TASK,
             org.json.JSONObject("""{"run": "625623c87b8e486e", "answer": {"bucket": "staging"}}"""))
         answer.result("""{"task": "Deploy site", "run": "625623c87b8e486e", "values": {"bucket": "staging"}}""", false, emptyList())
@@ -170,12 +192,21 @@ abstract class TasksMockups(private val theme: String) {
                     .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task asks:\n\n" +
                         table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
-                        "Answer with your answer_task tool, these fields in its answer:\n- bucket: one of \"staging\", \"production\""), from)
+                        "Answer with your mcp__mesh__answer_task tool, these fields in its answer:\n- bucket: one of \"staging\", \"production\""), from)
                     androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
-                        dev.baude.android.ToolCard(answer, null, {}, null)
+                        dev.baude.android.Prose("Staging, I'd say: production deploys wait for the release.")
                     }
-                    androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
-                        dev.baude.android.Prose("Staging: production deploys wait for the release.")
+                    dev.baude.android.Said(dev.baude.android.Line("you", "You haven't answered run 625623c87b8e486e with " +
+                        "your mcp__mesh__answer_task tool, and the task's waiting on it. Answer with the tool now.\n\n" +
+                        "Answer with your mcp__mesh__answer_task tool, these fields in its answer:\n- bucket: one of " +
+                        "\"staging\", \"production\""), from, waits = waiting)
+                    if (!waiting) {
+                        androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
+                            dev.baude.android.ToolCard(answer, null, {}, null)
+                        }
+                        androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
+                            dev.baude.android.Prose("Answered: staging.")
+                        }
                     }
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
                         table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
@@ -186,7 +217,7 @@ abstract class TasksMockups(private val theme: String) {
             }
         }
         settle()
-        shoot("asked")
+        shoot(if (waiting) "reminded" else "asked")
     }
 
     /** A Bot's chat told its task's run finished (Notify on graceful exit): the same heading and table, the end of its output. */

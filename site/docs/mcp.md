@@ -3154,6 +3154,7 @@ One thing a pending restart waits for: a chat whose agent is running a command, 
 | `run` | string |  | A task run's: its id. |
 | `terminal` | string |  | A terminal's: its id (terminal's attach). |
 | `name` | string | yes | The chat's title, the task's name, the agent's model, or the terminal's title. |
+| `waiting` | boolean |  | A task run's: true while it waits for input (an ask of its Bot, asking); a restart would stop it. |
 | `what` | string |  | What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program. |
 
 #### RestartState
@@ -3228,6 +3229,7 @@ A session as a host lists it.
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it. |
+| `task_asks` | array of string |  | A Bot's: the uuids of the messages its tasks' runs have sent it as asks, each run waiting for input (asking) till the turn that message began ends. Empty for every other. |
 | `task_run` | TaskRunRef? |  | The task's run that started it (start's task_run), on its Bot's host. |
 | `desktop` | boolean |  | Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group. |
 | `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
@@ -3370,6 +3372,7 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `seconds` | number/null |  | How long it took. |
 | `exit` | integer/null |  | Its script's exit code. |
 | `error` | string/null |  | Why it failed or was skipped. |
+| `skips` | integer/null |  | A skipped run's: how many firings it stands for (its trigger fired again while the same run went on: one record, not one each). |
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
 | `chats` | array/null of string |  | The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them. |

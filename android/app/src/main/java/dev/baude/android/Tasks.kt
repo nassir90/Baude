@@ -177,8 +177,8 @@ private fun whole(t: Msg.Task, form: List<Msg.TaskField>? = t.form,
     return o
 }
 
-/** A run's state as an icon (its word for a description): a tick done, a stop sign failed, a spinner going, a square
- * stopped, an arrow skipped; nothing for none. */
+/** A run's state as an icon (its word for a description): a tick done, a stop sign failed, a spinner running, an
+ * hourglass in the warning colour waiting for input, a square stopped, an arrow skipped; nothing for none. */
 @Composable
 private fun RunState(status: String?) {
     val c = LocalBaude.current
@@ -187,7 +187,8 @@ private fun RunState(status: String?) {
     when (status) {
         "done" -> Icon(Adwaita.ObjectSelect, word, tint = c.success, modifier = mod)
         "failed" -> Icon(Adwaita.ProcessStop, word, tint = c.destructive, modifier = mod)
-        "running", "asking" -> Box(mod.semantics { contentDescription = word }, contentAlignment = Alignment.Center) { Spinner() }
+        "running" -> Box(mod.semantics { contentDescription = word }, contentAlignment = Alignment.Center) { Spinner() }
+        "asking" -> Icon(Adwaita.Waiting, word, tint = c.warning, modifier = mod)
         "stopped" -> Icon(Adwaita.MediaPlaybackStop, word, tint = c.dim, modifier = mod)
         "skipped" -> Icon(Adwaita.GoNext, word, tint = c.dim, modifier = mod)
     }
@@ -484,10 +485,14 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
             }
             if (going(r.status)) IconButton(Adwaita.MediaPlaybackStop, Wording.Common.stop, onClick = stop)
         }
-        Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
-            r.seconds?.let { tookText(it.toDouble()) }, r.version)
-            .joinToString(" · "),
-            style = Type.caption, color = c.dim, modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
+        Row(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) { // (its state's icon first, as Baude's run page has it)
+            RunState(r.status)
+            Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
+                r.seconds?.let { tookText(it.toDouble()) }, r.version)
+                .joinToString(" · "),
+                style = Type.caption, color = c.dim)
+        }
         if (chats.isNotEmpty()) {
             GroupHeading(Wording.Tasks.startedChats)
             BoxedList(chats, "") { s ->

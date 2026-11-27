@@ -19,7 +19,7 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 | `triggers` | below |
 | `notify_failure` | true: a failed run (non-zero exit, timeout) is sent to the Bot with its log |
 | `notify_exit` | true: a run that exits 0 is told to the Bot, for its information, with the end of its output (default false) |
-| `timeout_s` | the most a run may take (default an hour); it's stopped after |
+| `timeout_s` | the most a run may take (default an hour), not counting time it waits for input; it's stopped after |
 | `paused` | its triggers don't fire; it can still be run by hand |
 
 A script runs with the Bot's folder as its working directory (its worktree made again from its branch first, if it's
@@ -51,7 +51,7 @@ push since (its payload's `before` the head last run, `after` the head now).
 
 ## A run
 
-`running` → (`asking` while it waits on its Bot) → `done` | `failed` | `stopped` | `skipped`.
+`running` → (`asking` while it waits for input: an ask of its Bot, shown as "Waiting for input") → `done` | `failed` | `stopped` | `skipped`.
 
 Each run is kept as `runs/<id>.json` with a log `runs/<id>.log` (JSON lines `{at, kind, text, values?}`, kinds `out`,
 `err`, `say`, `ask`, `answer`, `status`). The latest 100 runs of each task are kept. A run records: task, version,
@@ -89,7 +89,9 @@ except Conflict as e:
   the Bot can call it again. A turn that ends without the tool is reminded once; ending without it again, the ask
   fails (said as refused if the tool was called and refused). A Bot whose agent has no mesh tools (an Apple model) is
   asked for a JSON object of the fields in its reply instead, checked the same way, sent back once if it doesn't fit.
-  The run is `asking` meanwhile.
+  The run is `asking` meanwhile ("Waiting for input"): it waits up to 7 days (`ASK_S`), its `timeout_s` clock
+  stopped, and the script pings the host so the connection stays up however long the answer takes. The reminder is
+  a message of its own, marked as waiting for the answer as the ask was.
 - `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far. The host refuses it
   for a task whose `notify_failure` is off.
 - `@task.main` runs a function with the inputs; an exception's traceback is printed and the script exits 1, so the run

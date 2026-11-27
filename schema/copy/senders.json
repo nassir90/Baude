@@ -12,6 +12,7 @@
     "on": "{$who} on {$where}",
     "through_mesh": "through the mesh",
     "local": "local",
-    "task_run": "{$task} run"
+    "task_run": "{$task} run",
+    "run_waiting": "its run is waiting for this answer"
   }
 }

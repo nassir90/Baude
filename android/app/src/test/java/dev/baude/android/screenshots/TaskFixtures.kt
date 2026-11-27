@@ -112,6 +112,31 @@ def deploy(inputs):
         page = "run"
     }
 
+    /** A run of Deploy site waiting for input: its script asked Juniper which bucket, the answer not in yet. */
+    val waiting get() = run("r5", "t1", "Deploy site", "asking", "manual", now - 25 * 60, null, V)
+
+    /** The list, Deploy site's last run waiting for input. */
+    fun waitingList() = list().apply {
+        tasks[0] = Msg.Task.from(deploy.json().put("last", waiting.json()))
+    }
+
+    /** Deploy site's page, its newest run waiting for input. */
+    fun waitingPage() = waitingList().apply {
+        task = tasks[0]
+        runs.addAll(listOf(waiting) + TaskFixtures.runs)
+        page = "task"
+    }
+
+    /** That run's page: what it said, and its ask, not answered yet. */
+    fun waitingRun() = waitingPage().apply {
+        run = Msg.TaskRun.from(waiting.json().put("offset", 0).put("asks", 1))
+        log.addAll(listOf(line("say", "deploying main"), line("out", "building 14 pages… done"),
+            line("ask", "Which bucket does site go to?\n\nAnswer with only a JSON object with these fields:\n" +
+                "- bucket: one of \"staging\", \"production\"")))
+        bot = "Juniper"
+        page = "run"
+    }
+
     /** The run that failed, its log. */
     fun failedRun() = page().apply {
         run = TaskFixtures.runs[1].let { Msg.TaskRun.from(it.json().put("handed", true).put("exit", 2)

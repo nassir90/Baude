@@ -15,7 +15,7 @@ import re
 import sys
 import textwrap
 
-from baudelib import emissiontools, multiplextools, wire
+from baudelib import emissiontools, multiplextools, wire, wording
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GENERATED = os.path.join(ROOT, "baudelib", "script", "baudetask_sdk", "generated.py")
@@ -238,6 +238,8 @@ def generated():
         out += _class(name, wire.DEFS[name]) + ["", ""]
     out += _packed("TYPES = {", [f"{_q(n)}: {n}" for n in entities + replies], "}", 0)
     out += ["Obj._types.update(TYPES)", "", ""]
+    out += [f"CLI_DEFAULT = {_q(wording.say('subscriptions.cli_default'))}  "
+            "# (a subscription that's its CLI's own sign-in, as every app names it: schema/copy)", "", ""]
     for cls, op in WHAT_AREAS.items():
         out += _what_area(cls, op) + [""]
     for cls, (op, module) in TOOL_AREAS.items():

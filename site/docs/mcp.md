@@ -22,6 +22,14 @@ Each tool is one or two of the wire's requests, below: the notebook's host does 
 
 The mesh's hosts (this one first): each one's id, name, whether it's reachable now, and the models it can run (their values are what start_subagent's model takes).
 
+### `subscriptions`
+
+The Claude and Codex subscriptions a host's chats run on (every reachable host's if none's given): each one's id (what start_subagent's account takes; "" for its CLI's own sign-in), provider, name, kind, whether it's the one a new chat on that provider's models takes (default), whether it's disabled (a subagent on it is refused), and the models of that host it runs. A model in no subscription's models runs on none (Ollama's, Apple's, an endpoint's).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string |  | A host's id or name (hosts) |
+
 ### `start_subagent`
 
 Start a new chat (a subagent) on a host of the mesh, with one of its models, give it a task and, unless wait is false, wait for its answer. It runs as a chat there (listed in Baude), in cwd on that host (its home if none's given), in Auto mode unless another's asked for (Auto at most); it can't ask you for permissions, so what it does ask is refused after a minute. Its id and its host's come back, to message it again (message_chat).
@@ -31,6 +39,7 @@ Start a new chat (a subagent) on a host of the mesh, with one of its models, giv
 | `prompt` | string | yes | The task, said in full: it doesn't see this chat |
 | `host` | string |  | A host's id or name (hosts); this one if none |
 | `model` | string |  | A model's value on that host (hosts) |
+| `account` | string |  | The subscription it runs on, of those that host has for its model's provider (subscriptions: an id or a name; "" for the CLI's own sign-in), in place of the one it'd take (yours, on this host; else that host's default) |
 | `cwd` | string |  | The folder on that host it works in |
 | `title` | string |  | Its title in the list |
 | `mode` | `auto` \| `acceptEdits` \| `default` \| `plan` |  | Its permission mode (default: auto; a model with no modes runs in default) |
@@ -235,18 +244,19 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, "" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
-| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage with id "": whose CLI's own sign-in (Claude's where left out). |
-| `id` | string |  | rename, token, remove, use, usage, sign_in: the account ("" for the CLI's own sign-in, use and usage only). |
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `disable` \| `auto_disable` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
+| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage, disable and auto_disable with id "": whose CLI's own sign-in (Claude's where left out). |
+| `id` | string |  | rename, token, remove, disable, auto_disable, use, usage, sign_in: the account ("" for the CLI's own sign-in, disable, auto_disable, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
 | `token` | string |  | add (Claude, Codex), token: what signs the account in, pasted: Claude's a long-lived token from claude setup-token (sk-ant-oat…) or an Anthropic API key (sk-ant-api…); Codex's an OpenAI API key (sk-…), written to a new CODEX_HOME's auth.json as codex login --with-api-key writes it. Kept on the host only, owner-only; never said back. |
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
 | `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
+| `on` | boolean |  | disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted. |
 | `code` | string |  | code: what the sign-in page showed, pasted. |
 | `method` | `browser` \| `device` |  | sign_in, Codex's: browser (the default: codex login, its page sending the browser back to the host's 127.0.0.1) or device (codex login --device-auth). |
 | `url` | string |  | callback: the address the browser ended on (its path and query are what's passed on). |
@@ -864,6 +874,17 @@ Record's notebooks here, for another machine's Record: listed, or changed.
 
 Both ways, every PING_S on every connection (and link): SILENT_S of silence and the other end's taken for gone.
 
+#### `queue` (QueueOp)
+
+A chat's queue changed (a change to the chat: Agent Management's write): messages added at its end, dropped by id, or the one up to which it's sent as the turn ends named. Told every other head attached to it (queue_changed). Sent on the chat's own connection, so it's in order with the interrupt send-now asks for.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `add` | array/null of QueuedMessage |  | Messages queued, at its end (one whose id it has already: left as it is). |
+| `drop` | array/null of string |  | The ids of messages taken out of it (sent by the head, edited, deleted). |
+| `upto` | string/null |  | The id of the one whose send-now stops the turn: it and those before it sent as the turn ends (at once if none's going). |
+
 #### `quit` (Quit)
 
 The host process stops, its agents too (their sessions kept, resumed next time; one at a turn or asking is marked cut).
@@ -912,11 +933,13 @@ The host process's restart, as a head asks for it: once nothing's running (its p
 
 #### `rotate` (Rotate)
 
-A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The Bot's session id. |
+| `model` | string/null |  | The model the Bot carries on on, of whatever program (null: its own). Given, a Bot with nothing said yet is moved onto it without a past thread. |
+| `effort` | string/null |  | Its effort on model, if model's program has one (null: the Bot's own). |
 
 #### `run_task` (RunTask)
 
@@ -975,6 +998,7 @@ A new session. Its prompt is sent once it's begun.
 | `cwd` | string |  | Its folder (default: the forked session's, else home). |
 | `model` | string/null |  | Its model. |
 | `effort` | string/null |  | Its effort. |
+| `account` | string |  | The subscription its agent runs under, one of the host's accounts for its model's provider (Claude's or Codex's: Account's id or name; "" for the CLI's own sign-in), in place of the one it would take (the chat's that starts it, else the host's default for that provider). Refused for a model that runs on no subscription, or one that isn't an account there; a disabled one's refused as its chats are. Asks subscriptions_read of a member besides spawn. |
 | `mode` | string/null |  | Its permission mode. |
 | `group` | string/null |  | Its group. |
 | `title` | string/null |  | Its title. |
@@ -1305,6 +1329,8 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
 | `codex_usage` | boolean |  | Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's "codex"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of "" is Claude's. |
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
+| `disabled` | array of string |  | The subscriptions disabled on the host, by usage key (an account's id, "" for Claude's CLI's own sign-in, "codex" for Codex's): their chats can't send. |
+| `auto_disable` | array of string |  | The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted. |
 | `last_usage` | object |  | Each Claude and Codex subscription's usage as the host last read it, by id ("" for Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers. |
 | `who` | string/null |  | sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names). |
 
@@ -1352,6 +1378,7 @@ attach's answer.
 | `login` | ChatLogin? |  | Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws. |
 | `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
 | `draft` | ChatDraft? |  | Its draft, as its host keeps it (draft_save); null if none's been written, or the head may only read the chat. |
+| `queue` | ChatQueue? |  | Its queue, as its host keeps it (queue); null if nothing's been queued, or the head may only read the chat. |
 
 #### `autofix` (AutofixReply)
 
@@ -1896,6 +1923,15 @@ notes's answer: listed {notebooks, ids}, or written {done, by}.
 | `by` | string |  | record: the Record running there made them. |
 | `error` | string |  | What's wrong. |
 
+#### `queue` (QueueReply)
+
+queue's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `queue` | ChatQueue | yes | Its queue as kept now. |
+
 #### `quitting` (Quitting)
 
 quit's answer: it's stopping.
@@ -1935,7 +1971,7 @@ rotate's answer.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | Session | yes | The Bot, as it's listed now: in its new conversation. |
-| `thread` | Session | yes | Its past thread, as it's listed now: archived. |
+| `thread` | Session? |  | Its past thread, as it's listed now: archived; null if it was only moved onto another model, nothing said yet. |
 
 #### `seen_set` (SeenSet)
 
@@ -2294,6 +2330,15 @@ What an agent's program says, on stdout.
 |---|---|---|---|
 | `line` | string |  | The line. |
 
+#### `queue_changed` (QueueChanged)
+
+A chat's queue changed by another head (queue), or by its host as it sends it: told every head attached to it that may write it, as attach's answer tells one attaching.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `queue` | ChatQueue | yes | Its queue now. |
+
 #### `sessions` (Sessions)
 
 Its sessions (newest first; a side question's never), and what it is: subscribe's answer, then again on every change.
@@ -2552,6 +2597,16 @@ A sign-in, as its host has it: a chat's to Claude, from which every head draws t
 | `reason` | string/null |  | needed: the first sentence of Claude's own error; failed: why the sign-in didn't finish. |
 | `who` | string/null |  | signed_in: who as, as claude auth status says it (Codex's: the email its sign-in names); null if it didn't say, or the head may not read Subscriptions. |
 | `turn` | integer |  | needed: which of the chat's turns that failed for want of signing in it's for, counted on its host since it started: a new one each time one fails, so every head moves the card to that turn. |
+
+#### ChatQueue
+
+A chat's queue, as its host keeps it: the messages written while its turn runs, the same on every head that opens the chat, on any machine. Its host leads it: as a turn ends it sends them all, as one message, unless a revert stopped the turn; a message queued once no turn's going goes at once.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `turns` | array of QueuedMessage | yes | Its messages, oldest first. |
+| `upto` | string/null |  | The one whose send-now stopped the turn: as it ends, it and those before it are sent, the rest kept. |
+| `rev` | integer | yes | Its revision: one more with every change, never less (a head drops one it's seen a later revision than). |
 
 #### Clock
 
@@ -3274,6 +3329,18 @@ A pull request a chat's replies name.
 | `repo` | string/null |  | Its repository, owner/name (null for a bare #12). |
 | `number` | integer |  | Its number. |
 
+#### QueuedMessage
+
+A message written while a chat's turn runs, kept by the chat's host in its queue till the turn is over (ChatQueue).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id, the head's pick (a uuid): the uuid it's sent by when it goes alone. |
+| `text` | string | yes | What's written, as heads show it. |
+| `content` | any | yes | The message's content as it's sent (a user message's: its text, or its blocks, pictures and documents first). |
+| `at` | number/null |  | When it was queued, epoch seconds. |
+| `sender` | Sender? |  | Who it's from, if not the chat's user (a relayed chat's message): it's sent by itself, not joined with those from another. |
+
 #### Record
 
 A member's record: who it is and the members it's linked to. A host sends its own when it changes (seq higher than any it sent before) and passes each one newer than it had on to its other links.
@@ -3368,7 +3435,7 @@ A session as a host lists it.
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
 | `rotated` | number/null |  | A Bot's: when it was last rotated (its conversation archived as a past thread, a new one begun), epoch seconds; null if it never has. A head's copy of its transcript is let go of as it changes. |
 | `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
-| `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
+| `acting` | boolean |  | Whether its turn is at its browser's tools (Emission's), its own or a subagent's: from the start of a call of Emission's till another tool's call or text starts after it (in each agent's own messages; on while any agent is at one), the turn ends or its agent goes; only while it's working, not asking. |
 | `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
@@ -3381,6 +3448,7 @@ A session as a host lists it.
 | `start_key` | string/null |  | Its start's start_key, if it was given one. |
 | `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
 | `account_gone` | boolean |  | Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked. |
+| `account_disabled` | boolean |  | The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked. |
 | `held` | array of HeldMessage |  | Messages held for it, oldest first. |
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
 | `always_allow` | array of string |  | The tools allowed whenever it asks for them, sorted. |
@@ -3711,8 +3779,8 @@ A host's telemetry: on or off, line profiling on or off, and what each process o
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean | yes | Events kept and the machine sampled. |
-| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
 
 #### TelemetryUsage
@@ -3882,6 +3950,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `OPEN_S` | `20` | A member of the mesh, reached through it: its tunnel has this long to open, in seconds. |
 | `PING_S` | `5` | A connection's ends each say something at least this often (ping), in seconds. |
 | `QUERY_ROWS_MAX` | `1000` | A database query's rows, at most (databases' query): the rest aren't read. |
+| `QUEUE_CHARS_MAX` | `8000000` | A chat's queue, as its host keeps it, at most, in characters of JSON (its messages' pictures and documents too): a message that would take it past this is refused, and stays the head's own. |
 | `SHOT_MAX` | `1024` | A browser screenshot's longest side, in pixels. |
 | `SHOT_QUALITY` | `82` | A browser screenshot's JPEG quality. |
 | `SIGNED_S` | `300` | A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to. |
@@ -3889,6 +3958,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `34` | The wire's version, as a host's hello says it. |
+| `VERSION` | `37` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

@@ -62,6 +62,8 @@
     "not_signed_in_folder": "That folder isn't signed in to Claude",
     "token_saved": "Token replaced",
     "no_account_here": "This chat's model runs on no subscription",
+    "spawn_no_account": "{$model} runs on no subscription",
+    "spawn_unknown": "No subscription {$name} on this host for {$model}",
     "account_tip": "Subscription this chat runs on",
     "account_note": "Subscription → {$name}",
     "removed_account": "Removed subscription",

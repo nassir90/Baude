@@ -48,7 +48,9 @@ class Outgoing(val id: String, val lines: List<Line>, val text: String, val file
  * one it's sent by: if it was sent and its host may have taken it (tried: its link went before the answer came), sent
  * by it again, so its host takes it once. failed: why its host said no to it, sent by itself; it waits for you (↑). */
 class Queued(val text: String, val files: List<Picked>, val uuid: String? = null, val offline: Boolean = false,
-             val tried: Boolean = false, val failed: String? = null)
+             val tried: Boolean = false, val failed: String? = null) {
+    var hosted = 0 // (in its chat's queue on its host, by its uuid, which sends it: 1 asked to add it, 2 it has it)
+}
 
 object Queue {
     private val ALL = Queued("", emptyList())
@@ -58,7 +60,8 @@ object Queue {
     fun submit(chat: Chat, working: Boolean, text: String, files: List<Picked>) {
         val reached = Mesh.conn(chat.hostId)?.state == "up"
         if (chat.sender == null && (working || !reached))
-            chat.queued.add(Queued(text.trim(), files, java.util.UUID.randomUUID().toString(), offline = !reached))
+            chat.queued.add(Queued(text.trim(), files, java.util.UUID.randomUUID().toString(), offline = !reached)
+                .also { if (reached) Mesh.queueAdd(chat, it) }) // (a host's chat's: kept there, and sent by it)
         else chat.send(text, files)
     }
 
@@ -79,12 +82,13 @@ object Queue {
     }
 
     /** The queue sent as one message when a turn ends, including interruption (up to the one ↑ was pressed on, if one was). */
-    fun flush(chat: Chat) {
+    fun flush(chat: Chat, taken: (() -> Unit)? = null) {
         val upto = chat.queueUpto ?: ALL
         chat.stopAsked = false
         chat.queueUpto = null
         if (chat.queued.isEmpty()) return
-        val turns = if (upto === ALL) chat.queued.filter { it.failed == null } // (one its host said no to: by ↑ only)
+        val turns = if (upto === ALL) chat.queued.filter { it.failed == null && it.hosted == 0 } // (one its host said no
+            // to: by ↑ only; one its host has: sent by it)
             else chat.queued.take(chat.queued.indexOf(upto) + 1)
         if (turns.isEmpty()) return
         if (Mesh.conn(chat.hostId)?.state != "up") { // (kept, to go once its host's back: resend)
@@ -92,21 +96,31 @@ object Queue {
                 offline = true, tried = q.tried)
             return
         }
+        Mesh.queueDrop(chat, turns)
         chat.queued.removeAll(turns.toSet())
         if (turns.any { it.tried }) { // (one its host may have taken: each by its own uuid, so it's taken once)
-            for (q in turns) chat.send(q.text, q.files, q.uuid)
+            for (q in turns) chat.send(q.text, q.files, q.uuid, if (q === turns.last()) taken else null)
             return
         }
         val text = turns.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         val files = turns.flatMap { it.files }
-        chat.send(text, files, turns.singleOrNull()?.uuid)
+        chat.send(text, files, turns.singleOrNull()?.uuid, taken)
     }
 
     /** ↑ on a queued message: it and those before it sent together, now: to the turn going on, which takes it in and
-     * goes on (as Baude's send_at_turn), or as a turn of its own. */
+     * goes on (as Baude's send_at_turn), or as a turn of its own. Claude Code's commands and subagents running in the
+     * foreground are moved to the background once it's given it (background_tasks), where they go on, so the turn
+     * takes it in now. */
     fun sendNow(chat: Chat, q: Queued) {
         chat.queueUpto = q
-        flush(chat)
+        val claude = isWorking(chat) && program(Mesh.session(chat.hostId, chat.sid)?.model) == "claude"
+        flush(chat, if (claude) ({ moveForeground(chat) }) else null)
+    }
+
+    /** A queued message taken out (✕, or its revert): out of its host's queue too, if it has it. */
+    fun drop(chat: Chat, q: Queued) {
+        Mesh.queueDrop(chat, listOf(q))
+        chat.queued.remove(q)
     }
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -181,8 +195,9 @@ object Queue {
         val text = listOf(chat.draft.value.orEmpty(), chat.typed).filter { it.isNotBlank() }.joinToString("\n\n")
         val going = chat.sent.filter { it.kept && !it.accepted } // (sent, its host's answer not come: sent again by its
             .map { Queued(it.text, it.files, it.id, offline = true, tried = true) } // uuid if the app's ended first)
-        val upto = chat.queued.indexOf(chat.queueUpto).takeIf { it >= 0 }?.let { it + going.size }
-        return Mesh.Draft(text, chat.files.toList(), going + chat.queued, upto, chat.stopAsked && chat.queued.isNotEmpty(),
+        val mine = chat.queued.filter { it.hosted == 0 } // (its host's kept there)
+        val upto = mine.indexOf(chat.queueUpto).takeIf { it >= 0 }?.let { it + going.size }
+        return Mesh.Draft(text, chat.files.toList(), going + mine, upto, chat.stopAsked && mine.isNotEmpty(),
             chat.draftDirty)
     }
 
@@ -336,12 +351,12 @@ fun QueuedRow(chat: Chat, q: Queued) {
             q.failed?.let { Wording.HeldSend.notSent(why = it) } ?: Wording.Hosts.waitsFor(host = Mesh.label(chat.hostId)),
             tint = if (q.failed != null) c.warning else c.dim, modifier = Modifier.alignBy(level.buttons).padding(end = 6.dp).size(14.dp.icon))
         Revealed(shown, Modifier.alignBy(level.buttons)) {
-            TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
+            TurnButton(Wording.ChatTurns.queuedDelete, { Queue.drop(chat, q) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
             TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q) }) { UpArrow() }
             TurnButton(Wording.ChatTurns.queuedEdit, {
-                chat.queued.remove(q)
+                Queue.drop(chat, q)
                 chat.edit.value = q.text
                 chat.files.addAll(0, q.files)
             }) { Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(12.dp.icon)) }

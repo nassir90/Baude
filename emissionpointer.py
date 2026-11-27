@@ -16,7 +16,7 @@ class BotPointer:
     it): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played in turn.
     It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
     takes it pressed along its path, a scroll shows the wheel's way (a chevron going that way). It fades once the Bot's
-    let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or
+    let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at Emission's tools (acting) or
     its pointer's moving (gliding, pressing, dragging, scrolling), and out once neither is, GLOW_HOLD_S after.
     look(now) says what's to be drawn then (now: time.monotonic())."""
     # (a glide's time: the shortest, the longest; about a second for 1500 px between)
@@ -97,7 +97,7 @@ class BotPointer:
         return bool(self.steps or self.step or self.marks)
 
     def glowing(self, now=None):
-        """Whether the glow's wanted: the Bot's at its tools, or its pointer's moving or just has."""
+        """Whether the glow's wanted: the Bot's at Emission's tools, or its pointer's moving or just has."""
         return self.acting or self.moving() or (now or time.monotonic()) - self.moved < self.GLOW_HOLD_S
 
     def shown(self, now=None):

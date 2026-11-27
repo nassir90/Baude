@@ -8,7 +8,7 @@ type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to 
 tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting). Out in a window of its
 own (BrowserWindow: an Emission window's bars, the Bot's browser still), the page says so instead, and the Bot's browser
 is that window's till it's closed. Over the page, never in it: the Bot's pointer as its tools move it, and its edges
-glowing in the accent while the Bot's turn is at its tools (BotPointer, drawn by Presence, or MacOverlay hosted)."""
+glowing in the accent while the Bot's turn is at Emission's tools (BotPointer, drawn by Presence, or MacOverlay hosted)."""
 import json
 import os
 import queue
@@ -1200,7 +1200,7 @@ class BrowserPane(Gtk.Box):
         return True
 
     def presence_check(self):
-        """The glow as the Bot's turn is (its host's listing: acting, at its tools; not writing to you, not done),
+        """The glow as the Bot's turn is (its host's listing: acting, at Emission's tools; not writing to you, not done),
         in the accent: given the pointer drawn over its page (hosted: its window's, drawn by MacOverlay; streamed:
         Presence's). As listings change (listen), and as its page is shown or its frames start."""
         if self.sid is None or not self.get_mapped():  # (nothing for a page out of sight, or a chat's)

@@ -1,5 +1,5 @@
 {
-  "description": "A Bot's browser, a page of the right-hand side panel: the Bot's own Emission browser, watched live and drivable by you with the same input the Bot uses (clicks, typing, keys, scroll, drag, hover). It sits on one of the hosts the Bot has used (its chat's host to start with). While the Bot is acting an accent-coloured glow frames the page and the Bot's pointer is drawn moving over it. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. The page can also be moved out into a window of its own (see 'Its own window'). This inventory covers what the pane shows, not Emission's own internals.",
+  "description": "A Bot's browser, a page of the right-hand side panel: the Bot's own Emission browser, watched live and drivable by you with the same input the Bot uses (clicks, typing, keys, scroll, drag, hover). It sits on one of the hosts the Bot has used (its chat's host to start with). While the Bot is using Emission's tools an accent-coloured glow frames the page and the Bot's pointer is drawn moving over it. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. The page can also be moved out into a window of its own (see 'Its own window'). This inventory covers what the pane shows, not Emission's own internals.",
   "apps": [
     "baude"
   ],
@@ -126,7 +126,7 @@
     },
     {
       "name": "page",
-      "shows": "The Bot's selected tab drawn to fill the page area (kept in proportion, centred), set into the panel's dark inside like the other panes. A streamed page is asked for at the area's size (frames at device pixels) and re-requested a quarter second after the size settles; the Bot's page is laid out at the panel's shape while you are driving it. A hosted (native) page is drawn by Baude itself, always over the window's own drawing: moving, resizing, maximizing or un-maximizing the window (dragging it out of maximized by its title bar included) never hides or reloads it. The app's own popups still show over it: a toast, or anything else the app lays over the page area, is drawn above the page and takes its own clicks and scrolls there. While the Bot acts, a glow in the accent colour frames the page and the Bot's pointer (an arrow with a soft shadow, click rings, scroll chevrons) is drawn over it moving as the Bot moves it; these never take a click. Nothing but the page is shown when the page is out in its own window (see 'Its own window').",
+      "shows": "The Bot's selected tab drawn to fill the page area (kept in proportion, centred), set into the panel's dark inside like the other panes. A streamed page is asked for at the area's size (frames at device pixels) and re-requested a quarter second after the size settles; the Bot's page is laid out at the panel's shape while you are driving it. A hosted (native) page is drawn by Baude itself, always over the window's own drawing: moving, resizing, maximizing or un-maximizing the window (dragging it out of maximized by its title bar included) never hides or reloads it. The app's own popups still show over it: a toast, or anything else the app lays over the page area, is drawn above the page and takes its own clicks and scrolls there. While the Bot's turn is at Emission's tools (from the start of an Emission call until another tool's call or its text begins), a glow in the accent colour frames the page (at the page's size, redrawn as the page or its window is resized) and the Bot's pointer (an arrow with a soft shadow, click rings, scroll chevrons) is drawn over it moving as the Bot moves it; these never take a click. Nothing but the page is shown when the page is out in its own window (see 'Its own window').",
       "actions": [
         {
           "by": "click on the page",
@@ -167,6 +167,26 @@
           "source": [
             {
               "issue": "BaudeInternal#303"
+            }
+          ]
+        },
+        {
+          "said": "The Emission browser shows the orange gradient even when Emission's tools aren't being used (paraphrased)",
+          "rule": "Every app draws a Bot's browser glow only while the Bot's turn is at Emission's tools: a call to any other tool, or the Bot writing, ends it, and the glow fades out.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#301"
+            }
+          ]
+        },
+        {
+          "said": "The agent-use vignette doesn't scale properly when the Emission window is resized (paraphrased)",
+          "rule": "Every app redraws a Bot's browser glow at the page's new size whenever the page or its window is resized, held steady or fading; it never stays at the size it was drawn at.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#302"
             }
           ]
         }
@@ -243,7 +263,7 @@
     },
     {
       "name": "watching",
-      "shows": "Live page; tab strip if more than one tab; pointer and glow while the Bot acts (its host says it is working and acting)."
+      "shows": "Live page; tab strip if more than one tab; pointer and glow while the Bot's turn is at Emission's tools (its host says it is working and acting)."
     },
     {
       "name": "started again",
@@ -280,6 +300,28 @@
     {
       "name": "own window",
       "shows": "'Currently disembodied' placeholder; see the part above."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "A development browser that can't open plain http pages (a dev server on a *.localhost name) is unacceptable (paraphrased)",
+      "rule": "Every app's browser opens plain http pages as an ordinary browser does: localhost, *.localhost, *.local, private and public IP addresses and any http:// address typed; a page that answers with an error status (401 asking for sign-in, say) is shown, not replaced by a failure page",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#299"
+        }
+      ]
+    },
+    {
+      "said": "A preview's sign-in fails because the browser blocks cross-site tracking as Safari does; a developer's browser should let it work (paraphrased)",
+      "rule": "Every app's browser keeps cookies and storage set under another site's page (an app's preview on another host, an embedded sign-in) by default; blocking them as Safari does is a per-profile choice, off unless turned on",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#299"
+        }
+      ]
     }
   ]
 }

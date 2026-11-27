@@ -238,6 +238,20 @@ class ChatLogin(Obj):
     """
 
 
+class ChatQueue(Obj):
+    """A chat's queue, as its host keeps it: the messages written while its turn runs, the same on every head that
+    opens the chat, on any machine. Its host leads it: as a turn ends it sends them all, as one message, unless a
+    revert stopped the turn; a message queued once no turn's going goes at once.
+
+        turns (array of QueuedMessage): Its messages, oldest first.
+        upto (string or None): The one whose send-now stopped the turn: as it ends, it and those before it are
+            sent, the rest kept.
+        rev (integer): Its revision: one more with every change, never less (a head drops one it's seen a later
+            revision than).
+    """
+    _refs = {"turns": "QueuedMessage"}
+
+
 class Clock(Obj):
     """The host's clock.
 
@@ -982,6 +996,21 @@ class PullLink(Obj):
     """
 
 
+class QueuedMessage(Obj):
+    """A message written while a chat's turn runs, kept by the chat's host in its queue till the turn is over
+    (ChatQueue).
+
+        id (string): Its id, the head's pick (a uuid): the uuid it's sent by when it goes alone.
+        text (string): What's written, as heads show it.
+        content (any): The message's content as it's sent (a user message's: its text, or its blocks, pictures
+            and documents first).
+        at (number or None): When it was queued, epoch seconds.
+        sender (Sender or None): Who it's from, if not the chat's user (a relayed chat's message): it's sent by
+            itself, not joined with those from another.
+    """
+    _refs = {"sender": "Sender"}
+
+
 class Record(Obj):
     """A member's record: who it is and the members it's linked to. A host sends its own when it changes (seq higher
     than any it sent before) and passes each one newer than it had on to its other links.
@@ -1094,8 +1123,10 @@ class Session(Obj):
             as it changes.
         autofix (AutofixPull or None): Its Auto-fix: the pull request its host follows for it; null while it's
             off.
-        acting (boolean): Whether its turn is at its tools: from a tool call's start till text starts after it,
-            the turn ends or its agent goes; only while it's working, not asking.
+        acting (boolean): Whether its turn is at its browser's tools (Emission's), its own or a subagent's: from
+            the start of a call of Emission's till another tool's call or text starts after it (in each agent's
+            own messages; on while any agent is at one), the turn ends or its agent goes; only while it's
+            working, not asking.
         context (ContextUsage or None): How much of its context window its agent last said it's used, kept while
             its agent's stopped; null till it's said.
         on_phone (boolean): A Bot's browser is on a phone now.
@@ -1778,8 +1809,10 @@ class Attached(Obj):
             false, it only reads it, and answers none of its asks.
         draft (ChatDraft or None): Its draft, as its host keeps it (draft_save); null if none's been written, or
             the head may only read the chat.
+        queue (ChatQueue or None): Its queue, as its host keeps it (queue); null if nothing's been queued, or
+            the head may only read the chat.
     """
-    _refs = {"session": "Session", "login": "ChatLogin", "draft": "ChatDraft"}
+    _refs = {"session": "Session", "login": "ChatLogin", "draft": "ChatDraft", "queue": "ChatQueue"}
 
 
 class AutofixReply(Obj):
@@ -2338,6 +2371,15 @@ class NotesReply(Obj):
     _refs = {"notebooks": "Notebook"}
 
 
+class QueueReply(Obj):
+    """queue's answer.
+
+        session (string): The session's id.
+        queue (ChatQueue): Its queue as kept now.
+    """
+    _refs = {"queue": "ChatQueue"}
+
+
 class Quitting(Obj):
     """quit's answer: it's stopping."""
 
@@ -2631,59 +2673,63 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "AccessRules": AccessRules, "AccessState": AccessState, "Account": Account, "Ask": Ask,
          "AutofixPull": AutofixPull, "BotFields": BotFields, "BotListing": BotListing, "BotRef": BotRef,
          "Branch": Branch, "CallbackPage": CallbackPage, "ChatDraft": ChatDraft, "ChatLogin": ChatLogin,
-         "Clock": Clock, "Command": Command, "Commit": Commit, "ContextCategory": ContextCategory,
-         "ContextUsage": ContextUsage, "DbColumn": DbColumn, "DbLink": DbLink, "DbServer": DbServer,
-         "DbTable": DbTable, "DecideQuestion": DecideQuestion, "Decider": Decider, "Decision": Decision, "Dep": Dep,
-         "DirEntry": DirEntry, "DockerColumn": DockerColumn, "DockerContext": DockerContext,
-         "DockerFault": DockerFault, "DockerPage": DockerPage, "DockerRow": DockerRow,
-         "DockerSection": DockerSection, "Edit": Edit, "FoundLink": FoundLink, "GitFound": GitFound,
-         "GitMade": GitMade, "GitParent": GitParent, "Gone": Gone, "GoneFolder": GoneFolder, "Head": Head,
-         "HeldMessage": HeldMessage, "HostHello": HostHello, "Info": Info, "KubeColumn": KubeColumn,
+         "ChatQueue": ChatQueue, "Clock": Clock, "Command": Command, "Commit": Commit,
+         "ContextCategory": ContextCategory, "ContextUsage": ContextUsage, "DbColumn": DbColumn, "DbLink": DbLink,
+         "DbServer": DbServer, "DbTable": DbTable, "DecideQuestion": DecideQuestion, "Decider": Decider,
+         "Decision": Decision, "Dep": Dep, "DirEntry": DirEntry, "DockerColumn": DockerColumn,
+         "DockerContext": DockerContext, "DockerFault": DockerFault, "DockerPage": DockerPage,
+         "DockerRow": DockerRow, "DockerSection": DockerSection, "Edit": Edit, "FoundLink": FoundLink,
+         "GitFound": GitFound, "GitMade": GitMade, "GitParent": GitParent, "Gone": Gone, "GoneFolder": GoneFolder,
+         "Head": Head, "HeldMessage": HeldMessage, "HostHello": HostHello, "Info": Info, "KubeColumn": KubeColumn,
          "KubeContainer": KubeContainer, "KubeContext": KubeContext, "KubeFault": KubeFault, "KubePage": KubePage,
          "KubeRef": KubeRef, "KubeRow": KubeRow, "KubeSample": KubeSample, "KubeSection": KubeSection,
          "KubeShare": KubeShare, "KubeShareColumn": KubeShareColumn, "KubeSummary": KubeSummary, "KubeUse": KubeUse,
          "Member": Member, "MemberInfo": MemberInfo, "MeshView": MeshView, "Notebook": Notebook, "OutLink": OutLink,
          "PageNow": PageNow, "PointerEvent": PointerEvent, "Provider": Provider, "ProviderModel": ProviderModel,
-         "Proxy": Proxy, "PullInfo": PullInfo, "PullLink": PullLink, "Record": Record,
-         "RestartBlocker": RestartBlocker, "RestartState": RestartState, "Running": Running, "Sender": Sender,
-         "Session": Session, "SignalRef": SignalRef, "StoredSender": StoredSender, "SubagentFile": SubagentFile,
-         "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding, "TaskChoice": TaskChoice, "TaskField": TaskField,
-         "TaskLogLine": TaskLogLine, "TaskRun": TaskRun, "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger,
-         "TaskVariable": TaskVariable, "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent,
-         "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
-         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
-         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
-         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
-         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
-         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
-         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
-         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
-         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
-         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
-         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
-         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
-         "Deactivated": Deactivated, "Decided": Decided, "DecidersReply": DecidersReply, "Deleted": Deleted,
-         "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd, "DockerReply": DockerReply,
-         "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply, "EditsReply": EditsReply,
-         "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply, "EmissionServing": EmissionServing,
-         "EmissionWatchEnd": EmissionWatchEnd, "EmissionWatching": EmissionWatching, "Error": Error,
-         "FeedbackFiled": FeedbackFiled, "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply,
-         "GitReply": GitReply, "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData,
-         "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts,
-         "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
+         "Proxy": Proxy, "PullInfo": PullInfo, "PullLink": PullLink, "QueuedMessage": QueuedMessage,
+         "Record": Record, "RestartBlocker": RestartBlocker, "RestartState": RestartState, "Running": Running,
+         "Sender": Sender, "Session": Session, "SignalRef": SignalRef, "StoredSender": StoredSender,
+         "SubagentFile": SubagentFile, "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding,
+         "TaskChoice": TaskChoice, "TaskField": TaskField, "TaskLogLine": TaskLogLine, "TaskRun": TaskRun,
+         "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger, "TaskVariable": TaskVariable,
+         "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent, "TelemetryFront": TelemetryFront,
+         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
+         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
+         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
+         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
+         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
+         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
+         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
+         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
+         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
+         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
+         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
+         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
+         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
+         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
+         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
+         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
+         "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
+         "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
+         "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
+         "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd,
+         "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
          "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
-         "NotesReply": NotesReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
-         "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated, "SeenSet": SeenSet,
-         "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply, "Started": Started, "Stopped": Stopped,
-         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskAnswered": TaskAnswered,
-         "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply, "TaskReported": TaskReported,
-         "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted, "TasksReply": TasksReply,
-         "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
+         "NotesReply": NotesReply, "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed,
+         "Relaying": Relaying, "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated,
+         "SeenSet": SeenSet, "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply, "Started": Started,
+         "Stopped": Stopped, "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer,
+         "TaskAnswered": TaskAnswered, "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply,
+         "TaskReported": TaskReported, "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted,
+         "TasksReply": TasksReply, "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
          "TelemetrySetReply": TelemetrySetReply, "TerminalEnd": TerminalEnd, "TerminalOpened": TerminalOpened,
          "TerminalOut": TerminalOut, "TerminalsReply": TerminalsReply, "ThemeRemoved": ThemeRemoved,
          "ThemeSaved": ThemeSaved, "ThemesReply": ThemesReply, "TranscriptReply": TranscriptReply,
          "Unarchived": Unarchived, "Unlinked": Unlinked, "WaitsOnReply": WaitsOnReply}
 Obj._types.update(TYPES)
+
+
+CLI_DEFAULT = "CLI default"  # (a subscription that's its CLI's own sign-in, as every app names it: schema/copy)
 
 
 class Kube(Area):
@@ -4062,6 +4108,22 @@ class Ops(Area):
         return self._call("notes", {"action": action, "have": have, "changes": changes,
                                     "moved": moved}, host, NotesReply)
 
+    def queue(self, *, session=None, add=None, drop=None, upto=None, host=None):
+        """queue (QueueOp): A chat's queue changed (a change to the chat: Agent Management's write): messages added at
+        its end, dropped by id, or the one up to which it's sent as the turn ends named. Told every other head
+        attached to it (queue_changed). Sent on the chat's own connection, so it's in order with the interrupt send-
+        now asks for.
+
+            session (string): The session's id.
+            add (array or None of QueuedMessage): Messages queued, at its end (one whose id it has already: left
+                as it is).
+            drop (array or None of string): The ids of messages taken out of it (sent by the head, edited,
+                deleted).
+            upto (string or None): The id of the one whose send-now stops the turn: it and those before it sent
+                as the turn ends (at once if none's going).
+        """
+        return self._call("queue", {"session": session, "add": add, "drop": drop, "upto": upto}, host, QueueReply)
+
     def quit(self, *, if_idle=None, restart=None, host=None):
         """quit (Quit): The host process stops, its agents too (their sessions kept, resumed next time; one at a turn
         or asking is marked cut).
@@ -4157,8 +4219,8 @@ class Ops(Area):
         return self._call("signal_names", {"cwd": cwd, "session": session,
                                            "cli_id": cli_id}, host, SignalNamesReply)
 
-    def start(self, *, prompt=None, cwd=None, model=None, effort=None, mode=None, group=None, title=None,
-              attach=None, answers=None, spawned_by=None, task_run=None, system=None, add_dirs=None,
+    def start(self, *, prompt=None, cwd=None, model=None, effort=None, account=None, mode=None, group=None,
+              title=None, attach=None, answers=None, spawned_by=None, task_run=None, system=None, add_dirs=None,
               allowed_tools=None, disallowed_tools=None, fork_from=None, ask_timeout=None, ask_default=None,
               draft=None, ephemeral=None, adopt=None, env=None, start_key=None, app_tools=None, grace=None,
               as_meta=None, as_=None, bot=None, host=None):
@@ -4168,6 +4230,11 @@ class Ops(Area):
             cwd (string): Its folder (default: the forked session's, else home).
             model (string or None): Its model.
             effort (string or None): Its effort.
+            account (string): The subscription its agent runs under, one of the host's accounts for its model's
+                provider (Claude's or Codex's: Account's id or name; "" for the CLI's own sign-in), in place of
+                the one it would take (the chat's that starts it, else the host's default for that provider).
+                Refused for a model that runs on no subscription, or one that isn't an account there; a disabled
+                one's refused as its chats are. Asks subscriptions_read of a member besides spawn.
             mode (string or None): Its permission mode.
             group (string or None): Its group.
             title (string or None): Its title.
@@ -4204,15 +4271,15 @@ class Ops(Area):
             as (string): As input's, for the prompt.
             bot (BotFields): A Bot made of it as it starts (a phone's host takes it; picture left out).
         """
-        return self._call("start", {"prompt": prompt, "cwd": cwd, "model": model, "effort": effort, "mode": mode,
-                                    "group": group, "title": title, "attach": attach, "answers": answers,
-                                    "spawned_by": spawned_by, "task_run": task_run, "system": system,
-                                    "add_dirs": add_dirs, "allowed_tools": allowed_tools,
-                                    "disallowed_tools": disallowed_tools, "fork_from": fork_from,
-                                    "ask_timeout": ask_timeout, "ask_default": ask_default, "draft": draft,
-                                    "ephemeral": ephemeral, "adopt": adopt, "env": env, "start_key": start_key,
-                                    "app_tools": app_tools, "grace": grace, "as_meta": as_meta, "as": as_,
-                                    "bot": bot}, host, Obj)
+        return self._call("start", {"prompt": prompt, "cwd": cwd, "model": model, "effort": effort,
+                                    "account": account, "mode": mode, "group": group, "title": title,
+                                    "attach": attach, "answers": answers, "spawned_by": spawned_by,
+                                    "task_run": task_run, "system": system, "add_dirs": add_dirs,
+                                    "allowed_tools": allowed_tools, "disallowed_tools": disallowed_tools,
+                                    "fork_from": fork_from, "ask_timeout": ask_timeout, "ask_default": ask_default,
+                                    "draft": draft, "ephemeral": ephemeral, "adopt": adopt, "env": env,
+                                    "start_key": start_key, "app_tools": app_tools, "grace": grace,
+                                    "as_meta": as_meta, "as": as_, "bot": bot}, host, Obj)
 
     def stop(self, *, session=None, restart=None, host=None):
         """stop (Stop): A session's agent stopped: the next message resumes it.

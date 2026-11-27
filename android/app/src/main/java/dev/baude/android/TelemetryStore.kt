@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit
  * profiles nothing. Nothing here is sent anywhere. */
 object TelemetryStore {
     private const val SAMPLE_S = 5L
+    private const val PROCS_TICKS = 6L // (its process every 30 seconds)
     private const val LIMIT = 5000
     private const val ERRORS_KEPT = 1000 // (errors kept: the latest by when they last happened)
     private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L, "counters" to 90L)
@@ -61,7 +62,7 @@ object TelemetryStore {
     }
 
     private fun run() {
-        if (sampling == null) sampling = work.scheduleWithFixedDelay({ sampleNow() }, SAMPLE_S, SAMPLE_S, TimeUnit.SECONDS)
+        if (sampling == null) sampling = work.scheduleWithFixedDelay({ tick() }, SAMPLE_S, SAMPLE_S, TimeUnit.SECONDS)
     }
 
     /** The wire's TelemetryState: on or off; nothing profiled here. */
@@ -216,6 +217,11 @@ object TelemetryStore {
         val today = LocalDate.now()
         if (pruned != today) {
             pruned = today
+            for (f in File(dir(), "metrics").listFiles().orEmpty()) { // (old samples rolled up: a row a minute, then an hour)
+                val d = try { LocalDate.parse(f.name.removeSuffix(".jsonl")) } catch (_: Exception) { continue }
+                val span = if (d.plusDays(7).isBefore(today)) 3600 else if (d.plusDays(1).isBefore(today)) 60 else 0
+                if (span > 0) try { roll(f, span) } catch (_: Exception) {}
+            }
             for ((k, days) in KEEP) for (f in File(dir(), k).listFiles().orEmpty()) {
                 val d = try { LocalDate.parse(f.name.removeSuffix(".jsonl")) } catch (_: Exception) { continue }
                 if (d.plusDays(days).isBefore(today)) f.delete()
@@ -223,14 +229,50 @@ object TelemetryStore {
         }
     }
 
-    /** One sample: the phone's memory, swap and low memory, and this app's process (its host too) CPU and memory. No load average: Android
-     * keeps it from apps. */
-    private fun sampleNow() {
+    /** A day file of samples rolled up to a row each span seconds (telemetry.roll_samples, the same), unless it is: the
+     * numbers their mean, the pressure the worst, the process's CPU and memory their mean. */
+    private fun roll(f: File, span: Int) {
+        val rows = f.readLines().mapNotNull { try { JSONObject(it) } catch (_: Exception) { null } }
+        if (rows.isEmpty() || rows.all { it.optInt("span", 0) >= span }) return
+        fun mean(xs: List<Double>) = if (xs.isEmpty()) null else xs.sum() / xs.size
+        fun nums(these: List<JSONObject>, k: String) = these.mapNotNull { (it.opt(k) as? Number)?.toDouble() }
+        val out = rows.groupBy { Triple((it.getDouble("at") / span).toLong(), it.opt("commit")?.toString(), it.opt("wire")?.toString()) }
+            .toSortedMap(compareBy({ it.first }, { it.second }, { it.third })).map { (key, these) ->
+                val o = JSONObject().put("at", key.first * span).put("span", span).put("load", JSONObject.NULL)
+                    .put("commit", these.last().opt("commit") ?: JSONObject.NULL).put("wire", these.last().opt("wire") ?: JSONObject.NULL)
+                for (k in listOf("memory_total", "memory_used", "swap_total", "swap_used")) o.put(k, mean(nums(these, k))?.toLong() ?: JSONObject.NULL)
+                o.put("memory_stall", JSONObject.NULL)
+                o.put("memory_pressure", if (these.any { it.optString("memory_pressure") == "critical" }) "critical" else "normal")
+                val procs = these.flatMap { it.optJSONArray("procs").list() }.groupBy { it.optString("app") to it.optLong("pid") }
+                if (procs.isNotEmpty()) o.put("procs", JSONArray(procs.map { (k, ps) -> JSONObject().put("app", k.first).put("pid", k.second)
+                    .put("cpu", mean(nums(ps, "cpu"))?.let { Math.round(it * 10) / 10.0 } ?: JSONObject.NULL)
+                    .put("rss", mean(nums(ps, "rss"))?.toLong() ?: JSONObject.NULL) }))
+                o
+            }
+        val tmp = File(f.path + ".tmp")
+        tmp.writeText(out.joinToString("") { "$it\n" })
+        tmp.renameTo(f)
+    }
+
+    private var ticks = 0L
+
+    /** Every SAMPLE_S: the phone sampled (every 6th tick with this app in the background: nobody's at it), its
+     * process with it every PROCS_TICKS (4 times as seldom in the background). */
+    private fun tick() {
+        val away = !Telemetry.inFront()
+        ticks++
+        if (away && ticks % 6 != 0L) return
+        sampleNow(ticks % (if (away) PROCS_TICKS * 4 else PROCS_TICKS) == 0L || cpuBefore == null)
+    }
+
+    /** One sample: the phone's memory, swap and low memory, and (procs) this app's process (its host too) CPU and
+     * memory. No load average: Android keeps it from apps. */
+    private fun sampleNow(procs: Boolean) {
         try {
             val now = System.currentTimeMillis()
             val cpu = Process.getElapsedCpuTime()
             val before = cpuBefore
-            cpuBefore = now to cpu
+            if (procs) cpuBefore = now to cpu
             val pct = before?.takeIf { now > it.first }?.let { Math.round((cpu - it.second) * 1000.0 / (now - it.first)) / 10.0 }
             val rss = try {
                 File("/proc/self/statm").readText().trim().split(" ")[1].toLong() * Os.sysconf(OsConstants._SC_PAGESIZE)
@@ -244,7 +286,7 @@ object TelemetryStore {
                 .put("memory_total", mem.totalMem).put("memory_used", mem.totalMem - mem.availMem)
                 .put("swap_total", swap?.first ?: JSONObject.NULL).put("swap_used", swap?.second ?: JSONObject.NULL)
                 .put("memory_pressure", if (mem.lowMemory) "critical" else "normal").put("memory_stall", JSONObject.NULL)
-                .put("procs", JSONArray().put(proc))))
+                .apply { if (procs) put("procs", JSONArray().put(proc)) }))
         } catch (_: Exception) {
         }
     }
@@ -285,11 +327,16 @@ object TelemetryStore {
         val limit = m.limit?.toInt()?.coerceIn(1, 100_000) ?: LIMIT
         val what = m.what.orEmpty()
         val out = arrayListOf<Pair<String, Any?>>("host" to hostId, "state" to state())
-        for (kind in listOf("events", "metrics", "profiles")) if (kind in what) out.add(kind to JSONArray(rows(kind, start, end, limit)))
+        val cut = ArrayList<String>() // (each list cut short by limit: said, never silently)
+        fun capped(kind: String, all: List<JSONObject>, latestLast: Boolean = true): JSONArray {
+            if (all.size > limit) cut.add(kind)
+            return JSONArray(if (all.size <= limit) all else if (latestLast) all.subList(all.size - limit, all.size) else all.take(limit))
+        }
+        for (kind in listOf("events", "metrics", "profiles", "counters")) if (kind in what) out.add(kind to capped(kind, rows(kind, start, end, 0)))
         if ("usage" in what) out.add("usage" to usage(rows("events", start, end, 0)))
-        if ("errors" in what) out.add("errors" to JSONArray(errorRows(start, end, limit)))
-        if ("counters" in what) out.add("counters" to JSONArray(rows("counters", start, end, limit)))
-        if ("counted" in what) out.add("counted" to JSONArray(counted(rows("counters", start, end, 0)).take(limit)))
+        if ("errors" in what) out.add("errors" to capped("errors", errorRows(start, end, Int.MAX_VALUE), false))
+        if ("counted" in what) out.add("counted" to capped("counted", counted(rows("counters", start, end, 0)), false))
+        if (cut.isNotEmpty()) out.add("truncated" to JSONArray(cut))
         return out.toTypedArray()
     }
 
@@ -304,8 +351,35 @@ object TelemetryStore {
         return LongArray(4) { i -> parts.sumOf { (it.opt(keys[i]) as? Number)?.toLong()?.coerceAtLeast(0) ?: 0 } }
     }
 
+    private val FAMILIES = listOf("opus", "sonnet", "haiku", "fable")
+
+    /** The family a model name is of (opus, from opus, opus[1m] or claude-opus-5-5[1m]), or null (telemetry.family_of). */
+    private fun familyOf(model: String): String? {
+        val parts = model.replace(Regex("\\[[^\\]]*\\]"), "").split("-")
+        return FAMILIES.firstOrNull { it in parts }
+    }
+
+    /** An alias (opus, opus[1m]) kept before turns said the id they ran on, as the first id of its family the same
+     * events have from then on, else itself (telemetry.canonical_models, the same). */
+    private fun canonicalModels(events: List<JSONObject>): (String, Double) -> String {
+        val ids = HashMap<String, MutableList<Pair<Double, String>>>()
+        for (e in events.sortedBy { it.optDouble("at", 0.0) }) {
+            val m = e.optString("model")
+            if (m.startsWith("claude-")) familyOf(m)?.let { ids.getOrPut(it) { ArrayList() }.add(e.optDouble("at", 0.0) to m) }
+        }
+        return { model, at ->
+            val family = if (model.startsWith("claude-")) null else familyOf(model)
+            if (family == null) model else {
+                val later = ids[family].orEmpty().filter { it.first >= at }.map { it.second }
+                val long = later.filter { "[1m]" in it }
+                (if ("[1m]" in model && long.isNotEmpty()) long else later).firstOrNull() ?: model
+            }
+        }
+    }
+
     /** The hosts' own turn_ended events added up (telemetry.usage, the same). */
     fun usage(events: List<JSONObject>): JSONObject {
+        val names = canonicalModels(events)
         val seen = HashSet<String>()
         val days = sortedMapOf<String, HashMap<String, Long>>()
         val models = HashMap<Pair<String, String?>, HashMap<String, Long>>()
@@ -323,7 +397,8 @@ object TelemetryStore {
             val key = "${e.optString("host")}/${e.optString("session")}/${e.optString("turn").ifEmpty { Math.round(e.getDouble("at")).toString() }}"
             if (!seen.add(key)) continue
             add(days.getOrPut(day(e.getDouble("at")).toString()) { HashMap() }, e)
-            val model = e.optString("model").takeIf { !e.isNull("model") && it.isNotEmpty() } ?: continue
+            val model = e.optString("model").takeIf { !e.isNull("model") && it.isNotEmpty() }
+                ?.let { names(it, e.getDouble("at")) } ?: continue
             val effort = e.optString("effort").takeIf { !e.isNull("effort") && it.isNotEmpty() }
             add(models.getOrPut(model to null) { HashMap() }, e)
             add(combos.getOrPut(model to effort) { HashMap() }, e)

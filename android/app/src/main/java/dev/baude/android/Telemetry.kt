@@ -55,7 +55,6 @@ object Telemetry {
     private var shown = false
     private var opened: Pair<String, String>? = null
     private var front: Pair<String, String>? = null
-    private val sentAt = HashMap<Pair<String, String>, Long>()
     private var errorsDue = false
     private var counting = false
     var screen: List<String> = listOf("contacts") // (MainActivity's: the screen shown)
@@ -100,7 +99,10 @@ object Telemetry {
         }
     }
 
-    /** In front (MainActivity's onResume). */
+    /** Whether this app's in front (someone's at the phone): TelemetryStore samples less often while it isn't. */
+    fun inFront() = shown
+
+        /** In front (MainActivity's onResume). */
     fun resumed() {
         shown = true
         PhoneCounts.front(PhoneErrors.shownScreen())
@@ -131,23 +133,7 @@ object Telemetry {
     /** A turn sent in a chat (Mesh.send). */
     fun sent(chat: Chat) {
         if (!TelemetryStore.on) return
-        val key = hostOf(chat.hostId) to chat.sid
-        sentAt[key] = System.currentTimeMillis()
-        event("turn_sent", key)
-    }
-
-    /** A chat's turn's result: how long it took (from its sending here, else as it says), its model and effort, its
-     * tokens. */
-    fun ended(chat: Chat, m: JSONObject) {
-        if (!TelemetryStore.on) return
-        val key = hostOf(chat.hostId) to chat.sid
-        val sent = sentAt.remove(key)
-        val t = TelemetryStore.tokensOf(m)
-        val listed = Mesh.session(chat.hostId, chat.sid)
-        event("turn_ended", key, seconds = sent?.let { (System.currentTimeMillis() - it) / 1000.0 }
-            ?: m.optDouble("duration_ms", -1.0).takeIf { it >= 0 }?.let { it / 1000 },
-            turn = m.optString("uuid").ifEmpty { null }, model = listed?.model, effort = listed?.effort,
-            tokens = t)
+        event("turn_sent", hostOf(chat.hostId) to chat.sid)
     }
 
     private fun event(kind: String, chat: Pair<String, String>, seconds: Double? = null, turn: String? = null,
@@ -406,6 +392,7 @@ fun TelemetryPage() {
     var asked by remember { mutableStateOf(0) }
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
+    var procsAt by remember(hostId) { mutableStateOf<Msg.TelemetrySample?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var counted by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
@@ -425,7 +412,12 @@ fun TelemetryPage() {
     LaunchedEffect(hostId) {
         while (true) {
             val since = metrics?.let { Msg.TelemetryReadReply.from(it).metrics.orEmpty().lastOrNull()?.at?.toDouble() } ?: 0.0
-            read(maxOf(since, System.currentTimeMillis() / 1000.0 - 60), "metrics", 1) { metrics = it }
+            read(maxOf(since, System.currentTimeMillis() / 1000.0 - 150), "metrics", 60) { r -> // (the processes: from
+                // the latest sample that has them, taken less often than the machine)
+                val got = Msg.TelemetryReadReply.from(r).metrics.orEmpty()
+                if (got.any { it.procs != null }) procsAt = got.last { it.procs != null }
+                metrics = r
+            }
             delay(5_000)
         }
     }
@@ -483,7 +475,7 @@ fun TelemetryPage() {
             pressureSaid(s)?.let { rows.add(valueRow(Wording.Telemetry.memoryPressure, it)) }
             BoxedList(rows, "") { it() }
             val order = APP_NAMES.keys.toList()
-            val procs = s.procs.orEmpty().filter { it.app in APP_NAMES }
+            val procs = procsAt?.procs.orEmpty().filter { it.app in APP_NAMES }
                 .sortedWith(compareBy({ order.indexOf(it.app) }, { it.pid?.toLong() ?: 0L }))
             if (procs.isNotEmpty()) {
                 Heading(Wording.SidePanel.processes)

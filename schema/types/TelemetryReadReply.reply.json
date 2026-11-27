@@ -74,6 +74,20 @@
         }
       ],
       "description": "Its turns added up."
+    },
+    "truncated": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "events",
+          "metrics",
+          "profiles",
+          "counters",
+          "errors",
+          "counted"
+        ]
+      },
+      "description": "Each list cut short by limit (the latest kept): a read is never cut short without saying so."
     }
   },
   "required": [

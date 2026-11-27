@@ -1,11 +1,11 @@
 """What Baude and Record tell their machine's host of chats as it happens (baudelib.telemetry, the telemetry op; the
 phone's Telemetry.kt the same), and Settings → Telemetry, which shows what a host keeps. Recorder, one an app: while
 that host's telemetry is on (its Info's telemetry, followed as it changes), each chat opened, coming in front or
-leaving it, each turn sent and each turn's end (how long it took, its model and effort, its tokens), by its host's id
-and its session's id, told at once with its own time; and line profiles of what the host says this app profiles
+leaving it and each turn sent (a turn's end is its host's to keep: one source for it), by its host's id and its
+session's id, told at once with its own time; its errors and its counts (uitrack's); and line profiles of what the host says this app profiles
 (lineprofile), every PROFILE_S, while its line profiling is on too. While it's off nothing is looked at or sent.
-Nothing is sent anywhere but this machine's host. watch(win, app, network) is the one hook a window needs; look,
-turn_sent and turn_ended are the chat's."""
+Nothing is sent anywhere but this machine's host. watch(win, app, network) is the one hook a window needs; look and
+turn_sent are the chat's."""
 import datetime
 import os
 import time
@@ -38,6 +38,8 @@ USED_KINDS = ("part", "menu", "screen")  # (what the user used: Most Used)
 TIMED_KINDS = ("part", "menu", "op", "callback")  # (what's run for them: Slowest, by its time each)
 ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
+PROCS_BACK_S = 150  # (as far back as the page first looks for a sample with its processes: they're taken every 2
+# minutes at the most, with nobody at the machine)
 _RECORDER = []
 
 
@@ -86,7 +88,6 @@ class Recorder:
         self.windows = weakref.WeakSet()
         self.opened = weakref.WeakKeyDictionary()  # (a window: the chats open in it, as last looked)
         self.front = None  # (the chat in front, in which window: (win ref, chat))
-        self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
         self.picked = []  # (the counts that picked what's profiled now)
         self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
@@ -136,7 +137,7 @@ class Recorder:
                 self.queue.clear()
                 errorbook.BOOK.take()
                 self.opened.clear()
-                self.front, self.sent_at = None, {}
+                self.front = None
                 if self.away_timer is not None:
                     GLib.source_remove(self.away_timer)
                     self.away_timer = None
@@ -209,27 +210,7 @@ class Recorder:
             return
         self.look(win)
         if (chat := chat_of(win)) is not None:
-            self.sent_at[chat] = time.time()
             self.event("turn_sent", chat)
-        else:
-            self.sent_at[("", id(win))] = time.time()  # (a new chat's: its id comes with its first message)
-
-    def turn_ended(self, win, msg, model=None, effort=None):
-        """A turn's result: how long it took (from its sending here, else as it says), its model and effort, its
-        tokens."""
-        if not self.on or (chat := chat_of(win)) is None:
-            return
-        self.look(win)
-        sent = self.sent_at.pop(chat, None) or self.sent_at.pop(("", id(win)), None)
-        r = getattr(win, "remote", None)
-        model = model or ((r.sessions.get(chat[1]) or {}).get("model") if r is not None else None)  # (its default's,
-        # as its host lists it)
-        took = time.time() - sent if sent else (msg["duration_ms"] / 1000 if isinstance(
-            msg.get("duration_ms"), (int, float)) else None)
-        self.event("turn_ended", chat, seconds=round(took, 3) if took is not None else None,
-                   turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
-                   model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
-                   **telemetry.tokens_of(msg))
 
     def tell_counts(self):
         """Every counters.FLUSH_S: what this process counted since, told as a row."""
@@ -354,11 +335,6 @@ def look(win):
 def turn_sent(win):
     if _RECORDER:
         _RECORDER[0].turn_sent(win)
-
-
-def turn_ended(win, msg, model=None, effort=None):
-    if _RECORDER:
-        _RECORDER[0].turn_ended(win, msg, model, effort)
 
 
 # ---- Settings → Telemetry
@@ -691,7 +667,7 @@ class Page(Adw.PreferencesPage):
     def tick(self):
         if self.get_mapped() and self.state and self.state.get("on"):
             now = time.time()
-            self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
+            self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 20},
                       self.took_metrics)
             self.ticks += 1
             if self.ticks % (PROFILE_S // REFRESH_S) == 0:
@@ -771,7 +747,7 @@ class Page(Adw.PreferencesPage):
     def ask(self):
         now = time.time()
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
-        self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
+        self.read({"from": now - PROCS_BACK_S, "what": ["metrics"], "limit": 60}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         self.read_errors()
         self.read_counts()
@@ -883,7 +859,10 @@ class Page(Adw.PreferencesPage):
         if s.get("memory_pressure") or s.get("memory_stall") is not None:
             rows.append(row(wording.say("telemetry.memory_pressure"), said_pressure(s)))
         self.group("machine", wording.say("telemetry.machine"), rows)
-        procs = sorted((p for p in s.get("procs") or [] if p.get("app") in APP_NAMES),
+        with_procs = next((x for x in reversed(samples) if "procs" in x), None)
+        if with_procs is None:  # (the latest with its processes: they're taken less often than the machine)
+            return False
+        procs = sorted((p for p in with_procs.get("procs") or [] if p.get("app") in APP_NAMES),
                        key=lambda p: (list(APP_NAMES).index(p["app"]), p.get("pid") or 0))
         if procs:
             self.group("processes", wording.say("side_panel.processes"), proc_rows(procs))

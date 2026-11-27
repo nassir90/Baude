@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it: across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may manage the asking Bot is told it as it changes (inbox_changed).",
+  "description": "A task's or a chat's ask of a person, kept by its host (state folder's inbox/) till it's answered or withdrawn: across the host's restarts; a task's stopped then (its run gone), a chat's once its chat's archived or deleted, struck through and its buttons off. Every head that may manage the asking Bot or chat is told it as it changes (inbox_changed).",
   "properties": {
     "id": {
       "type": "string",
@@ -9,26 +9,42 @@
     },
     "session": {
       "type": "string",
-      "description": "The asking task's Bot's session id."
+      "description": "The asking chat's session id: a task's Bot's, or the chat whose model raised it."
     },
     "bot": {
       "type": [
         "string",
         "null"
       ],
-      "description": "That Bot's name."
+      "description": "That chat's Bot's name, if it's a Bot."
+    },
+    "chat": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A chat's own ask (task null): the chat's name as it raised it (its Bot's, else its title)."
     },
     "task": {
-      "type": "string",
-      "description": "The task's id."
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The task's id; null for a chat's own ask (its model's, with its chat's tools)."
     },
     "task_name": {
-      "type": "string",
-      "description": "The task's name."
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The task's name; null for a chat's own."
     },
     "run": {
-      "type": "string",
-      "description": "The asking run's id."
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The asking run's id; null for a chat's own."
     },
     "at": {
       "type": "number",
@@ -41,7 +57,7 @@
         "withdrawn",
         "stopped"
       ],
-      "description": "waiting: for an answer; answered (answer: how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it unanswered."
+      "description": "waiting: for an answer; answered (answer: how); withdrawn: its task or chat took it back; stopped: its run ended (or its host restarted), or its chat was archived or deleted, with it unanswered."
     },
     "versions": {
       "type": "array",
@@ -90,9 +106,6 @@
   "required": [
     "id",
     "session",
-    "task",
-    "task_name",
-    "run",
     "at",
     "status",
     "versions"

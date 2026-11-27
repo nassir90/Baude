@@ -1,16 +1,20 @@
-"""The Inbox (schema/ui/Inbox.page.json): what a Bot's task asks of a person, kept by the task's host. A running
-script raises an ask (baudetask.inbox: inbox_raise): Markdown, its pictures, its buttons and a form. Every head that
-may manage the asking Bot is told it, and told again as it changes (inbox_changed, as a draft's change is told), so an
+"""The Inbox (schema/ui/Inbox.page.json): what a Bot's task, or a chat's model, asks of a person, kept by its host. A
+running script raises an ask (baudetask.inbox: inbox_raise with its run's token), or a chat does with its own tools
+(baudelib.chattools' ask_user: inbox_raise with its session, on its own tools' connection): Markdown, its pictures,
+its buttons and a form. Every head that may manage the asking Bot (or chat) is told it, and told again as it changes (inbox_changed, as a draft's change is told), so an
 ask answered on one device leaves every Inbox. A person answers by pressing one of its buttons (inbox_press, the
 form's values with it), has a model of the host answer it for them to confirm (inbox_route model: its proposal), sends
 it to a Bot to answer (inbox_route bot: the Bot's answer_ask tool), or writes to the asking task's Bot (inbox_say),
 which may propose an answer (its answer_ask: for the person to confirm) or put a new version of it (revise_ask). The
 script waits for the answer, or polls it (inbox_wait), and may put a new version of it (inbox_revise: one that's been
-pressed is open again, waiting) or withdraw it (inbox_withdraw).
+pressed is open again, waiting) or withdraw it (inbox_withdraw). A chat's ask is answered back into that chat: the
+answer is sent it as a message from the Inbox once it's idle (deliver), as its next turn, unless its model waits for
+it (inbox_wait) and is given it so.
 
 Kept in the host's state folder, inbox/: asks.json (the asks), pictures/<sha256's first 16 hex> (each picture's bytes,
 once however many versions show it). Asks persist across the host's restarts: one waiting as the host stopped (or as
-its run ended) is stopped, shown struck through till it's removed (inbox_remove). No GTK."""
+its run ended) is stopped, shown struck through till it's removed (inbox_remove); a chat's goes on waiting, as its
+chat's still there, and is stopped once the chat's archived or deleted (chat_gone). No GTK."""
 import base64
 import hashlib
 import json
@@ -34,6 +38,8 @@ PICTURE_MAX = wire.CONSTANTS["IMAGE_BYTES_MAX"]  # (one picture's bytes, at most
 FRESH_S = 120  # (seconds a picture just kept is safe from save() while its ask is made)
 VERSIONS_MAX = 50  # (an ask's versions kept: the oldest go, its first kept)
 TEXT_MAX = 20_000  # (what a person writes to the asking Bot)
+WAIT_MAX_S = 600  # (a chat's model waiting on its ask in one call, at most)
+DONE_KEEP_S = 7 * 86400  # (a chat's ask answered or withdrawn: kept this long for its model to read, across restarts)
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
 _KINDS = (  # (a picture's kind, by how its bytes begin)
     (b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF87a", "image/gif"),
@@ -102,6 +108,30 @@ def title_of(version):
     return ""
 
 
+def is_chats(ask):
+    """Is it a chat's own ask (its model's, raised with the chat's tools), not a task's run's?"""
+    return not ask.get("run")
+
+
+def chat_of(s):
+    """What a chat's called, as an ask from it says: its Bot's name, else its title."""
+    if s is None:
+        return None
+    return (s.meta.get("bot") or {}).get("name") or s.listing().get("title") or None
+
+
+def answer_said(ask):
+    """A chat's ask's answer, as its chat's told it: the button, the form's values, who answered it if not the
+    person."""
+    a, v = ask["answer"], ask["versions"][-1]
+    lines = [wording.say("inbox.answered_said", title=title_of(v), ask=ask["id"], button=a["label"])]
+    if a.get("by"):
+        lines.append(wording.say("inbox.answered_by", bot=a["by"]))
+    if a.get("values"):
+        lines += ["", wording.say("inbox.values_said"), json.dumps(a["values"], ensure_ascii=False, indent=1)]
+    return "\n".join(lines)
+
+
 def said(ask, version=None):
     """An ask as a model or a Bot is told it: its title and body, its buttons by index, its form's fields."""
     v = version or ask["versions"][-1]
@@ -123,15 +153,18 @@ class Inbox:
         self.folder = os.path.join(server.state_dir, "inbox")
         self.fresh = {}  # (pictures just kept and not yet in an ask: sha: when, so save() leaves them)
         self.proposing = {}  # (the start_key of a model's session asked to answer an ask: that ask's id)
+        self.waiters = {}  # (a chat's ask's id: how many of its model's inbox_waits wait on it, which it's told by)
         kept = _read_json(os.path.join(self.folder, "asks.json")) or {}
         self.asks = {}
         for a in kept.get("asks") or []:
             if not isinstance(a, dict) or not wire.is_id(a.get("id") or "") or not a.get("versions"):
                 continue
-            if a.get("status") in ("answered", "withdrawn"):  # (its run's gone with the host: nobody to collect it)
-                continue
-            if a.get("status") == "waiting":  # (its run ended as the host stopped)
-                a["status"] = "stopped"
+            chat = server.sessions.get(a.get("session") or "") if is_chats(a) else None
+            if a.get("status") in ("answered", "withdrawn") and not (  # (its run's gone with the host: nobody to
+                    chat is not None and (a.get("_tell") or time.time() - (a.get("_done") or 0) < DONE_KEEP_S)):
+                continue  # collect it; a chat's, its model may yet read, or be told)
+            if a.get("status") == "waiting" and (not is_chats(a) or chat is None or chat.meta.get("archived")):
+                a["status"] = "stopped"  # (its run ended as the host stopped; its chat's gone meanwhile)
             if (a.get("proposal") or {}).get("status") == "answering":
                 a["proposal"] = None
             a["sent_to"] = a["sent_to_name"] = None
@@ -266,7 +299,9 @@ class Inbox:
             raise ValueError(wording.say("inbox.not_yours"))
         return ask, got[0], got[1]
 
-    def raise_(self, msg):
+    def raise_(self, conn, msg):
+        if msg.get("run") is None:
+            return self._chat_raise(conn, msg)
         got = self.server.tasks.held(msg)
         if got is None:
             raise ValueError(wording.say("host_errors.no_run"))
@@ -286,19 +321,20 @@ class Inbox:
         self.tell(ask)
         return {"ask": ask["id"], "version": 1}
 
-    def withdraw(self, msg):
-        ask, _held, _st = self._run_ask(msg)
+    def withdraw(self, conn, msg):
+        ask = self._chat_ask(conn, msg) if msg.get("run") is None else self._run_ask(msg)[0]
         with self.lock:
             if ask["status"] == "waiting":
-                ask["status"] = "withdrawn"
-                ask["proposal"] = None
+                ask.update(status="withdrawn", proposal=None, _done=time.time())
         self.save()
         self.tell(ask)
         return {"ask": ask["id"]}
 
-    def wait(self, msg):
+    def wait(self, conn, msg):
         """inbox_wait: the ask as it is once it isn't waiting, or timeout's up (the run waiting for input meanwhile,
-        its clock stopped), or its run's stopped."""
+        its clock stopped), or its run's stopped. A chat's: as its model asks for it (_chat_wait)."""
+        if msg.get("run") is None:
+            return self._chat_wait(conn, msg)
         ask, held, st = self._run_ask(msg)
         timeout = msg.get("timeout")
         end = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
@@ -315,6 +351,122 @@ class Inbox:
         finally:
             if waits:
                 tasks._waiting(st, msg["run"], held, False)
+
+    # ---- a chat's (its model's, with its own tools: baudelib.chattools)
+    def _own(self, conn, sid):
+        """(server's lock held) The chat sid, as its own tools ask of it: ValueError if conn isn't its own tools', or
+        may not write to it, or it's gone or archived."""
+        srv = self.server
+        s = srv.sessions.get(sid) if isinstance(sid, str) else None
+        if s is None or s.deleting or conn.acting != sid or conn.task is not None or \
+                not srv.access.allowed(conn, "manage_write", s):  # (a task's script's: its run's, with its token)
+            raise ValueError(wording.say("inbox.not_own"))
+        if s.meta.get("archived"):
+            raise ValueError(wording.say("inbox.chat_archived"))
+        return s
+
+    def _chat_ask(self, conn, msg):
+        """The ask a chat's request names: ValueError if it isn't that chat's own, or conn isn't its tools'."""
+        with self.lock:
+            ask = self.asks.get(msg.get("ask"))
+        if ask is None:
+            raise ValueError(wording.say("inbox.no_ask", ask=str(msg.get("ask"))))
+        if not is_chats(ask) or ask["session"] != msg.get("session"):
+            raise ValueError(wording.say("inbox.not_own"))
+        with self.server.lock:
+            s = self.server.sessions.get(ask["session"])
+            if s is None or conn.acting != s.id or conn.task is not None or \
+                    not self.server.access.allowed(conn, "manage_read", s):
+                raise ValueError(wording.say("inbox.not_own"))
+        return ask
+
+    def _chat_raise(self, conn, msg):
+        version = self.version(msg)
+        with self.server.lock:
+            s = self._own(conn, msg.get("session"))
+            bot, chat = (s.meta.get("bot") or {}).get("name") or None, chat_of(s)
+        ask = {"id": uuid.uuid4().hex[:16], "session": s.id, "bot": bot, "chat": chat, "task": None,
+               "task_name": None, "run": None, "at": version["at"], "status": "waiting", "versions": [version],
+               "proposal": None, "sent_to": None, "sent_to_name": None, "answer": None}
+        with self.lock:
+            self.asks[ask["id"]] = ask
+        self.save()
+        self.tell(ask)
+        return {"ask": ask["id"], "version": 1}
+
+    def _chat_wait(self, conn, msg):
+        """A chat's ask as it is once it isn't waiting, or timeout's up (WAIT_MAX_S at most; 0: as it is now). Its
+        answer given so is its model's: it isn't sent the chat as well."""
+        ask = self._chat_ask(conn, msg)
+        try:
+            timeout = min(WAIT_MAX_S, max(0.0, float(msg.get("timeout") if msg.get("timeout") is not None
+                                                     else WAIT_MAX_S)))
+        except (TypeError, ValueError):
+            timeout = 0.0
+        end, told = time.monotonic() + timeout, False
+        with self.lock:
+            self.waiters[ask["id"]] = self.waiters.get(ask["id"], 0) + 1
+            try:
+                while ask["status"] == "waiting" and time.monotonic() < end:
+                    self.cv.wait(max(0.0, min(0.5, end - time.monotonic())))
+                told = bool(ask.pop("_tell", None))
+                out = {"ask": ask["id"], "status": ask["status"], "answer": ask.get("answer"),
+                       "version": len(ask["versions"])}
+            finally:
+                self.waiters[ask["id"]] -= 1
+                if not self.waiters[ask["id"]]:
+                    del self.waiters[ask["id"]]
+        if told:
+            self.save()
+        return out
+
+    def chat_gone(self, sid):
+        """A chat archived or deleted: its asks still waiting, stopped; those it's done with, let go of."""
+        changed, dropped = [], []
+        with self.lock:
+            for a in list(self.asks.values()):
+                if a["session"] != sid or not is_chats(a):
+                    continue
+                if a["status"] == "waiting":
+                    a.update(status="stopped", proposal=None, sent_to=None, sent_to_name=None)
+                    changed.append(a)
+                elif a["status"] in ("answered", "withdrawn"):
+                    del self.asks[a["id"]]
+                    dropped.append(a)
+        if changed or dropped:
+            self.save()
+        for a in changed:
+            self.tell(a)
+        for a in dropped:
+            self.tell(a, removed=True)
+
+    def deliver(self):
+        """Each chat's asks answered and not yet told it (_tell), sent it, one at a time, once it's idle (the host's
+        watch comes by again for the rest), as a message from the Inbox: its model's next turn. One its model waits on
+        (inbox_wait) is its wait's to give."""
+        srv, sent = self.server, False
+        with srv.lock:
+            with self.lock:
+                due = [a for a in self.asks.values() if a.get("_tell") and not self.waiters.get(a["id"])]
+            for a in sorted(due, key=lambda a: (a.get("answer") or {}).get("at") or 0):
+                s = srv.sessions.get(a["session"])
+                if s is not None and not s.deleting and not s.meta.get("archived") and s.busy:
+                    continue
+                with self.lock:
+                    if not a.pop("_tell", None):
+                        continue
+                sent = True
+                if s is None or s.deleting or s.meta.get("archived"):
+                    continue
+                try:
+                    srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                             "message": {"role": "user", "content": answer_said(a)}},
+                                   {"kind": "host", "name": wording.say("inbox.title"), "host": srv.me["id"],
+                                    "host_name": srv.me["name"], "session": s.id})
+                except Exception as e:  # noqa: BLE001 (Elsewhere, its subscription off, or its agent not started)
+                    srv.log(f"telling {s.id} its ask {a['id']} was answered: {e}")
+        if sent:
+            self.save()
 
     def run_over(self, rid):
         """A run ended: its asks still waiting, stopped; those it's done with (answered, withdrawn), let go of."""
@@ -395,7 +547,11 @@ class Inbox:
                 done = ask["answer"] = {"button": n, "label": v["buttons"][n]["label"], "values": values, "by": by,
                                         "at": time.time()}
                 ask.update(status="answered", proposal=None, sent_to=None, sent_to_name=None)
+                if is_chats(ask):  # (told its chat: its model's wait, or its next turn, deliver)
+                    ask.update(_tell=True, _done=done["at"])
         self.save()
+        if done is not None and is_chats(ask):
+            self.server.woken.set()
         st = self.server.tasks.stores.get(ask["session"])
         if done is not None and st is not None and ask["run"] in st.runs:
             st.log(ask["run"], "answer", done["label"] + (" " + json.dumps(values) if values else ""),
@@ -412,8 +568,9 @@ class Inbox:
         else:
             ask, s = self._find(conn, msg)
             by = ((s.meta.get("bot") or {}).get("name") if s is not None else None) or None
+        own = msg.get("run") is not None or is_chats(ask) and conn.acting == ask["session"] and conn.task is None
         with self.lock:
-            reopens = msg.get("run") is not None and ask["status"] == "answered"  # (its run asks again: one ask)
+            reopens = own and ask["status"] == "answered"  # (its run, or its chat, asks again: one ask)
             if ask["status"] != "waiting" and not reopens:
                 raise ValueError(wording.say("inbox.not_waiting"))
             version = self.version(msg, ask["versions"][-1], by)
@@ -421,7 +578,8 @@ class Inbox:
             if len(ask["versions"]) > VERSIONS_MAX:
                 ask["versions"] = ask["versions"][:1] + ask["versions"][-(VERSIONS_MAX - 1):]
             ask.update(status="waiting", answer=None, proposal=None)  # (answered for the version before: asked again,
-            n = len(ask["versions"])  # if it's wanted)
+            ask.pop("_tell", None)  # if it's wanted)
+            n = len(ask["versions"])
         self.save()
         self.tell(ask)
         return {"ask": ask["id"], "version": n}
@@ -442,8 +600,12 @@ class Inbox:
         text = msg.get("text") if isinstance(msg.get("text"), str) else ""
         if not text.strip():
             raise ValueError("nothing to send")
-        told = "\n\n".join((text[:TEXT_MAX], wording.say("inbox.person_wrote", task=ask["task_name"], ask=ask["id"]),
-                            said(ask), wording.say("inbox.bot_may")))
+        if is_chats(ask):
+            told = "\n\n".join((text[:TEXT_MAX], wording.say("inbox.person_wrote_chat", ask=ask["id"]), said(ask),
+                                wording.say("inbox.chat_may")))
+        else:
+            told = "\n\n".join((text[:TEXT_MAX], wording.say("inbox.person_wrote", task=ask["task_name"],
+                                                                ask=ask["id"]), said(ask), wording.say("inbox.bot_may")))
         srv = self.server
         with srv.lock:
             s = srv.sessions.get(ask["session"])
@@ -477,13 +639,19 @@ class Inbox:
             if b is None or b.deleting or not b.meta.get("bot") or not srv.access.allowed(conn, "manage_write", b):
                 raise ValueError(f"no Bot {sid} here")
             name = (b.meta.get("bot") or {}).get("name") or "Bot"
-            text = "\n\n".join((wording.say("inbox.bot_sent", task=ask["task_name"], ask=ask["id"],
-                                            bot=ask.get("bot") or "Bot"), said(ask)))
+            if is_chats(ask):
+                text = "\n\n".join((wording.say("inbox.chat_sent", chat=ask.get("chat") or "", ask=ask["id"]),
+                                     said(ask)))
+                sender = {"kind": "bot" if ask.get("bot") else "chat", "name": ask.get("chat") or "",
+                          "host": srv.me["id"], "host_name": srv.me["name"], "session": ask["session"]}
+            else:
+                text = "\n\n".join((wording.say("inbox.bot_sent", task=ask["task_name"], ask=ask["id"],
+                                                bot=ask.get("bot") or "Bot"), said(ask)))
+                sender = {"kind": "host", "name": wording.say("tasks.sender", name=ask["task_name"]),
+                          "host": srv.me["id"], "host_name": srv.me["name"], "session": ask["session"],
+                          "task": ask["task"], "run": ask["run"]}
             srv.take_input(None, b, {"type": "user", "uuid": str(uuid.uuid4()),
-                                     "message": {"role": "user", "content": text}},
-                           {"kind": "host", "name": wording.say("tasks.sender", name=ask["task_name"]),
-                            "host": srv.me["id"], "host_name": srv.me["name"], "session": ask["session"],
-                            "task": ask["task"], "run": ask["run"]})
+                                     "message": {"role": "user", "content": text}}, sender)
         with self.lock:
             ask.update(sent_to=sid, sent_to_name=name)
         self.save()
@@ -554,9 +722,12 @@ class Inbox:
         self.tell(ask)
 
     def turn_over(self, s, msg):
-        """(server's lock held) A session's turn ended: one asked to answer an ask, its answer taken, and let go of."""
+        """(server's lock held) A session's turn ended: one asked to answer an ask, its answer taken, and let go of; a
+        chat with an answer to be told, told it now it's idle (the watch woken: deliver)."""
         with self.lock:
             aid = self.proposing.pop(s.meta.get("start_key") or "", None)
+            if any(a.get("_tell") and a["session"] == s.id for a in self.asks.values()):
+                self.server.woken.set()  # (an answer to tell it, now it's idle: deliver)
         if aid is None:
             return
         failed = str(msg.get("result") or "error") if msg.get("is_error") else None
@@ -583,15 +754,17 @@ class Inbox:
             except Exception as e:  # noqa: BLE001 (what's wrong said to whoever asked: Elsewhere, a disabled
                 reply("error", error=str(e) or type(e).__name__)  # subscription, a bad field)
 
-        if op in SCRIPT_OPS or op == "inbox_revise" and msg.get("run") is not None:
+        if op in SCRIPT_OPS and msg.get("run") is not None or op == "inbox_revise" and msg.get("run") is not None:
             if conn.origin is not None or conn.member is not None:  # (a task's script: this machine's socket only)
                 return conn.send(self.server.access.refused(msg.get("req"), "shell"))
+        if op in SCRIPT_OPS and msg.get("run") is None and conn.origin is not None:  # (a chat's own tools: on its
+            return conn.send(self.server.access.refused(msg.get("req"), "manage_write"))  # host's own socket)
         if op == "inbox":
             return reply("inbox_reply", asks=self.listing(conn))
-        table = {"inbox_raise": (lambda: self.raise_(msg), "inbox_raised"),
+        table = {"inbox_raise": (lambda: self.raise_(conn, msg), "inbox_raised"),
                  "inbox_revise": (lambda: self.revise(conn, msg), "inbox_raised"),
-                 "inbox_withdraw": (lambda: self.withdraw(msg), "inbox_done"),
-                 "inbox_wait": (lambda: self.wait(msg), "inbox_answered"),
+                 "inbox_withdraw": (lambda: self.withdraw(conn, msg), "inbox_done"),
+                 "inbox_wait": (lambda: self.wait(conn, msg), "inbox_answered"),
                  "inbox_press": (lambda: self.press(conn, msg), "inbox_done"),
                  "inbox_route": (lambda: self.route(conn, msg), "inbox_done"),
                  "inbox_say": (lambda: self.say(conn, msg), "inbox_done"),

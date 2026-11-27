@@ -1060,6 +1060,8 @@ class ServerRunning:
                     s.proc.kill()
                 s.meta["archived"] = op == "archive"
                 self.save(s)
+                if op == "archive":
+                    self.inbox.chat_gone(s.id)  # (its model's asks still waiting: stopped)
                 self.changed()
                 return reply(op + "d", session=s.id)
             if op == "delete":  # (on a thread of its own: its claude's waited for, its files moved, not under the lock)

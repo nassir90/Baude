@@ -404,6 +404,7 @@ class Server(ServerRunning, ServerSessions):
             for c in list(s.viewers):  # (attached to it: it's gone, for good)
                 c.send({"op": "deleted", "session": s.id})
             self.log(f"deleted {s.id}")
+            self.inbox.chat_gone(s.id)  # (its model's asks still waiting: stopped)
             self.changed()
         reply("deleted", session=s.id, trashed=went)
 

@@ -720,6 +720,23 @@ def mcp_tool(which, name, args):
     return got["result"]["content"][0]["text"]
 
 
+def chat_tool_turn(n, text):
+    """"CHAT TOOL <name> <json>": one of the chat's own tools (baudelib.chattools) called with those arguments, as an
+    agent calls it (mcp__chat__<name>), what it gave said back."""
+    name, _, args = text.split("CHAT TOOL ", 1)[1].partition(" ")
+    args = json.loads(args or "{}")
+    tid = f"toolu_chat{n}"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+            {"type": "tool_use", "id": tid, "name": f"mcp__chat__{name}", "input": args}]}})
+    said = chat_tool(name, args)
+    record(f"CHAT TOOL {name} {' '.join(said.split())}")
+    out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": said}]}})
+    say(f"{name}: {said}", f"msg{n}b")
+    result(said)
+
+
 def autofix(n, text):
     """"AUTOFIX ON" / "AUTOFIX OFF": Auto-fix turned on or off with the chat's tool (mcp__chat__autofix); a message
     from Auto-fix (a pull request that "needs fixing"): fixed as an agent would: a commit pushed and a comment on the
@@ -1081,6 +1098,8 @@ def main():
                 result(answer)
             elif re.search(r"An instance of the '.*' task (failed|finished|asks:)|You haven't answered run", text):
                 task_answer(turns, text)
+            elif "CHAT TOOL " in text:
+                chat_tool_turn(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)
             elif "EXPIRED" in text:

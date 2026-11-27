@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A task's script's ask's answer (run, token), waited for: till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).",
+  "description": "An ask's answer, waited for: a task's script's (run, token), till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll); a chat's own tools' (session), as long, 600 seconds at most. An answer a chat's model gets so isn't sent it as a message as well.",
   "properties": {
     "op": {
       "const": "inbox_wait",
@@ -17,6 +17,10 @@
     "ask": {
       "type": "string",
       "description": "The ask's id."
+    },
+    "session": {
+      "type": "string",
+      "description": "A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token."
     },
     "run": {
       "type": "string",
@@ -36,9 +40,7 @@
   },
   "required": [
     "op",
-    "ask",
-    "run",
-    "token"
+    "ask"
   ],
   "additionalProperties": false
 }

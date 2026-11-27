@@ -14,8 +14,9 @@ from baudelib.claude import ClaudeProc
 from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
 
 
-def permission_params(mode, *, turn=False, read_only=False):
-    """Manual and automatic review use the same workspace sandbox."""
+def permission_params(mode, *, turn=False, read_only=False, writable=()):
+    """Manual and automatic review use the same workspace sandbox; writable: folders it may write besides its own
+    (a Bot's memory's), a turn's (a thread's are its config's: writable_config)."""
     if read_only:
         return {"approvalPolicy": "on-request", "approvalsReviewer": "user",
                 **({"sandboxPolicy": {"type": "readOnly", "networkAccess": False}} if turn
@@ -28,9 +29,17 @@ def permission_params(mode, *, turn=False, read_only=False):
     elif full:
         params["sandboxPolicy"] = {"type": "dangerFullAccess"}
     else:
-        params["sandboxPolicy"] = {"type": "workspaceWrite", "writableRoots": [],
+        params["sandboxPolicy"] = {"type": "workspaceWrite", "writableRoots": list(writable),
                                    "networkAccess": False, "excludeTmpdirEnvVar": False, "excludeSlashTmp": False}
     return params
+
+
+def writable_config(mode, writable, read_only=False):
+    """A thread's config (thread/start's, thread/resume's) for the folders it may write besides its own
+    (permission_params's writable): only where it writes in a workspace sandbox."""
+    if read_only or not writable or mode == "bypassPermissions":
+        return {}
+    return {"sandbox_workspace_write": {"writable_roots": list(writable)}}
 
 
 LEVELS = ("TRACE", "DEBUG", "INFO", "WARN", "ERROR")
@@ -322,7 +331,7 @@ class CodexProc(AppServer):
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
                  catalog=(), mode="default", meta_system=None, meta_servers=None, dispatch=None,
-                 recover_empty=False, profile=None, servers=None, instructions=None):
+                 recover_empty=False, profile=None, servers=None, instructions=None, writable=()):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
         self.req_ids = itertools.count(1)
@@ -331,6 +340,7 @@ class CodexProc(AppServer):
         self.model, self.catalog = model, catalog
         self.read_only = ephemeral and not self.meta_only
         self.mode = "default" if self.read_only else codex_mode(mode)
+        self.writable = list(writable)  # (folders it may write besides its own: a Bot's memory's)
         self.effort = codex_effort(catalog, model, effort)
         self.init_rid = "codex-initialize"
         self.asks, self.streams, self.patches = {}, {}, {}
@@ -354,8 +364,10 @@ class CodexProc(AppServer):
             params.update(threadId=resume, excludeTurns=True)
         elif ephemeral:
             params["ephemeral"] = True
-        if servers:  # (MCP servers of the host's: a Bot's answer_task tool)
-            params["config"] = {"mcp_servers": servers}
+        config = {**({"mcp_servers": servers} if servers else {}),  # (MCP servers of the host's: chattools, the
+                  **writable_config(self.mode, self.writable, self.read_only)}  # mesh's)
+        if config:
+            params["config"] = config
         if instructions:  # (after Codex's own, each start: a Bot's who it is, its memory)
             params["developerInstructions"] = instructions
 
@@ -548,7 +560,8 @@ class CodexProc(AppServer):
                     if self.effort:
                         params["effort"] = self.effort
                     if not self.meta_only:
-                        params.update(permission_params(self.mode, turn=True, read_only=self.read_only))
+                        params.update(permission_params(self.mode, turn=True, read_only=self.read_only,
+                                                        writable=self.writable))
                     self.starting = True
                     self.forget("error", "raw")  # (a turn's own: one that comes back on a later turn is said again)
                     self.rpc("turn/start", params, lambda _: None, self.finish)
@@ -624,6 +637,11 @@ class CodexProc(AppServer):
                 and params.get("itemId") in self.patches:
             name, inp = "Codex file changes", {"changes": self.patches[params["itemId"]],
                                                "reason": params.get("reason") or ""}
+        elif method == "mcpServer/elicitation/request" and isinstance(meta := params.get("_meta"), dict) and \
+                meta.get("codex_approval_kind") == "mcp_tool_call" and isinstance(meta.get("tool_name"), str):
+            # (an MCP tool asked about: Claude Code's name for it, as its own ask's)
+            name = f'mcp__{params.get("serverName")}__{meta["tool_name"]}'
+            inp = meta.get("tool_params") if isinstance(meta.get("tool_params"), dict) else {}
         else:
             self.reject(rid, f"Unsupported Codex request: {method}")
             return
@@ -651,6 +669,9 @@ class CodexProc(AppServer):
                 if params is not None:
                     allow = (response.get("response") or {}).get("behavior") == "allow"
                     decision = "accept" if allow else "decline"
+                    if "_meta" in params:  # (an MCP tool's: an elicitation's answer)
+                        self.write({"id": rid, "result": {"action": decision, "content": None}})
+                        return
                     if params.get("availableDecisions") and decision not in params["availableDecisions"]:
                         decision = "cancel"
                     self.write({"id": rid, "result": {"decision": decision}})

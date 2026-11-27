@@ -101,7 +101,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     val top = item.depth == 0 && s.forkFrom.isNullOrBlank()
     val active = !dead(h) && s.state in listOf("working", "waiting")
     val archived = s.archived == true
-    val canBot = alive && takes(h, "bot") && (s.bot != null || program(s.model) in listOf("claude", "pi")) // (a Bot on
+    val canBot = alive && takes(h, "bot") && (s.bot != null || program(s.model) in listOf("claude", "pi", "codex")) // (a Bot on
     // any model: its settings)
     Popover(open, dismiss, offset = at, ticks = if (page == "groups") Ticks.END else Ticks.NONE) {
         if (page == "groups") {

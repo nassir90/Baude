@@ -420,6 +420,9 @@ class MacWeb:
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
         self.attached = self.attached_root = self.blocker = None
+        self.holes, self.holes_in_view, self.hole_views = [], [], []  # (where GTK draws over it, cut out: cut_holes)
+        self.holes_frame = None  # (the page's frame as its holes were cut)
+        self.hole_tick, self.hole_frames, self.toasts_seen = None, 0, []  # (watch_toasts)
         self.overlay, self.tab_id = None, None  # (overlay: what's drawn over it, hosted: MacOverlay)
 
     @staticmethod
@@ -597,6 +600,8 @@ class MacWeb:
                 continue
             p = g(view, objc_sel(b"convertPoint:fromView:"), at, None)
             box = send(view, b"bounds", ret=R)
+            if any(h.x <= p.x <= h.x + h.w and h.y <= p.y <= h.y + h.h for h in web.holes_in_view):
+                continue  # (a toast's over it there: GTK's)
             if box.x <= p.x <= box.x + box.w and box.y <= p.y <= box.y + box.h:
                 if getattr(web.window, "blocked", False):  # (read-only: not the page's, nor GTK's)
                     if began:
@@ -655,6 +660,7 @@ class MacWeb:
         if ns and macos.objc_send(ns, b"firstResponder") == self.view:
             macos.objc_send(ns, b"makeFirstResponder:", macos.objc_send(ns, b"contentView"), types=(ctypes.c_void_p,))
         self.block(False)
+        self.cut_holes([])
         macos.objc_send(self.view, b"removeFromSuperview")
         self.attached = self.attached_root = None
 
@@ -687,6 +693,7 @@ class MacWeb:
             if self.attached is not None:
                 macos.objc_send(self.view, b"setHidden:", True, types=(ctypes.c_bool,))
                 self.block(False)
+                self.cut_holes([])
             return
         if self.attached is not None and root is not self.attached_root:  # (shown again, or in another window)
             self.detach()
@@ -710,8 +717,115 @@ class MacWeb:
         self.block(bool(getattr(self.window, "blocked", False)) and not hidden)
         if self.blocker is not None:
             send(self.blocker, b"setFrame:", frame, types=(R,))
+        self.cut_holes([] if hidden else [(x, y if flipped else cbox.h - y - h, w, h, r)
+                                          for x, y, w, h, r in self.over(root, b)])
+        if not hosted:  # (its own window's: followed each frame while something's over it, a toast moving in or out)
+            self.watch_toasts()
         if hosted and not hidden:
             self.draw_over()
+
+    def over(self, root, page):
+        """What GTK draws over the page, whose place is at page in root: a later child of anything its place is in
+        (an Adw.ToastOverlay's toasts, a Gtk.Overlay's overlays: Baude's lightbox, its terminal) that's shown, takes
+        clicks and overlaps it, as (x, y, w, h, corner radius) in root. A toast's a pill: its ends rounded."""
+        out = []
+        px, py, pw, ph = page.get_x(), page.get_y(), page.get_width(), page.get_height()
+        child = self.place
+        while (parent := child.get_parent()) is not None:
+            above = child.get_next_sibling()
+            while above is not None:
+                if above.get_mapped() and above.get_can_target() and above.get_opacity() > 0:
+                    ok, b = above.compute_bounds(root)
+                    x, y, w, h = (b.get_x(), b.get_y(), b.get_width(), b.get_height()) if ok else (0, 0, 0, 0)
+                    if min(x + w, px + pw) > max(x, px) and min(y + h, py + ph) > max(y, py):
+                        out.append((x, y, w, h, h / 2 if above.get_css_name() == "toast" else 0))
+                above = above.get_next_sibling()
+            child = parent
+        return out
+
+    def cut_holes(self, holes):
+        """GTK's drawing over the page (holes: (x, y, w, h, corner radius) in the content view) shown through it: those
+        cut out of its layer (a mask), and a view over each that takes their clicks and gives them to GTK's, under it
+        (as block's), so a toast's button is pressed, not the page under it. [] for none."""
+        if self.view is None:
+            return
+        send, R = macos.objc_send, macos._rect()
+        f = send(self.view, b"frame", ret=R)
+        frame = (f.x, f.y, f.w, f.h)  # (the page moved or resized under a toast that stayed: cut again, where it is now)
+        if holes == self.holes and frame == self.holes_frame:
+            return
+        self.holes_frame = frame
+        for v in self.hole_views:
+            send(v, b"removeFromSuperview")
+            send(v, b"release")
+        self.hole_views, self.holes, self.holes_in_view = [], holes, []
+        layer = send(self.view, b"layer")
+        send(b"CATransaction", b"begin")
+        send(b"CATransaction", b"setDisableActions:", True, types=(ctypes.c_bool,))  # (cut at once, as GTK draws them)
+        if not holes or self.attached is None:
+            if layer:
+                send(layer, b"setMask:", None, types=(ctypes.c_void_p,))
+            send(b"CATransaction", b"commit")
+            return
+        cg = self.hole_graphics()
+        path = cg.CGPathCreateMutable()
+        cg.CGPathAddRect(path, None, send(self.view, b"bounds", ret=R))
+        for x, y, w, h, r in holes:
+            v = send(send(b"NSView", b"alloc"), b"initWithFrame:", R(x, y, w, h), types=(R,))
+            send(self.attached, b"addSubview:positioned:relativeTo:", v, 1, self.view,
+                 types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p))  # (1: NSWindowAbove)
+            self.hole_views.append(v)
+            box = send(self.view, b"convertRect:fromView:", R(x, y, w, h), self.attached, types=(R, ctypes.c_void_p),
+                       ret=R)
+            self.holes_in_view.append(box)
+            r = min(r, box.w / 2, box.h / 2)
+            cg.CGPathAddRoundedRect(path, None, box, r, r)
+        mask = send(send(b"CAShapeLayer", b"alloc"), b"init")
+        send(mask, b"setFrame:", send(layer, b"bounds", ret=R), types=(R,))
+        send(mask, b"setFillRule:", macos.ns_string("even-odd"), types=(ctypes.c_void_p,))  # (kCAFillRuleEvenOdd: the
+        send(mask, b"setPath:", path, types=(ctypes.c_void_p,))                             # holes left out)
+        send(layer, b"setMask:", mask, types=(ctypes.c_void_p,))
+        send(mask, b"release")
+        cg.CGPathRelease(path)
+        send(b"CATransaction", b"commit")
+
+    @staticmethod
+    def hole_graphics():
+        cg = MacOverlay.graphics()
+        if not getattr(cg, "holes_ready", False):
+            R = macos._rect()
+            cg.CGPathAddRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, R]
+            cg.CGPathAddRoundedRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, R, ctypes.c_double, ctypes.c_double]
+            cg.holes_ready = True
+        return cg
+
+    def watch_toasts(self):
+        """In its own window (not followed each frame, as a hosted page is): followed each frame from a toast's coming
+        or going (its toast overlays' children changing) till nothing's over it."""
+        if not self.toasts_seen:
+            w = self.place.get_parent()
+            while w is not None:
+                if w.__gtype__.name == "AdwToastOverlay":
+                    kids = w.observe_children()
+                    self.toasts_seen.append((kids, kids.connect("items-changed", lambda *_: self.toast_moved())))
+                w = w.get_parent()
+            if not self.toasts_seen:
+                self.toasts_seen.append((None, None))
+        if self.holes and self.hole_tick is None:
+            self.toast_moved()
+
+    def toast_moved(self):
+        self.hole_frames = 30  # (followed a while whatever's over it: a toast's laid out after it's added)
+        if self.hole_tick is None and self.view is not None:
+            self.hole_tick = self.place.add_tick_callback(self.hole_ticked)
+
+    def hole_ticked(self, *_):
+        self.hole_frames -= 1
+        self.follow()
+        if self.view is not None and (self.holes or self.hole_frames > 0):
+            return True
+        self.hole_tick = None
+        return False
 
     ON_TOP = 1000.0
 
@@ -1133,6 +1247,14 @@ class MacWeb:
     def close(self):
         if self.view:
             self.block(False)
+            self.cut_holes([])
+            for kids, handler in self.toasts_seen:
+                if kids is not None:
+                    kids.disconnect(handler)
+            self.toasts_seen = []
+            if self.hole_tick is not None:
+                self.place.remove_tick_callback(self.hole_tick)
+                self.hole_tick = None
             if self.overlay is not None:
                 self.overlay.close()
                 self.overlay = None

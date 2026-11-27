@@ -271,5 +271,27 @@
       "name": "own window",
       "shows": "'Currently disembodied' placeholder; see the part above."
     }
+  ],
+  "decisions": [
+    {
+      "said": "A development browser that can't open plain http pages (a dev server on a *.localhost name) is unacceptable (paraphrased)",
+      "rule": "Every app's browser opens plain http pages as an ordinary browser does: localhost, *.localhost, *.local, private and public IP addresses and any http:// address typed; a page that answers with an error status (401 asking for sign-in, say) is shown, not replaced by a failure page",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#299"
+        }
+      ]
+    },
+    {
+      "said": "A preview's sign-in fails because the browser blocks cross-site tracking as Safari does; a developer's browser should let it work (paraphrased)",
+      "rule": "Every app's browser keeps cookies and storage set under another site's page (an app's preview on another host, an embedded sign-in) by default; blocking them as Safari does is a per-profile choice, off unless turned on",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#299"
+        }
+      ]
+    }
   ]
 }

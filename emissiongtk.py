@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
-from baudelib.emissionlink import data_home, note_leftover  # noqa
+from baudelib.emissionlink import blocks_tracking, data_home, note_leftover  # noqa
 from emissioncore import CONSOLE_JS, address, download_path, failure_page, for_bots, once  # noqa: E402
 from emissionmac import MacWeb  # noqa: E402
 
@@ -230,9 +230,27 @@ class GtkWeb:
             net = WebKit.NetworkSession.new(os.path.join(root, "data"), os.path.join(root, "cache"))
             net.get_cookie_manager().set_persistent_storage(os.path.join(root, "cookies.sqlite"),
                                                             WebKit.CookiePersistentStorage.SQLITE)
+            cls.track(net, blocks_tracking(profile))
             net.connect("download-started", cls.download_started)
             cls.sessions[profile] = net
         return cls.sessions[profile]
+
+    @staticmethod
+    def track(net, on):
+        """net's cookies under another site's page (an app's preview on another host signing in) kept, as a browser
+        without tracking prevention keeps them, or (on) refused, and WebKit's tracking prevention on."""
+        from gi.repository import WebKit
+        net.set_itp_enabled(on)
+        net.get_cookie_manager().set_accept_policy(
+            WebKit.CookieAcceptPolicy.NO_THIRD_PARTY if on else WebKit.CookieAcceptPolicy.ALWAYS)
+
+    @classmethod
+    def block_tracking(cls, profile, on):
+        """As MacWeb's: profile's pages from now on blocking cross-site cookies (on), or not."""
+        if profile in cls.sessions:
+            cls.track(cls.sessions[profile], on)
+        elif profile in cls.given_back:
+            cls.track(cls.given_back[profile], on)
 
     @classmethod
     def cookies(cls, profile, done):

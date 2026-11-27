@@ -1,6 +1,6 @@
 """hostaccounts — this host's Claude and Codex subscription accounts (accounts), changed for a head anywhere in the
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
-(add: a Claude token, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
+(add: a Claude token or API key, a Codex API key, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), a chat moved onto another (use: once it's on it, kept as the one a new
 chat on its provider's models takes, accounts.selected), a subscription's usage read (usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
@@ -68,6 +68,8 @@ def answer(server, conn, msg, reply):
                 accounts.add("claude", msg.get("name"), accounts.check_token(msg.get("token")))
             elif msg.get("home"):
                 accounts.add("codex", msg.get("name"), _signed_in_home(msg["home"]))
+            elif "token" in msg:
+                accounts.add_codex_key(msg.get("name"), msg.get("token"))
             else:
                 raise ValueError(wording.say("subscriptions.not_chatgpt"))
             return done()
@@ -119,6 +121,8 @@ def _usage(server, profile, provider, done):
     """A subscription's usage (profile; "": the CLI's own sign-in of provider, Claude's where none is said)."""
     if profile:
         provider = (accounts.account(profile) or {}).get("provider", provider)
+        if accounts.api_key(profile):
+            return done(usage=None, api_key=True)
     try:
         limits = accounts.plan_usage(profile, claude_cli(server), provider)
     except accounts.SignedOut as e:

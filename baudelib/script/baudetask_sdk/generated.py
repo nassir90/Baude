@@ -114,9 +114,9 @@ class Account(Obj):
         name (string): Its name, the user's, unique for its provider on its host.
         kind ('folder' | 'token' | 'profile'): folder: a Claude account that is a config folder of its own on
             its host (CLAUDE_CONFIG_DIR), signed in to with claude auth login run there with it (signed in again
-            the same way); token: a Claude account signed in with a token from claude setup-token, where its
-            host has no claude (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its
-            own (signed in again with a device code).
+            the same way); token: a Claude account signed in with a token from claude setup-token or an
+            Anthropic API key (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its
+            own, signed in with ChatGPT or an OpenAI API key (signed in again with codex login).
     """
 
 
@@ -1680,6 +1680,8 @@ class AccountsReply(Obj):
             (accounts' use) last picked there, else the CLI's own sign-in.
         usage (array or None of UsageLimit): usage: the subscription's limits; null where they can't be read for
             its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's).
+        api_key (boolean): usage: true where the account is signed in with an API key (paid per use), so it has
+            no subscription limits (usage null).
         line (string): sign_in (Claude's): a line the sign-in wrote (the page to open among them).
         login (ChatLogin): sign_in (Codex's): its state as it goes (login alone: signing_in, then with the page,
             and the device code's code), then on its end, signed_in or failed.
@@ -3305,19 +3307,19 @@ class Ops(Area):
     def accounts(self, *, what=None, provider=None, id=None, session=None, name=None, token=None, home=None,
                  folder=None, code=None, method=None, url=None, cb=None, host=None):
         """accounts (Accounts): The host's Claude and Codex subscription accounts (hostaccounts): list them; add one
-        (Claude: name and an existing signed-in config folder, or name and token where the host has no claude;
-        Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id,
-        token); remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent
-        started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its
-        provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of
-        provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign
-        in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're
-        written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device
-        code's), its state coming as it goes (login: the page to open, and the device code's code to enter there);
-        then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this
-        connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser
-        sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave,
-        or error). Each other is answered with accounts.
+        (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing
+        signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token);
+        remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again
+        under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's
+        models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's
+        where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again;
+        Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page
+        to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state
+        coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the
+        connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code:
+        no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one
+        this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is
+        answered with accounts.
 
             what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'use' | 'usage' | 'sign_in' | 'code' |
                 'callback'): What to do.
@@ -3330,7 +3332,10 @@ class Ops(Area):
                 (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat
                 (Agent Management's read).
             name (string): add, rename, sign_in (a new account): its name.
-            token (string): add (Claude), token: a token from claude setup-token.
+            token (string): add (Claude, Codex), token: what signs the account in, pasted: Claude's a long-lived
+                token from claude setup-token (sk-ant-oat…) or an Anthropic API key (sk-ant-api…); Codex's an
+                OpenAI API key (sk-…), written to a new CODEX_HOME's auth.json as codex login --with-api-key
+                writes it. Kept on the host only, owner-only; never said back.
             home (string): add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping
                 its credentials in a file.
             folder (string): add (Claude): an existing Claude config folder on the host, signed in (claude auth

@@ -9,10 +9,12 @@ only the folder's path. The folder's projects (and the user's commands, agents, 
 CLAUDE.md) are links to the host's own Claude folder's, so its chats are where every other chat is, and set up the
 same. Its settings.json and .claude.json are its own (claude won't write through a link): a folder made here starts
 with a copy of the host's settings.json and the host's user MCP servers (~/.claude.json's mcpServers), as a Codex
-account's CODEX_HOME has settings of its own. Where the host has no claude, a Claude account is a token from claude setup-token (kind "token"), given to
-its claude on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), which claude reads once as it starts, so it's in no
-environment its tools inherit. A Codex account is a CODEX_HOME of its own (kind "profile"), with file-backed
-credentials Codex manages."""
+account's CODEX_HOME has settings of its own. A Claude account can also be a token (kind "token"): a long-lived one
+from claude setup-token, or an Anthropic API key, kept in this file and given to its claude on a pipe
+(CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR, or CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR for an API key), which claude reads
+once as it starts, so it's in no environment its tools inherit. A Codex account is a CODEX_HOME of its own (kind
+"profile"), with file-backed credentials Codex manages (an OpenAI API key pasted is written to its auth.json as
+`codex login --with-api-key` writes it)."""
 import glob
 import os
 import shutil
@@ -28,7 +30,7 @@ from baudelib.selfupdate import settings_path
 
 PROVIDERS = ("claude", "codex")
 _CLAUDE_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
-                "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
                 "CLAUDE_CODE_USE_FOUNDRY")
 _FOLDER_KEYS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")  # (another folder's, or its Keychain item's)
 # (what a folder account's folder shares with the host's own Claude folder: its chats, and how the user set Claude up)
@@ -116,12 +118,65 @@ def select(provider, profile):
         db.execute("INSERT OR REPLACE INTO defaults VALUES (?,?)", (provider, profile))
 
 
+API_KEY = "sk-ant-api"  # (an Anthropic API key's start; a setup token's is sk-ant-oat)
+
+
 def check_token(token):
-    """A Claude setup token as pasted, trimmed; ValueError for anything else."""
+    """A Claude setup token or Anthropic API key as pasted, trimmed; ValueError for anything else."""
     token = (token or "").strip()
-    if not token.startswith("sk-ant-oat") or any(c.isspace() for c in token):
+    if not token.startswith(("sk-ant-oat", API_KEY)) or any(c.isspace() for c in token):
         raise ValueError(wording.say("subscriptions.enter_token"))
     return token
+
+
+def check_openai_key(key):
+    """An OpenAI API key as pasted, trimmed; ValueError for anything else."""
+    key = (key or "").strip()
+    if not key.startswith("sk-") or len(key) < 20 or any(c.isspace() for c in key):
+        raise ValueError(wording.say("subscriptions.enter_openai_key"))
+    return key
+
+
+def add_codex_key(name, key):
+    """A new Codex account signed in with an OpenAI API key: a CODEX_HOME of its own made here (owner-only), its
+    auth.json (0600) as `codex login --with-api-key` writes it, credentials kept in a file. Its id."""
+    import json
+    import tempfile
+    name, key = check_name("codex", name), check_openai_key(key)
+    root().mkdir(mode=0o700, parents=True, exist_ok=True)
+    home = tempfile.mkdtemp(prefix="codex-", dir=root())
+    try:
+        with open(os.path.join(home, "config.toml"), "x") as config:
+            config.write('cli_auth_credentials_store = "file"\n')
+        with os.fdopen(os.open(os.path.join(home, "auth.json"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w",
+                       encoding="utf-8") as f:
+            json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": key}, f, indent=2)
+        return add("codex", name, home)
+    except BaseException:
+        shutil.rmtree(home, ignore_errors=True)
+        raise
+
+
+def api_key(profile):
+    """Whether an account is signed in with an API key (paid per use: no subscription limits): a Claude token
+    account's Anthropic API key, or a Codex account whose auth.json holds an OpenAI API key."""
+    import json
+    a = account(profile)
+    if a is None:
+        return False
+    try:
+        credential = _credential(a["provider"], profile)
+    except OSError:
+        return False
+    if a["provider"] == "claude":
+        return a["kind"] == "token" and credential.startswith(API_KEY)
+    try:
+        with open(os.path.join(credential, "auth.json"), encoding="utf-8") as f:
+            auth = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(auth, dict) and (auth.get("auth_mode") == "apikey" or
+                                       bool(auth.get("OPENAI_API_KEY")) and not auth.get("tokens"))
 
 
 def check_name(provider, name):
@@ -349,7 +404,8 @@ def claude_launch(env, profile):
         os.write(write, token.encode())  # (far less than a pipe holds: written whole without a reader)
     finally:
         os.close(write)
-    env["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"] = str(read)
+    env["CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR" if token.startswith(API_KEY) else
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"] = str(read)
     return env, read
 
 

@@ -3,6 +3,7 @@ package dev.baude.android.screenshots
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
@@ -189,6 +190,7 @@ abstract class TasksMockups(private val theme: String) {
         activity.setContent {
             BaudeTheme {
                 androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState(Int.MAX_VALUE)) // (its end: the answer)
                     .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task asks:\n\n" +
                         table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
@@ -208,7 +210,7 @@ abstract class TasksMockups(private val theme: String) {
                             dev.baude.android.Prose("Answered: staging.")
                         }
                     }
-                    dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
+                    if (!waiting) dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
                         table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
                         "| exit code | 3 |\n\nIt failed: exited with 3. The end of its log:\n\nsay: deploying site\n" +
                         "err: the upload was refused: the bucket's key expired\n\nFind out why. If the script is at fault, " +

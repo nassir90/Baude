@@ -298,7 +298,7 @@ def result(text):
 def task_answer(n, text):
     """A task's script asking its Bot (baudelib/tasks.py), answered with mcp__mesh__answer_task: a form's fields
     filled (the last of a choice's choices, 7, true, "filled"), or, with no form, a line saying it looked; an ask that
-    says SKIP THE TOOL answered in text only, till it's reminded. A failure handed over by the host whose log says
+    says SKIP THE TOOL answered in text only, till it's reminded (answered FAKE_REMINDED_S seconds after). A failure handed over by the host whose log says
     HEAL ME, healed: the task's script set to one that asks the Bot once and ends well (mcp__mesh__set_task), and run
     again (mcp__mesh__run_task, not waited for); any other a line saying it looked."""
     healing = re.search(r"^\| task \| ([A-Za-z0-9_-]+) \|$", text, re.M) if "HEAL ME" in text else None
@@ -310,6 +310,8 @@ def task_answer(n, text):
         mcp_tool("mesh", "run_task", {"id": tid})
         answer = "Healed: fixed its script and ran it again."
     elif "answer_task tool" in text and run and ("SKIP THE TOOL" not in text or "You haven't answered" in text):
+        if "You haven't answered" in text:  # (FAKE_REMINDED_S: a while before it answers a reminder, as a scene wants)
+            time.sleep(float(os.environ.get("FAKE_REMINDED_S") or 0))
         values = {}
         for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
             kind = m[2]

@@ -13,7 +13,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire,
     wording, worktree,
 )
@@ -527,6 +527,76 @@ class ServerRunning:
         self.log(f"feedback {note} filed on {repo}: {made['url']}")
         reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
 
+    def deciders_op(self, msg, reply):
+        """deciders: this host's (with their URLs), then the other members' as their records say; one added, removed
+        or tested first."""
+        what, tested, error = msg.get("what") or "list", None, None
+        try:
+            if what == "add":
+                tested = self.deciders.add(msg.get("name"), msg.get("url"))
+            elif what == "remove":
+                self.deciders.remove(msg.get("id"))
+            elif what == "test":
+                tested = self.deciders.test(msg.get("id"))
+        except (ValueError, OSError) as e:
+            error = str(e)
+        own = self.deciders.listing(fresh=what == "list")
+        if what != "list" or not error:
+            self.mesh.deciders_changed(own)
+        listed = [{**d, "host": None, "host_name": self.me["name"]} for d in own]
+        for member, name, decs in self.mesh.member_deciders():
+            listed += [{**d, "value": f"{name}/{d['id']}", "host": member, "host_name": name, "url": None}
+                       for d in decs]
+        reply("deciders", what=what, deciders=listed, tested=tested, **({"error": error} if error else {}))
+
+    def decide(self, msg, reply):
+        """decide: asked of one of this host's deciders, or carried to the member that has it; decided either way
+        (unavailable: why it couldn't be asked)."""
+        name = msg.get("decider") if isinstance(msg.get("decider"), str) and msg["decider"].strip() else None
+        here = self.me["name"]
+        host, _, which = (name or "").rpartition("/")
+        member = None
+        if host and host.lower() not in (here.lower(), self.me["id"]):
+            member = self.mesh.member_named(host)
+            if member is None:
+                return reply("decided", decider=which, host=host, unavailable=wording.say("deciders.host_gone", host=host))
+        if member is not None:
+            ask = {"op": "decide", "decider": which, "state": msg.get("state", ""), "questions": msg.get("questions"),
+                   **({"images": msg["images"]} if msg.get("images") else {})}
+            try:
+                ch, _info = self.mesh.channel(member)
+            except OSError as e:
+                return reply("decided", decider=which, host=host, unavailable=str(e) or
+                             wording.say("deciders.host_gone", host=host))
+            try:
+                ch.sock.settimeout(wire.SILENT_S)
+                ch.keep_alive()
+                ch.send({**ask, "req": 1})
+                while (got := ch.reply()) is not None:
+                    if got.get("req") != 1:
+                        continue
+                    if got.get("op") == "decided":
+                        return reply("decided", **{k: v for k, v in got.items() if k not in ("op", "req")})
+                    return reply("error", error=wire.said(got))
+                return reply("decided", decider=which, host=host, unavailable=wording.say("deciders.host_gone", host=host))
+            except OSError as e:
+                return reply("decided", decider=which, host=host, unavailable=str(e))
+            finally:
+                ch.close()
+        entry = self.deciders.find(which) if which else next(iter(self.deciders.entries()), None)
+        if entry is None:
+            return reply("decided", decider=which or "", host=here, unavailable=wording.say(
+                "deciders.no_such", host=here, name=which) if which else wording.say("deciders.none_here", host=here))
+        try:
+            got = self.deciders.decide(entry, msg)
+        except deciders.Unavailable as e:
+            self.mesh.deciders_changed(self.deciders.listing())
+            return reply("decided", decider=entry["name"], host=here, unavailable=wording.say(
+                "deciders.unavailable", name=entry["name"], host=here, why=str(e)))
+        except ValueError as e:
+            return reply("error", error=wording.say("deciders.said", name=entry["name"], host=here, why=str(e)))
+        reply("decided", decider=entry["name"], host=here, **got)
+
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
         reply = lambda kind, **kw: conn.send({"op": kind, "req": req, **kw})  # noqa: E731
@@ -839,6 +909,15 @@ class ServerRunning:
                 except ValueError as e:
                     reply("error", error=str(e))
             threading.Thread(target=asked, daemon=True, name="task-ask").start()
+            return None
+        if op == "deciders":  # (the host's decision models' servers: listed, added, removed, tested; on a thread)
+            threading.Thread(target=self.deciders_op, args=(msg, reply), daemon=True, name="deciders").start()
+            return None
+        if op == "decide":  # (a task's script's, on this machine's socket with its run's token; a member's, through
+            if msg.get("run") is not None and conn.origin is None and conn.member is None and \
+                    self.tasks.held(msg) is None:  # the mesh: as it may use providers)
+                return reply("error", error=wording.say("host_errors.no_run"))
+            threading.Thread(target=self.decide, args=(msg, reply), daemon=True, name="decide").start()
             return None
         if op in ("deactivate", "activate"):  # (a member, by its id or where a link from here goes: mesh.deactivate)
             where = msg.get("where") if wire.is_where(msg.get("where")) else None

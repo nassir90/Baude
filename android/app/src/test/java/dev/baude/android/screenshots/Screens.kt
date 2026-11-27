@@ -621,6 +621,11 @@ abstract class Screens(private val theme: String) {
                     dep("xvfb", "Xvfb", true, "sudo apt install xvfb", "deps.multiplex"),
                     dep("webkit", "WebKitGTK", true, "sudo apt install gir1.2-webkit-6.0", "mesh_versions.emission").put("where", "app"),
                     dep("node", "Node.js", true, "sudo apt install nodejs npm", "side_panel.signal").put("where", "app"))))
+                "deciders" -> r.put("what", "list").put("deciders", org.json.JSONArray(listOf( // (one answering, one not)
+                    org.json.JSONObject().put("value", "triage").put("id", "triage").put("name", "Triage")
+                        .put("url", "http://127.0.0.1:8000").put("reachable", true).put("model", "strands-decider-E2B-gemma4-v2-2611"),
+                    org.json.JSONObject().put("value", "review").put("id", "review").put("name", "Review")
+                        .put("url", "http://127.0.0.1:8009").put("reachable", false).put("error", "isn't running at http://127.0.0.1:8009"))))
                 else -> null
             }
         }

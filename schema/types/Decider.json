@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A decider a host knows (baudelib/deciders.py): a server that answers Strands Decider's System One API (POST /v1/systemone, GET /health), as the deciders op lists it, and as a member's record says it (no url). What a task's decider variable binds, and what decide's decider names, is its value.",
+  "properties": {
+    "value": {
+      "type": "string",
+      "description": "What decide's decider names it as, on the host that listed it: its id for one of that host's own, <its host's name>/<its id> for another member's."
+    },
+    "id": {
+      "type": "string",
+      "description": "Its id on its host."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "host": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The member that has it, by its id (the listing host's own: null)."
+    },
+    "host_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "That member's name."
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Where it's served (the listing host's own only)."
+    },
+    "reachable": {
+      "type": "boolean",
+      "description": "It answered as a decider when it was last looked at: a variable bound to one that didn't is warned of before a run."
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The model it serves, as its /health says."
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it didn't answer."
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}

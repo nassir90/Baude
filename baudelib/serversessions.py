@@ -17,7 +17,7 @@ from baudelib import (
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
     FILE_LIMIT, GRACE_MOST, RENAME_S, SETTINGS, Session, TAKEN, TRANSCRIPT_CHUNK, _said, _what, _write_json, bot_system,
-    clean_env, context_kept, context_listing, turn_acting,
+    clean_env, context_kept, context_listing, note_acting,
 )
 
 CARRY_TRIES = 5  # (copies of a chat's record made, each written to as it was copied, before its account waits again)
@@ -322,6 +322,7 @@ class ServerSessions:
         s.proc.on_disabled = self.subscription_disabled  # (auto-disabled as it's exhausted: its chats stopped)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
         # what it writes learned again)
+        s.acting_by.clear()
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
 
@@ -684,8 +685,8 @@ class ServerSessions:
                 self.ask_context(s, soon=True)  # (a reply, a tool's result: the window filling through a turn)
             if kind == "stream_event" and not msg.get("parent_tool_use_id"):
                 s.streamed = True  # (its text said as it's written: the same text come whole after is late)
-            if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and \
-                    (acting := turn_acting(msg, s.acting, s.streamed)) != s.acting:
+            if kind in ("stream_event", "assistant") and \
+                    (acting := note_acting(s.acting_by, msg, s.streamed)) != s.acting:
                 s.acting = acting
                 self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
@@ -705,6 +706,7 @@ class ServerSessions:
                     self.keep(s, "user", message, said)
                 told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
+                s.acting_by.clear()
                 autofix.turn_over(s, s.turn_began, time.time())  # (its own comments on the pull request: not sent it)
                 if (s.meta.get("autofix") or {}).get("waiting"):
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
@@ -965,6 +967,7 @@ class ServerSessions:
                 # its turn's end: its Bot told)
             self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
+            s.acting_by.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()

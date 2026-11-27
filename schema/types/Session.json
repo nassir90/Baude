@@ -118,7 +118,7 @@
     },
     "acting": {
       "type": "boolean",
-      "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."
+      "description": "Whether its turn is at its browser's tools (Emission's), its own or a subagent's: from the start of a call of Emission's till another tool's call or text starts after it (in each agent's own messages; on while any agent is at one), the turn ends or its agent goes; only while it's working, not asking."
     },
     "context": {
       "anyOf": [

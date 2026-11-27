@@ -734,8 +734,9 @@ class MacWeb:
                 return
             self.overlay = MacOverlay(self.view)
         accent = getattr(self.window, "accent", None) or (0.21, 0.52, 0.89)
-        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent:
-            return  # (nothing's moved, and the accent's as it was drawn in)
+        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent and \
+                self.overlay.drawn[2:] == self.overlay.size():
+            return  # (nothing's moved, the accent's as it was drawn in, and the page's the size it was drawn at)
         look = pointer.look()
         self.overlay.draw(look, accent, mine=look["tab"] in (None, self.tab_id))
 
@@ -1300,12 +1301,17 @@ class MacOverlay:
         send(self.arrow, b"setShadowOffset:", MacPoint(*ARROW_SHADOW), types=(MacPoint,))
         self.drawn = None
 
+    def size(self):
+        """Its width and height now (the page's: it's resized with it)."""
+        box = macos.objc_send(self.view, b"bounds", ret=macos._rect())
+        return box.w, box.h
+
     def draw(self, look, rgb, mine=True):
         """look (BotPointer's) drawn now; mine False: the pointer's in another tab (only the glow drawn here)."""
         send, R = macos.objc_send, macos._rect()
         self.colours(rgb)
         box = send(self.view, b"bounds", ret=R)
-        key = (repr(look), mine, box.w, box.h)
+        key = (repr(look), mine, box.w, box.h)  # (its last two: size()'s)
         if key == self.drawn:
             return
         self.drawn = key

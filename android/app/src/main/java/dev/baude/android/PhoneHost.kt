@@ -755,7 +755,9 @@ object PhoneHost {
             val uuid = record(s, kind, message, null, apiError) ?: return
             if (kind == "assistant") {
                 val content = message.optJSONArray("content")
-                s.acting = (0 until (content?.length() ?: 0)).any { content!!.optJSONObject(it)?.optString("type") == "tool_use" }
+                // (at its browser's tools: a call of Emission's in it, as baudelib/serverstate.py's turn_acting has it)
+                s.acting = (0 until (content?.length() ?: 0)).mapNotNull { content!!.optJSONObject(it) }
+                    .any { it.optString("type") == "tool_use" && it.optString("name").startsWith("mcp__emission__") }
                 s.meta.put("said", now())
                 save(s)
             }

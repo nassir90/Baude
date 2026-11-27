@@ -145,7 +145,7 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "autofix": _autofix,  # (no on: only as it is)
     **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
                      "bot", "rotate", "run_task", "task_stop", "task_bind", "answer_task", "waits_on", "seen",
-                     "draft_save"), "manage_write"),
+                     "draft_save", "queue"), "manage_write"),
     # (seen: what every head shows of it changed, as memory's seen is a write; a draft: a write)
 }
 CHATLESS = frozenset(("list_dir", "notes", "edits", "edit_propose", "edit_revise", "edit_withdraw", "edit_decide",
@@ -327,7 +327,8 @@ class Access:
         if op == "run_task" or op == "tasks" and "set" in msg:  # (a task: a script run here, a shell's worth)
             caps.append("shell")
         sends = op == "input" and inner.get("type") == "user" or op == "held" and msg.get("send") or \
-            op == "run_task" or op == "tasks" and "set" in msg
+            op == "run_task" or op == "tasks" and "set" in msg or \
+            op == "queue" and bool(msg.get("add") or msg.get("upto"))  # (a queue its host sends)
         if sends and (meta.get("mode") not in SAFE_MODES or
                       any(t in SHELL_TOOLS for t in getattr(session, "always_allow", None) or ()) or
                       any(isinstance(t, str) and t.split("(")[0] in SHELL_TOOLS

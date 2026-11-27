@@ -14,8 +14,8 @@ import uuid
 
 from baudelib import (
     access, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire,
-    wording, worktree,
+    hostlogin, hostqueue, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
+    wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -987,7 +987,8 @@ class ServerRunning:
                     # it again)
                     s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes,
-                             login=hostlogin.attached(self, conn, s), draft=s.meta.get("composer") if writes else None)
+                             login=hostlogin.attached(self, conn, s), draft=s.meta.get("composer") if writes else None,
+                             queue=hostqueue.given(s, writes))
             if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace;
                 s.viewers.discard(conn)  # one that only reads it isn't its head: its grace kept)
                 s.live.discard(conn)
@@ -1066,6 +1067,9 @@ class ServerRunning:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "draft_save":  # (what's written in its box and not sent: kept here for every head, the last
                 kind, fields = self.save_draft(conn, s, msg)  # write's, told the others attached)
+                return reply(kind, **fields)
+            if op == "queue":  # (what's written while its turn runs: kept here for every head, sent by this host
+                kind, fields = hostqueue.change(self, conn, s, msg)  # as the turn ends, hostqueue)
                 return reply(kind, **fields)
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
@@ -1285,7 +1289,7 @@ class ServerRunning:
         listed = s.listing()
         meta = copy.deepcopy(s.meta)
         for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
-                    "start_key", "rotated", "last_thread", "composer"):  # (the Bot's draft stays the Bot's)
+                    "start_key", "rotated", "last_thread", "composer", "queue"):  # (the Bot's draft stays the Bot's)
             meta.pop(key, None)
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
         meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",

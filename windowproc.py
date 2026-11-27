@@ -817,7 +817,8 @@ class WindowProc:
             queue = None
         elif queue and not gone:  # (whether its turn's going on as it's left: its end, seen as it's listed, sends it)
             self.QUEUE_SEEN[key] = "working" if self.busy or key in self.left_remote else None
-        self.unqueue(list(self.queued))  # (another chat: this one's queue kept for it, not shown under the next)
+        self.unqueue(list(self.queued), host=False)  # (another chat: this one's queue kept for it, not shown under the
+        # next; its host's left there)
         self.held_after_revert = None
         for t in getattr(self, "held_turns", {}).values():  # (and what its host holds for it: the next one's own)
             if t.get_parent() is self.queue_box:
@@ -982,6 +983,8 @@ class WindowProc:
             self.proc = None
             self.set_busy(False)
             self.remote_view()
+            if code != "lost":
+                self.follow_host_queue()  # (its host sending what's queued: attached again for it)
             return
         self.compact_ended()
         if code != 0 and self.session_id and not self.resume_pending:  # (nothing said now: the claude started next
@@ -1106,17 +1109,19 @@ class WindowProc:
         self.queue_box.append(turn)
         self.queue_box.set_visible(True)
         self.stick_bottom, self.restore_scroll = True, None
+        self.queue_to_host(turn)  # (a host's chat's: kept there, for every head, and sent by it)
 
     def queue_state(self):
         """The queue as the chat's draft keeps it (keep_draft): its messages (text, attachments, and the uuid one put
         back is sent by), the one whose ↑ the turn's stopping for (its place), and whether the turn was stopped
         otherwise (hold: its end sends nothing); None if nothing's queued."""
         stopped = self.__dict__.pop("stop_left", False) or bool(self.busy and getattr(self.proc, "stop_asked", False))
-        if not self.queued:
+        mine = [t for t in self.queued if not t.hosted]  # (its host's are kept there)
+        if not mine:
             return None
-        upto = self.queue_upto
-        return {"turns": [{"text": t.text, "attachments": list(t.atts), "said": t.said} for t in self.queued],
-                "upto": self.queued.index(upto) if isinstance(upto, QueuedTurn) else None, "hold": stopped}
+        upto = self.queue_upto if self.queue_upto in mine else None
+        return {"turns": [{"text": t.text, "attachments": list(t.atts), "said": t.said} for t in mine],
+                "upto": mine.index(upto) if isinstance(upto, QueuedTurn) else None, "hold": stopped}
 
     def put_queue(self, queue):
         """A queue the chat's draft kept (queue_state) under the conversation again, after what's queued; its ↑ and
@@ -1136,7 +1141,10 @@ class WindowProc:
         self.queue_box.set_visible(bool(self.queued))
         self.stick_bottom, self.restore_scroll = True, None
 
-    def unqueue(self, turns):
+    def unqueue(self, turns, host=True):
+        """turns out of the queue; out of its host's too (host), those it has."""
+        if host:
+            self.unqueue_on_host(turns)
         for t in turns:
             if t in self.queued:
                 self.queued.remove(t)
@@ -1178,8 +1186,10 @@ class WindowProc:
         upto, self.queue_upto = self.queue_upto, None
         if upto is None or self.busy or not self.queued:
             return False
-        turns = self.queued if upto == "all" else self.queued[:self.queued.index(upto) + 1]
-        turns = list(turns)
+        turns = [t for t in self.queued if not t.hosted] if upto == "all" else \
+            self.queued[:self.queued.index(upto) + 1]  # (all: what its host hasn't, which it sends itself)
+        if not turns:
+            return False
         self.unqueue(turns)
         text = "\n\n".join(t.text for t in turns if t.text)
         buf = self.input.get_buffer()  # (sent from the box, as anything is: on_send; what was written there kept)

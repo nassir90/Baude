@@ -1,8 +1,10 @@
 """windowdrafts — what each of a Baude window's chats keeps (WindowDrafts): its draft, its model, the inference
 providers, the stream-json protocol, compaction, its title, background tasks and artifacts.
 """
+import base64
 import json
 import os
+import time
 import urllib.parse
 import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
@@ -23,7 +25,7 @@ from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
-from chatparts import SenderTurn, UserTurn  # noqa: E402
+from chatparts import QueuedTurn, SenderTurn, UserTurn  # noqa: E402
 from widgets import discard, load_settings, save_settings  # noqa: E402,F401
 from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402,F401
 from codeview import CodePage  # noqa: E402,F401
@@ -213,6 +215,7 @@ class WindowDrafts:
                 self.hd["dirty"] = True
                 self.save_host_draft()
             return
+        self.host_queue_in(getattr(self.proc, "queue", None))  # (its queue, its host's)
         self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "")
         if dirty and self.box_markdown() != self.hd["text"]:
             return self.save_host_draft()
@@ -221,7 +224,9 @@ class WindowDrafts:
 
     def reattached_draft(self):
         """(the open chat attached again: its host back, say) What's been typed since its host last took it saved to
-        it; else what it has, if it's had a write since."""
+        it; else what it has, if it's had a write since. Its queue as its host has it."""
+        if isinstance(self.proc, baudelib.client.RemoteProc):
+            self.host_queue_in(self.proc.queue)
         if not self.hd_open() or not isinstance(self.proc, baudelib.client.RemoteProc) or self.draft_host() is None:
             return
         if self.hd["dirty"]:
@@ -340,6 +345,125 @@ class WindowDrafts:
             return
         hd["rev"] = d["rev"]
         self.put_host_text(d.get("text") or "")
+
+    # ---- a host's chat's queue: kept by its host (hostqueue), the same in every head that opens the chat, on any
+    # machine. What's queued here is added there, and what's sent, edited or deleted here dropped there; its host
+    # leads it, sending it as the turn ends, so every head shows it and it's sent once. Each change comes back as
+    # its answer, another head's or its host's sending it as "_queue" (h_queue). One its host won't take (too big)
+    # stays this window's, sent as its turn ends here, as before
+    hq = {"sid": None, "rev": -1}  # (the open chat's queue: the last revision its host's said)
+
+    def queue_host(self):
+        """The open chat's connection, if its host keeps its queue (as its draft: draft_host), else None."""
+        p = self.proc
+        return p if self.draft_host() is not None and isinstance(p, baudelib.client.RemoteProc) else None
+
+    def queue_to_host(self, turn):
+        """A message just queued, added to its host's queue."""
+        p = self.queue_host()
+        if p is None:
+            return
+        turn.qid, turn.hosted = turn.said or str(uuid.uuid4()), "adding"
+        sid = self.session_id
+
+        def done(reply):
+            if reply.get("op") == "queue" and self.session_id == sid:
+                return self.host_queue_in(reply.get("queue"))
+            if turn.hosted == "adding":  # (not taken: this window's to send, as its turn ends)
+                turn.hosted = False
+        p.queue_op({"add": [{"id": turn.qid, "text": turn.text, "content": self.user_content(turn.text, turn.atts)}]},
+                   done)
+
+    def unqueue_on_host(self, turns):
+        """Queued messages sent, edited or deleted here: dropped from its host's queue."""
+        ids = [t.qid for t in turns if t.hosted and t in self.queued]
+        if ids and (p := self.queue_host()) is not None:
+            sid = self.session_id
+            p.queue_op({"drop": ids}, lambda r: self.session_id == sid and r.get("op") == "queue" and
+                       self.host_queue_in(r.get("queue")))
+
+    def queue_upto_host(self):
+        """(a send-now's interrupt about to be sent) The queued message it's for, its host's: named to its host, which
+        sends it and those before it as the turn ends, not this window."""
+        t = self.queue_upto
+        if isinstance(t, QueuedTurn) and t.hosted and (p := self.queue_host()) is not None:
+            self.queue_upto = None
+            sid = self.session_id
+            p.queue_op({"upto": t.qid}, lambda r: self.session_id == sid and r.get("op") == "queue" and
+                       self.host_queue_in(r.get("queue")))
+
+    def follow_host_queue(self):
+        """(the open chat's agent gone mid-turn, stopped outright) Attached again if its host has what's queued here,
+        which it sends now, so its turn's followed here as it would be had this window sent it: once what's sent is
+        in its transcript as it's fetched (FOLLOW_WAIT_S at most), so it's drawn before the turn that answers it."""
+        if self.remote is None or self.proc is not None or not any(t.hosted for t in self.queued):
+            return
+        sid, path, since = self.session_id, self.view_path, time.monotonic()
+        size = os.path.getsize(path) if path and os.path.exists(path) else 0
+
+        def due():
+            if self.session_id != sid or self.proc is not None or not self.resume_pending:
+                return False
+            grown = path and os.path.exists(path) and os.path.getsize(path) > size
+            if not grown and time.monotonic() - since < self.FOLLOW_WAIT_S:
+                return True
+            self.begin_resume()
+            return False
+        GLib.timeout_add(200, due)
+
+    FOLLOW_WAIT_S = 5
+
+    def h_queue(self, msg):
+        """The open chat's queue changed on its host: another head's change, or its host sending it (queue_changed)."""
+        self.host_queue_in(msg.get("queue"))
+
+    @staticmethod
+    def queued_atts(content):
+        """What's attached to a queued message, from its content (pictures and documents; files named in its text)."""
+        atts = []
+        for b in content if isinstance(content, list) else ():
+            src = b.get("source") or {} if isinstance(b, dict) else {}
+            if src.get("type") != "base64" or b.get("type") not in ("image", "document"):
+                continue
+            try:
+                data = base64.b64decode(src.get("data") or "")
+            except ValueError:
+                continue
+            atts.append(Attachment(b.get("title") or "image", "image" if b["type"] == "image" else "pdf",
+                                   src.get("media_type") or "application/pdf", data, None))
+        return atts
+
+    def host_queue_in(self, q):
+        """The open chat's queue as its host has it, under the conversation: what's gone from it gone here, what's
+        new in it drawn in its place, what this window's adding (and what its host won't take) left as it is."""
+        if not isinstance(q, dict) or self.queue_host() is None:
+            return
+        if self.hq.get("sid") != self.session_id:
+            self.hq = {"sid": self.session_id, "rev": -1}
+        if (q.get("rev") or 0) < self.hq["rev"]:
+            return  # (older than one seen)
+        self.hq["rev"] = q.get("rev") or 0
+        turns = [t for t in q.get("turns") or () if isinstance(t, dict) and isinstance(t.get("id"), str)]
+        ids = {t["id"] for t in turns}
+        self.unqueue([t for t in self.queued if t.hosted is True and t.qid not in ids], host=False)
+        here = {t.qid: t for t in self.queued if t.qid}
+        prev = None
+        for t in turns:
+            turn = here.get(t["id"])
+            if turn is None:
+                atts = self.queued_atts(t.get("content"))
+                turn = QueuedTurn(self, self.user_bubble(t.get("text") or "", atts), t.get("text") or "", atts)
+                turn.qid = t["id"]
+                at = self.queued.index(prev) + 1 if prev is not None else 0
+                self.queued.insert(at, turn)
+                after = prev if prev is not None else (self.queued[1].get_prev_sibling() if len(self.queued) > 1
+                                                       else self.queue_box.get_last_child())
+                self.queue_box.insert_child_after(turn, after)
+                self.stick_bottom, self.restore_scroll = True, None
+            turn.hosted = True
+            prev = turn
+        self.queue_box.set_visible(bool(self.queued or any(t.get_visible() for t in
+                                                            getattr(self, "held_turns", {}).values())))
 
     @classmethod
     def drafts_state(cls):
@@ -778,6 +902,7 @@ class WindowDrafts:
         says it, once (h_result; stop_stuck)."""
         if not self.proc:
             return
+        self.queue_upto_host()  # (a send-now's: its host sends them as the turn ends)
         if self.interrupting is not None and self.interrupting[0] is self.proc:
             return  # (asked already: stopped outright if it doesn't end soon)
         self.drop_interrupting()

@@ -235,6 +235,7 @@ fun showUsage(chat: Chat, usage: JSONObject, model: String? = null) {
 fun interrupt(chat: Chat) {
     val c = chat.chrome
     chat.stopAsked = true
+    Mesh.queueUptoHost(chat) // (↑'s, on one its host has: its host sends them as the turn ends)
     if (c.interrupting != 0L) return
     val token = SystemClock.elapsedRealtime()
     c.interrupting = token

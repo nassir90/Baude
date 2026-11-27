@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A message written while a chat's turn runs, kept by the chat's host in its queue till the turn is over (ChatQueue).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id, the head's pick (a uuid): the uuid it's sent by when it goes alone."
+    },
+    "text": {
+      "type": "string",
+      "description": "What's written, as heads show it."
+    },
+    "content": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      ],
+      "description": "The message's content as it's sent (a user message's: its text, or its blocks, pictures and documents first)."
+    },
+    "at": {
+      "type": ["number", "null"],
+      "description": "When it was queued, epoch seconds."
+    }
+  },
+  "required": ["id", "text", "content"],
+  "additionalProperties": false
+}

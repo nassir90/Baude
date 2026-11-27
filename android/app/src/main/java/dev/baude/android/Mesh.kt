@@ -125,6 +125,7 @@ class Chat(hostId: String, sid: String) {
     val sent = mutableStateListOf<Outgoing>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
     val queued = mutableStateListOf<Queued>() // (written while a turn ran: sent when it ends)
     var queueUpto: Queued? = null             // (↑ on a queued message: the queue is sent up to it at the turn's end)
+    var queueRev = -1L                        // (its host's queue: the last revision it's said, Mesh.queueIn)
     var stopAsked = false                     // (the turn was stopped: its queue stays)
     val edit = mutableStateOf<String?>(null)  // (a queued message's revert: text for the box, before what's written)
     var typed = ""                            // (what's in the box, kept as it's written)
@@ -610,6 +611,10 @@ object Mesh {
                     val said = Msg.DraftChanged.from(msg)
                     if (it.hostId == c.id && it.sid == said.session.orEmpty()) main.post { if (open === it) draftIn(it, said.draft) }
                 }
+                Op.QUEUE_CHANGED -> open?.let { // (the open chat's queue, another head's change or its host sending it)
+                    if (it.hostId == c.id && it.sid == msg.optString("session"))
+                        main.post { if (open === it) queueIn(it, msg.optJSONObject("queue")) }
+                }
                 Op.EMISSION_CALL -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
                 Op.EMISSION_UNSERVED -> PhoneBrowser.unserved(c, msg)
                 Op.CLAUDE -> open?.let {
@@ -856,6 +861,7 @@ object Mesh {
                 chat.chrome.writes.value = attached.writes != false
                 chat.chrome.keepsLogin = r.has("login") // (an older host's doesn't: the card worked out here)
                 if (open === chat && attached.writes != false) draftAttached(chat, attached.draft)
+                if (open === chat && attached.writes != false) queueIn(chat, r.optJSONObject("queue"))
             }
             val asks = attached.asks.orEmpty().mapNotNull(Ask::of)
             main.post {
@@ -992,6 +998,94 @@ object Mesh {
         if (boxMarkdown(chat) != chat.draftText) {
             chat.draft.value = null
             chat.boxText.value = chat.draftText
+        }
+    }
+
+    // ---- a chat's queue: kept by its host (hostqueue), the same on every head that opens it, on any machine. What's
+    // queued here is added there, and what's sent, edited or deleted here dropped there; its host leads it, sending it
+    // as the turn ends, so every head shows it and it's sent once. One its host won't take stays this phone's
+
+    /** Does chat's host keep its queue (a host's chat this phone may write, not a new one nor a Claude Desktop chat)? */
+    fun keepsQueue(chat: Chat) = chat.sender == null && chat.chrome.writes.value && conns[chat.hostId]?.state == "up" &&
+        session(chat.hostId, chat.sid)?.let { it.draft != true && it.desktop != true } != false
+
+    private fun queueOp(chat: Chat, op: JSONObject) {
+        val c = conns[chat.hostId] ?: return
+        c.request(op.put("op", Op.QUEUE).put("session", chat.sid)) { r ->
+            main.post { if (open === chat && r.optString("op") == Op.QUEUE) queueIn(chat, r.optJSONObject("queue")) }
+        }
+    }
+
+    /** A message just queued, added to its host's queue (its content made off the main thread). */
+    fun queueAdd(chat: Chat, q: Queued) {
+        val id = q.uuid ?: return
+        if (!keepsQueue(chat)) return
+        val c = conns[chat.hostId] ?: return
+        q.hosted = 1
+        io.execute {
+            val content = try { build(id, q.text, q.files)?.getJSONObject("message")?.get("content") } catch (e: Exception) { null }
+            main.post {
+                if (content == null) {
+                    q.hosted = 0
+                    return@post
+                }
+                val add = JSONObject().put("id", id).put("text", q.text).put("content", content)
+                c.request(JSONObject().put("op", Op.QUEUE).put("session", chat.sid).put("add", JSONArray().put(add))) { r ->
+                    main.post {
+                        if (r.optString("op") != Op.QUEUE) { // (not taken: this phone's to send, as its turn ends)
+                            if (q.hosted == 1) q.hosted = 0
+                        } else if (open === chat) queueIn(chat, r.optJSONObject("queue"))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Queued messages sent, edited or deleted here: dropped from its host's queue. */
+    fun queueDrop(chat: Chat, qs: List<Queued>) {
+        val ids = qs.filter { it.hosted != 0 && it in chat.queued }.mapNotNull { it.uuid }
+        if (ids.isNotEmpty()) queueOp(chat, JSONObject().put("drop", JSONArray(ids)))
+    }
+
+    /** (an interrupt about to be sent) The queued message ↑ was pressed on, its host's: named to its host, which sends it
+     * and those before it as the turn ends, not this phone. */
+    fun queueUptoHost(chat: Chat) {
+        val q = chat.queueUpto ?: return
+        if (q.hosted == 0 || q.uuid == null) return
+        chat.queueUpto = null
+        queueOp(chat, JSONObject().put("upto", q.uuid))
+    }
+
+    /** The open chat's queue as its host has it, under the conversation: what's gone from it gone here, what's new in
+     * it put in its place, what's being added (and what its host won't take) left as it is. */
+    fun queueIn(chat: Chat, q: JSONObject?) {
+        if (q == null || chat.sender != null) return
+        val rev = q.optLong("rev")
+        if (rev < chat.queueRev) return
+        chat.queueRev = rev
+        val turns = q.optJSONArray("turns").list()
+        val ids = turns.map { it.optString("id") }.toSet()
+        chat.queued.removeAll { it.hosted == 2 && it.uuid !in ids }
+        var at = 0
+        for (t in turns) {
+            val id = t.optString("id")
+            val here = chat.queued.indexOfFirst { it.uuid == id }
+            if (here >= 0) {
+                chat.queued[here].hosted = 2
+                at = here + 1
+                continue
+            }
+            val files = (t.opt("content") as? JSONArray).list().mapNotNull { b ->
+                val src = b.optJSONObject("source")?.takeIf { it.optString("type") == "base64" } ?: return@mapNotNull null
+                val bytes = try { java.util.Base64.getDecoder().decode(src.optString("data")) } catch (_: Exception) { return@mapNotNull null }
+                when (b.optString("type")) {
+                    "image" -> Picked("image", src.optString("media_type"), bytes)
+                    "document" -> Picked(b.optString("title").ifBlank { "document.pdf" }, "application/pdf", bytes)
+                    else -> null
+                }
+            }
+            chat.queued.add(at.coerceAtMost(chat.queued.size), Queued(t.optString("text"), files, id).also { it.hosted = 2 })
+            at++
         }
     }
 

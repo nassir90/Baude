@@ -94,10 +94,11 @@ SCHEMAS = {
                  {"session": BOT, "id": {"type": "string"}, "inputs": {"type": "object"},
                   "wait": {"type": "boolean"}}, ["id"]),
     "task_run": ("One run of one of your tasks, and its log.", {"session": BOT, "run": {"type": "string"}}, ["run"]),
-    "answer_task": ("Answer one of your tasks' asks: a message that starts \"An instance of the '…' task asks:\" (or "
-                    "\"… failed\" from its script), the run's id in its table. With a form, answer is an object of its "
+    "answer_task": ("Answer an ask of one of your tasks' runs whose message says to answer with this tool "
+                    "(mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its "
                     "fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what "
-                    "you say besides is only commentary. A wrong answer is refused with what's wrong: call it again.",
+                    "you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. "
+                    "A message from a task that doesn't say to use this tool is answered in your reply, not with it.",
                     {"session": BOT, "run": {"type": "string", "description": "The asking run's id (its table's run)"},
                      "answer": {"type": "object", "description": "The form's fields, by name: each a text, number, "
                                                                  "true or false, or one of a choice's choices"},

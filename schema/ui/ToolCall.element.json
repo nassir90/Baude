@@ -106,7 +106,7 @@
     },
     {
       "name": "task answer",
-      "shows": "A Bot's mcp__mesh__answer_task call, once the host's taken it: the name reads \"Answered <task>\" (the task's name, from the call's result) and the summary is the answer as it was taken, e.g. \"Answered Deploy site  env = staging · dry_run = true\". No Output toggle: the card says what came back; Input still opens what it was given. Before it's taken it's drawn as any other call (\"Mesh / Answer task\" and the answer it was given); refused (an answer that doesn't fit the form, or no ask waiting), it's an error card whose Error opens what was wrong.",
+      "shows": "A Bot's mcp__mesh__answer_task call, once the host's taken it: the name reads \"Answered <task>\" (the task's name, from the call's result) and the summary is the answer as it was taken, e.g. \"Answered Deploy site  env = staging · dry_run = true\". Each value is cut to its first line and the whole summary to 120 characters, on one line ending in … where it doesn't fit; the name is cut with … too, so a long task name never widens the chat. No Output toggle: the card says what came back; Input still opens what it was given. Before it's taken it's drawn as any other call (\"Mesh / Answer task\" and the answer it was given); refused (an answer that doesn't fit the form, or no ask waiting), it's an error card whose Error opens what was wrong.",
       "copy": [
         "tool_calls.answered_task"
       ],

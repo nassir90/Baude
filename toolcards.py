@@ -133,11 +133,18 @@ ANSWER_TASK = "mcp__mesh__answer_task"  # (a Bot's answer to its task's ask: dra
 
 
 def answer_line(inp):
-    """An answer_task call's answer in a line: each field = value, · between (a value as it's written: text as it is,
-    the rest as JSON), or its text's first line."""
-    if isinstance(inp.get("answer"), dict):
-        return " · ".join(f"{k} = {v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)}"
-                          for k, v in inp["answer"].items())
+    """An answer_task call's answer in a line of at most 120 characters: each field = value (its first line), · between
+    (a value as it's written: text as it is, the rest as JSON), or its text's first line."""
+    fields = inp.get("answer")
+    if isinstance(fields, str):  # (an answer given as JSON)
+        try:
+            fields = json.loads(fields)
+        except ValueError:
+            pass
+    if isinstance(fields, dict):
+        return _first_line(" · ".join(
+            f"{k} = {_first_line(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))}"
+            for k, v in fields.items()))
     return _first_line(inp["text"]) if isinstance(inp.get("text"), str) else ""
 
 
@@ -675,6 +682,9 @@ class ToolCard(Gtk.Box):
             s = answer_line({"answer": self.answer.get("values"), "text": self.answer.get("text")})
         title = wording.say("tool_calls.answered_task", task=self.answer["task"]) if self.answer is not None else \
             tool_label(self.name)
+        if self.answer is not None:  # (a task's name, however long: cut, the chat no wider for it)
+            self.title.set_ellipsize(Pango.EllipsizeMode.END)
+            self.title.set_max_width_chars(40)
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         shown = html.escape(s)
         if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):

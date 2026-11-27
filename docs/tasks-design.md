@@ -87,7 +87,9 @@ except Conflict as e:
   no form). The run goes on as soon as the tool's called, not at the turn's end: the turn's text is only commentary,
   shown in the chat as any other. An answer that doesn't fit the form is refused to the tool with what was wrong, so
   the Bot can call it again. A turn that ends without the tool is reminded once; ending without it again, the ask
-  fails. The run is `asking` meanwhile.
+  fails (said as refused if the tool was called and refused). A Bot whose agent has no mesh tools (an Apple model) is
+  asked for a JSON object of the fields in its reply instead, checked the same way, sent back once if it doesn't fit.
+  The run is `asking` meanwhile.
 - `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far. The host refuses it
   for a task whose `notify_failure` is off.
 - `@task.main` runs a function with the inputs; an exception's traceback is printed and the script exits 1, so the run

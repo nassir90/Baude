@@ -109,15 +109,16 @@ fun saidNothing(base: String, text: String, isError: Boolean): Boolean {
 /** A Bot's answer to its task's ask (toolcards.ANSWER_TASK): drawn as "Answered <task>". */
 const val ANSWER_TASK = "mcp__mesh__answer_task"
 
-/** An answer_task call's answer in a line (toolcards.answer_line): each field = value, · between (text as it is, the
- * rest as JSON), or its text's first line. */
+/** An answer_task call's answer in a line of at most 120 characters (toolcards.answer_line): each field = value (its
+ * first line), · between (text as it is, the rest as JSON), or its text's first line. */
 fun answerLine(input: JSONObject): String {
-    val fields = input.optJSONObject("answer")
-    if (fields != null) return fields.keys().asSequence().joinToString(" · ") { k ->
+    fun first(v: String) = v.trim().lines().firstOrNull().orEmpty().take(120)
+    val fields = input.optJSONObject("answer") ?: (input.opt("answer") as? String)?.let { runCatching { JSONObject(it) }.getOrNull() }
+    if (fields != null) return first(fields.keys().asSequence().joinToString(" · ") { k ->
         val v = fields.opt(k)
-        "$k = ${if (v is String) v else JSONObject.wrap(v).let { w -> if (w == null || w === JSONObject.NULL) "null" else w.toString() }}"
-    }
-    return (input.opt("text") as? String)?.trim()?.lines()?.firstOrNull().orEmpty().take(120)
+        "$k = ${first(if (v is String) v else JSONObject.wrap(v).let { w -> if (w == null || w === JSONObject.NULL) "null" else w.toString() })}"
+    })
+    return first((input.opt("text") as? String).orEmpty())
 }
 
 /** What an answer_task call came back with (toolcards.answer_result; Codex's inside the MCP result it gives), or

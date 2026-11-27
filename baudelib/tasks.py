@@ -248,8 +248,13 @@ def fill(task, payload=None, fills=None, given=None):
 
 
 def answered(got, form):
-    """(values, None) from an answer to an ask with a form (the answer_task tool's answer: an object of its fields),
-    or (None, what's wrong)."""
+    """(values, None) from an answer to an ask with a form (the answer_task tool's answer: an object of its fields, or
+    that as JSON), or (None, what's wrong)."""
+    if isinstance(got, str):
+        try:
+            got = json.loads(got)
+        except ValueError:
+            pass
     if not isinstance(got, dict):
         return None, "the answer isn't an object of the form's fields"
     values, wrong = {}, []
@@ -262,20 +267,38 @@ def answered(got, form):
             values[f["name"]] = coerce(f, got[f["name"]])
         except ValueError as e:
             wrong.append(str(e))
+            continue
+        if f.get("required") and values[f["name"]] == "":
+            wrong.append(f"{f['name']} is required: it can't be empty")
     wrong += [f"{k} isn't one of the form's fields" for k in got if k not in {f["name"] for f in form}]
     return (None, "; ".join(wrong)) if wrong else (values, None)
 
 
-def form_said(form):
-    """How an ask's to be answered, said to its Bot: with its answer_task tool, and the form's fields (or text)."""
-    def one(f):
-        kind = {"choice": "one of " + ", ".join(json.dumps(c) for c in f.get("choices", ())), "number": "a number",
-                "bool": "true or false", "text": "text"}[f["type"]]
-        return f"- {f['name']}: {kind}" + (f" ({f['label']})" if f.get("label") else "") + \
-            (" (required)" if f.get("required") else "")
+def in_reply(text, form):
+    """answered for a Bot with no answer_task tool (its agent has no mesh tools): the JSON object in what it said."""
+    start, end = (text or "").find("{"), (text or "").rfind("}")
+    try:
+        got = json.loads(text[start:end + 1]) if 0 <= start < end else None
+    except ValueError:
+        got = None
+    return answered(got, form) if isinstance(got, dict) else (None, "the answer has no JSON object")
+
+
+def _field_said(f):
+    kind = {"choice": "one of " + ", ".join(json.dumps(c) for c in f.get("choices", ())), "number": "a number",
+            "bool": "true or false", "text": "text"}[f["type"]]
+    return f"- {f['name']}: {kind}" + (f" ({f['label']})" if f.get("label") else "") + \
+        (" (required)" if f.get("required") else "")
+
+
+def form_said(form, tool=True):
+    """How an ask's to be answered, said to its Bot: with its answer_task tool, and the form's fields (or text); not
+    tool (a Bot whose agent has no mesh tools): a JSON object of the form's fields in its reply."""
+    if not tool:
+        return wording.say("tasks.answer_json") + "\n" + "\n".join(_field_said(f) for f in form)
     if not form:
         return wording.say("tasks.answer_with_text")
-    return wording.say("tasks.answer_with") + "\n" + "\n".join(one(f) for f in form)
+    return wording.say("tasks.answer_with") + "\n" + "\n".join(_field_said(f) for f in form)
 
 
 def from_routine(r):
@@ -868,11 +891,29 @@ class Tasks:
             if not task.get("notify_failure"):
                 raise ValueError(wording.say("host_errors.task_no_fallback"))
             self._update(st, msg["run"], handed=True)  # (the script's handed its failure over: the host doesn't again)
+        tool = self.has_tool(held["sid"])
         said, failed, values = self.ask(msg["run"], text, task["name"], form=form, error=bool(msg.get("error")),
-                                        tool=True)
+                                        tool=tool)
         if failed:
             raise ValueError(said or wording.say("tasks.bot_failed"))
-        return said, values if form else None
+        if tool or not form:
+            return said, values if form else None
+        values, wrong = in_reply(said, form)  # (no tool: the JSON in what it said; once more, told what was wrong)
+        if wrong:
+            said, failed, _values = self.ask(msg["run"], wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" +
+                                             form_said(form, tool=False), task["name"])
+            values, wrong = (None, said) if failed else in_reply(said, form)
+            if wrong:
+                raise ValueError(wording.say("tasks.not_as_asked", wrong=wrong))
+        st.log(msg["run"], "answer", json.dumps(values), values=values)
+        return said, values
+
+    def has_tool(self, sid):
+        """Has the Bot sid's agent the answer_task tool (the mesh's tools: not an Apple model's)?"""
+        from baudelib import models
+        with self.server.lock:
+            s = self.server.sessions.get(sid)
+            return s is not None and models.model_program(s.meta.get("model")) in ("claude", "pi", "codex")
 
     def ask(self, rid, text, name, form=None, error=False, held=None, tool=False):
         """(what the Bot said, failed, values) for text given a run's Bot as a turn of its own, from its task (name);
@@ -906,9 +947,10 @@ class Tasks:
         if live:
             self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
         wait = {"run": rid, "name": name, "done": threading.Event(), "text": None, "failed": False,
-                "tool": tool, "form": form or [], "answered": False, "values": None}
+                "tool": tool, "form": form or [], "answered": False, "values": None,
+                "refused": None}
         said = asked_head(name, held.get("task") or "", st.runs.get(rid) or {"id": rid}, error) + "\n\n" + \
-            text + ("\n\n" + form_said(form) if tool else "")
+            text + ("\n\n" + form_said(form) if tool else "\n\n" + form_said(form, tool=False) if form else "")
         reminded = False
         while True:
             failed = self._send(st, sid, rid, held, wait, said, name, end)
@@ -920,10 +962,11 @@ class Tasks:
             wait["done"].clear()
             said = wording.say("tasks.answer_reminder", run=rid) + "\n\n" + form_said(form)
         if tool and not wait["answered"] and not wait["failed"]:
-            wait["text"], wait["failed"] = wording.say("tasks.not_answered"), True
+            wait["text"], wait["failed"] = wording.say("tasks.answer_refused", wrong=wait["refused"]) \
+                if wait["refused"] else wording.say("tasks.not_answered"), True
         if wait["failed"] or not form:
             st.log(rid, "answer", wait["text"] or "", error=wait["failed"] or None)
-        else:
+        elif tool:  # (not tool: its values, once script_ask's found them in what it said)
             st.log(rid, "answer", json.dumps(wait["values"]), values=wait["values"])
         if live and rid in self.running:
             self._update(st, rid, status="running")
@@ -981,11 +1024,13 @@ class Tasks:
             if wait["form"]:
                 values, wrong = answered(msg.get("answer"), wait["form"])
                 if wrong:
+                    wait["refused"] = wrong
                     raise ValueError(wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" + form_said(wait["form"]))
             else:
                 text = msg.get("text") if isinstance(msg.get("text"), str) else ""
                 if not text.strip():
-                    raise ValueError(wording.say("tasks.not_as_asked", wrong=wording.say("tasks.answer_no_text")))
+                    wait["refused"] = wording.say("tasks.answer_no_text")
+                    raise ValueError(wording.say("tasks.not_as_asked", wrong=wait["refused"]))
             wait.update(answered=True, values=values, text=text)
             self.waiting[s.id].remove(wait)
             wait["done"].set()

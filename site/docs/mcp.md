@@ -126,7 +126,7 @@ One run of one of your tasks, and its log.
 
 ### `answer_task`
 
-Answer one of your tasks' asks: a message that starts "An instance of the '…' task asks:" (or "… failed" from its script), the run's id in its table. With a form, answer is an object of its fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what you say besides is only commentary. A wrong answer is refused with what's wrong: call it again.
+Answer an ask of one of your tasks' runs whose message says to answer with this tool (mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. A message from a task that doesn't say to use this tool is answered in your reply, not with it.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -3691,6 +3691,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `27` | The wire's version, as a host's hello says it. |
+| `VERSION` | `28` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

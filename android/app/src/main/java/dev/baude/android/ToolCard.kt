@@ -117,7 +117,8 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
             }
             val detail = header(call, c)
             if (detail.isNotEmpty()) SelectionContainer {
-                Text(detail, style = Type.body, color = c.fg)
+                if (call.answer != null) Text(detail, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                else Text(detail, style = Type.body, color = c.fg)
             }
             AnimatedVisibility(inputOpen, enter = expandVertically(slide), exit = shrinkVertically(slide)) {
                 SelectionContainer {

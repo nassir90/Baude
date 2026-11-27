@@ -150,6 +150,7 @@ class ClaudeProc:
 
     dispatch = staticmethod(lambda fn: fn())
     env_of = None  # (a subclass's own environment for claude, in place of claude_env's: Record's, its child_env)
+    limits_folder = None  # (where its rate_limit_events are kept: its host's state folder; None, this machine's)
 
     def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None, profile=None):
         self.on_msg, self.on_exit = on_msg, on_exit
@@ -172,6 +173,7 @@ class ClaudeProc:
         child_env = (self.env_of() if self.env_of is not None else claude_env()) | (env or {})
         self.profile = ""
         self.remember_profile = False
+        self.says_limits = models.model_program(model) == "claude"  # (its rate_limit_events: its account's usage)
         if models.model_program(model) == "claude":
             self.profile = accounts.claude_session_profile(resume) if profile is None else profile
             self.remember_profile = bool(self.profile and "--no-session-persistence" not in args)
@@ -205,6 +207,13 @@ class ClaudeProc:
             if self.remember_profile and msg.get("type") == "system" and msg.get("subtype") == "init" and msg.get("session_id"):
                 accounts.remember_claude_session(msg["session_id"], self.profile)
                 self.remember_profile = False
+            if self.says_limits and msg.get("type") == "rate_limit_event":
+                from baudelib.serverstate import state_home
+                try:
+                    accounts.note_limits(self.limits_folder or state_home(), accounts.usage_key("claude", self.profile),
+                                         msg.get("rate_limit_info"))
+                except OSError:
+                    pass
             # (its handler looked up as it's delivered, not as it's read: a chat left mid-turn, or opened again, in between
             # gets what's after from its new one, BaudeWindow.detach_proc and attach_proc)
             self.dispatch(lambda m=msg: self.on_msg(self, m))

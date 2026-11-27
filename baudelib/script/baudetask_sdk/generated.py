@@ -1678,8 +1678,15 @@ class AccountsReply(Obj):
         accounts (array of Account): The host's accounts, by provider then name.
         defaults (object): The account each provider's new chats take: the one a chat's provider picker
             (accounts' use) last picked there, else the CLI's own sign-in.
-        usage (array or None of UsageLimit): usage: the subscription's limits; null where they can't be read for
-            its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's).
+        usage (array or None of UsageLimit): usage: the subscription's limits; for a Claude sign-in that can't
+            be asked (a setup token's), as its chats' turns last said them (as_of); null where none can be said
+            (an API key's, a Codex sign-in that isn't a ChatGPT plan's, a setup token's before its first turn:
+            after_turn).
+        as_of (number): usage: where its limits are as the subscription's chats' turns last said them (its sign-
+            in can't be asked: a setup token's), when they last said them, in seconds since 1970; shown as "Last
+            update <how long ago>" under them.
+        after_turn (boolean): usage: true where its limits can only be said by its chats' turns (a setup
+            token's) and none has said them yet (usage null).
         api_key (boolean): usage: true where the account is signed in with an API key (paid per use), so it has
             no subscription limits (usage null).
         line (string): sign_in (Claude's): a line the sign-in wrote (the page to open among them).

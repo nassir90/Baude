@@ -472,6 +472,71 @@ def last_usage():
         return {profile: (kept[2], kept[1]) for profile, kept in _usage_read.items() if kept[1]}
 
 
+SEEN_FILE = "usage_seen.json"  # (in the host's state folder: each subscription's limits as its chats' turns said them)
+_seen_guard = threading.Lock()
+
+
+def note_limits(folder, key, info):
+    """A claude chat's rate_limit_event (its rate_limit_info: the limits its last request's answer said, utilization a
+    fraction and resetsAt in seconds since 1970) kept for usage key key in folder (the host's state folder), each
+    window's (five_hour, seven_day…) latest with when it was seen, for seen_limits. Overage isn't kept."""
+    import json
+    if not isinstance(info, dict):
+        return
+    found = {}
+    windows = info.get("unifiedWindows")
+    for name, window in [*(windows.items() if isinstance(windows, dict) else ()),
+                         (info.get("rateLimitType"), info)]:
+        if not isinstance(name, str) or "overage" in name or not isinstance(window, dict):
+            continue
+        used, resets = window.get("utilization"), window.get("resetsAt")
+        if isinstance(used, (int, float)) and not isinstance(used, bool):
+            found.setdefault(name, {"percent": round(float(used) * 100, 1),
+                                    **({"resets": _reset_time(resets)} if _reset_time(resets) is not None else {})})
+    if not found:
+        return
+    path = os.path.join(folder, SEEN_FILE)
+    with _seen_guard:
+        try:
+            with open(path, encoding="utf-8") as f:
+                kept = json.load(f)
+        except (OSError, ValueError):
+            kept = {}
+        if not isinstance(kept, dict):
+            kept = {}
+        now = time.time()
+        mine = kept.get(key) if isinstance(kept.get(key), dict) else {}
+        mine.update({name: {**window, "seen": now} for name, window in found.items()})
+        kept[key] = mine
+        os.makedirs(folder, exist_ok=True)
+        part = f"{path}.{os.getpid()}.part"
+        with open(part, "w", encoding="utf-8") as f:
+            json.dump(kept, f)
+        os.replace(part, path)
+
+
+def seen_limits(folder, key):
+    """A subscription's limits as its chats' turns last said them (note_limits), [(key, percent, resets)] in
+    _plan_usage's shape, and when the latest of them was seen (seconds since 1970); None where none were. A window
+    that has reset since reads 0, with no reset time."""
+    import json
+    try:
+        with open(os.path.join(folder, SEEN_FILE), encoding="utf-8") as f:
+            mine = json.load(f).get(key)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(mine, dict) or not mine:
+        return None
+    now, limits = time.time(), []
+    order = ("five_hour", "seven_day")
+    for name in sorted(mine, key=lambda n: (order.index(n) if n in order else len(order), n)):
+        window = mine[name]
+        resets = window.get("resets")
+        gone = resets is not None and resets <= now
+        limits.append((name, 0.0 if gone else window["percent"], None if gone else resets))
+    return limits, max(w["seen"] for w in mine.values())
+
+
 def _reset_time(value):
     """When a limit resets, as Claude Code's get_usage says it (an ISO time or seconds since 1970): seconds since 1970,
     or None."""

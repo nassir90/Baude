@@ -337,6 +337,7 @@ class ServerSessions:
                 **({"profile": s.meta.get("profiles", {}).get("claude", "")} if run["program"] == "claude" else {}),
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
+        s.proc.limits_folder = self.state_dir  # (its usage as its turns say it, kept with this host's state)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
         # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)

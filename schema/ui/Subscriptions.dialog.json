@@ -83,7 +83,7 @@
       "parts": [
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was.",
+          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Available after a message\" before its first turn.",
           "actions": [
             {
               "by": "click ⋮",
@@ -110,7 +110,9 @@
             "subscriptions.weekly_limit_today",
             "subscriptions.other_limit",
             "subscriptions.other_limit_today",
-            "subscriptions.no_limits"
+            "subscriptions.no_limits",
+            "subscriptions.last_update",
+            "subscriptions.after_turn"
           ],
           "decisions": [
             {
@@ -161,6 +163,29 @@
               "source": [
                 {
                   "issue": "BaudeInternal#264"
+                }
+              ]
+            },
+            {
+              "said": "Okay then we need to build the one that siphons usage from inference calls … Build this, it's important. Should look like the other bars but maybe (\"last update X ago\")",
+              "rule": "Every app shows a Claude subscription whose usage can't be asked (a setup token's) with the same bars as any other, its limits as its chats' turns last said them (the host keeps each turn's rate-limit figures for the account the chat runs on, across restarts), then a dim \"Last update <how long ago>\" line under them; a subscription whose usage can be asked shows only that",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "message": "63ffd6d1-dc05-4f66-9cee-c255d5e3a05d"
+                },
+                {
+                  "message": "c9b7a342-0308-450e-acfb-707b69f2c927"
+                }
+              ]
+            },
+            {
+              "said": "\"Usage shows aftetr this acount's next turn\" !!!! -> \"Available after a message\"",
+              "rule": "Where a setup token's subscription has had no turn yet to say its limits, every app says exactly \"Available after a message\" in place of its bars",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "message": "b0979709-ca86-482f-8b0e-ee406f67f132"
                 }
               ]
             }

@@ -176,8 +176,21 @@ def record(line):
 OUT_LOCK = threading.Lock()  # background tasks write from timer threads
 
 
+def rate_limit_event():
+    """What claude says of its account's limits as a request's answer's headers say them (once per turn here, before
+    its result): utilization a fraction, resetsAt in seconds since 1970."""
+    now = int(time.time())
+    return {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed", "resetsAt": now + 3 * 3600, "rateLimitType": "five_hour", "utilization": 0.42,
+        "unifiedWindows": {"five_hour": {"utilization": 0.42, "resetsAt": now + 3 * 3600, "status": "allowed"},
+                           "seven_day": {"utilization": 0.17, "resetsAt": now + 4 * 86400, "status": "allowed"}},
+        "overageStatus": "rejected", "isUsingOverage": False}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
+
+
 def out(obj, delay=0.005):
     with OUT_LOCK:
+        if obj.get("type") == "result":
+            print(json.dumps(rate_limit_event()), flush=True)
         print(json.dumps(obj), flush=True)
         kind, ev = obj.get("type"), obj.get("event") or {}
         if kind == "stream_event" and ev.get("type") == "content_block_delta":

@@ -707,7 +707,8 @@ abstract class Screens(private val theme: String) {
                     listOf("baude", "screen", "Telemetry.dialog", 9, 410.0), listOf("phone", "part", "Settings.dialog|copy:telemetry.collect", 3, 0.02),
                     listOf("record", "menu", "RecordMenu.menu/Settings…", 12, 0.9), listOf("host", "op", "input", 233, 1.2),
                     listOf("baude", "part", "Sidebar.region/New session button", 17, 6.1), listOf("host", "op", "transcript", 88, 10.4),
-                    listOf("baude", "callback", "windowview.WindowView.load_history", 30, 8.7)).map { (app, kind, name, n, sec) ->
+                    listOf("baude", "callback", "windowview.WindowView.load_history", 30, 8.7),
+                    listOf("baude", "callback", "windowview.WindowView.load_history_and_scroll_to_the_message_the_user_was_reading", 4, 2.1)).map { (app, kind, name, n, sec) ->
                     org.json.JSONObject().put("app", app).put("kind", kind).put("name", name).put("count", n).put("seconds", sec) }))
                 "errors" -> out.put("errors", org.json.JSONArray(listOf(
                     org.json.JSONObject().put("app", "phone").put("kind", "send").put("fingerprint", "send:input:#")

@@ -89,6 +89,11 @@ def _stop(code, offset, _result=None):
         got[2] = took
 
 
+def _unwind(code, offset, _error=None):
+    if _ours.get(code.co_filename) or _is_ours(code.co_filename):  # (an unwind can't be disabled)
+        _stop(code, offset)
+
+
 def name_of(code):
     path = os.path.abspath(code.co_filename)[len(ROOT):]
     module = path[:-3].replace(os.sep, ".") if path.endswith(".py") else path
@@ -108,7 +113,7 @@ def switch(on):
             mon.use_tool_id(TOOL, "baude-functions")
             ev = mon.events
             for event, fn in ((ev.PY_START, _start), (ev.PY_RESUME, _resume), (ev.PY_RETURN, _stop),
-                              (ev.PY_YIELD, _stop), (ev.PY_UNWIND, _stop)):
+                              (ev.PY_YIELD, _stop), (ev.PY_UNWIND, _unwind)):
                 mon.register_callback(TOOL, event, fn)
             mon.set_events(TOOL, ev.PY_START | ev.PY_RESUME | ev.PY_RETURN | ev.PY_YIELD | ev.PY_UNWIND)
             mon.restart_events()

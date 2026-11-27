@@ -266,6 +266,7 @@ def main():
                                                    "host, a message to another chat), as an MCP server on stdin and stdout")
     mesh_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
     mesh_tools.add_argument("--as-meta", action="store_true", help="for a head's Meta, in no chat: what it sends is from Meta")
+    mesh_tools.add_argument("--only", help="those of them it has, by name, with commas (default: all)")
     chat_tools = sub.add_parser("chat-tools", help="a chat's own tools (Auto-fix for its pull request), as an MCP "
                                                    "server on stdin and stdout")
     chat_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
@@ -303,7 +304,8 @@ def main():
         return hosttools.serve(args.cwd, args.only.split(",") if args.only else None)
     if args.command == "mesh-tools":
         from baudelib import meshtools
-        return meshtools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket, meta=args.as_meta)
+        return meshtools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket, meta=args.as_meta,
+                               only=args.only.split(",") if args.only else None)
     if args.command == "chat-tools":
         from baudelib import chattools
         return chattools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)

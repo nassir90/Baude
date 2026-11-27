@@ -102,6 +102,10 @@ def _watch(msg):
     return "browser_write" if msg.get("default") else "browser_read"  # (Emission's own window: driven, not a Bot's)
 
 
+def _deciders(msg):
+    return "access_write" if msg.get("what") in ("add", "remove", "test") else "providers"  # (the host's own setup)
+
+
 def _tasks(msg):
     return "manage_write" if "set" in msg or "delete" in msg else "manage_read"
 
@@ -112,6 +116,8 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "emission_watch_say": "browser_read",
     **dict.fromkeys(("emission", "emission_serve", "emission_answer", "browser_open"), "browser_write"),
     "infer": "providers",
+    "decide": "providers",  # (a decision model's: as a provider's model)
+    "deciders": _deciders,
     "files": "model_files",
     **dict.fromkeys(("start", "agent"), "spawn"),  # (a chat forked: its manage_read too; adopted: its manage_write)
     "kube": _kube,
@@ -132,13 +138,14 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
     # (a chat's, or a chat's folder's: checked as it's found)
     **dict.fromkeys(("detach", "transcript", "chat_size", "subagents", "senders", "bot_picture", "task", "task_run",
-                     "task_output", "read_file", "git", "signal_names", "catalogue"), "manage_read"),
+                     "task_output", "read_file", "git", "signal_names", "catalogue", "task_choices"), "manage_read"),
     "attach": _attach,
     "memory": _memory,
     "tasks": _tasks,
     "autofix": _autofix,  # (no on: only as it is)
     **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
-                     "bot", "rotate", "run_task", "task_stop", "waits_on", "seen", "draft_save"), "manage_write"),
+                     "bot", "rotate", "run_task", "task_stop", "task_bind", "answer_task", "waits_on", "seen",
+                     "draft_save"), "manage_write"),
     # (seen: what every head shows of it changed, as memory's seen is a write; a draft: a write)
 }
 CHATLESS = frozenset(("list_dir", "notes", "edits", "edit_propose", "edit_revise", "edit_withdraw", "edit_decide",

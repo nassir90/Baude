@@ -15,9 +15,10 @@
         "ask",
         "answer",
         "status",
-        "agent"
+        "agent",
+        "warning"
       ],
-      "description": "What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too)."
+      "description": "What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too), or a bound variable not there as the run started."
     },
     "text": {
       "type": "string",
@@ -48,6 +49,10 @@
         "failed"
       ],
       "description": "An agent's: how the chat's turn ended (Sender's over)."
+    },
+    "variable": {
+      "type": "string",
+      "description": "A warning's: the variable's name."
     }
   },
   "required": [

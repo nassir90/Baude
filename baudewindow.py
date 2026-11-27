@@ -260,7 +260,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         menu.append_section(None, view)
         tools = Gio.Menu()  # (Kubernetes, Docker, Databases, Terminal, Browser: menufamily.attach)
         menu.append_section(None, tools)
-        usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
+        usage = Gio.Menu()  # (the usage of the subscription the chat runs under: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
@@ -280,7 +280,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
                                   tooltip_text=wording.say("chat_header.menu"))
         import subscriptionpage
         menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Record's too)
-        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Record's too)
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the chat's subscription's usage, Record's too)
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
                                          popover=self.signal_menu())
         header.pack_end(menu_btn)
@@ -832,7 +832,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.append(widgets.Spinner())
             row.append(said)
         else:
-            go = Gtk.Button(label=wording.say("cut_short.button"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
+            go = Gtk.Button(label=wording.say("common.continue"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
             go.connect("clicked", lambda *_: self.continue_cut())
             row.append(said)
             row.append(go)

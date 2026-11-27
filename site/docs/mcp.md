@@ -124,6 +124,17 @@ One run of one of your tasks, and its log.
 | `session` | string |  | A Bot's session id (yours if none's given) |
 | `run` | string | yes |  |
 
+### `answer_task`
+
+Answer an ask of one of your tasks' runs whose message says to answer with this tool (mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. A message from a task that doesn't say to use this tool is answered in your reply, not with it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `run` | string | yes | The asking run's id (its table's run) |
+| `answer` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
+| `text` | string |  | The answer to an ask with no form |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -275,6 +286,17 @@ Tools allowed whenever a session's agent asks for them, a head attached or not (
 | `tools` | array of string |  | These in place of any there were. |
 | `add` | array of string |  | These added to them. |
 
+#### `answer_task` (AnswerTask)
+
+An ask of one of a Bot's tasks' runs (task_ask) answered: the Bot's answer_task tool's, or anyone's who may manage the Bot. Taken only for an ask of that run that's waiting on that Bot; the run goes on at once. Refused, with what's wrong, if it doesn't fit the ask's form.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id: the one the ask's waiting on. |
+| `run` | string | yes | The asking run's id. |
+| `answer` | object |  | An ask with a form: its fields' values, by name. |
+| `text` | string |  | An ask with no form: the answer. |
+
 #### `archive` (Archive)
 
 A session archived: its agent stopped, and it's listed only to those subscribed with archived.
@@ -374,6 +396,30 @@ A member deactivated here: its links let go of and not made, its joins and tunne
 | `id` | string |  | Its id. |
 | `where` | Where |  | Where a link goes. |
 
+#### `decide` (Decide)
+
+A decision asked of one of the host's deciders, or a member's through it (baudetask.decide): the state, and each question about it by name. Answered with decided once it's asked. A task's script asks on its host's own socket with its run's token; a member, as its access rules let it use the host's providers.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `decider` | string/null |  | Which (a Decider's value: one of this host's by its id or name, another member's as <member>/<its id or name>); none: this host's first. |
+| `state` | string/object/array |  | Text, or structured data the decider renders as it does text. |
+| `questions` | object | yes | The questions, by name. |
+| `images` | array of string |  | Base64 images, part of the state. |
+| `run` | string |  | A task's script's run (BAUDE_TASK_RUN). |
+| `token` | string |  | Its run's token (BAUDE_TASK_TOKEN). |
+
+#### `deciders` (Deciders)
+
+The host's deciders (Settings → Dependencies, a task's decider variable): list them, each with whether it answers, and the mesh's other members' as their records say; add one (name, url: a Strands Decider's server's base, http://127.0.0.1:8000), looked at as it's added; remove one (id); test one (id): looked at now. Each is answered with deciders.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `list` \| `add` \| `remove` \| `test` |  | What to do (list where left out). |
+| `name` | string |  | add: its name. |
+| `url` | string |  | add: where it's served. |
+| `id` | string |  | remove, test: which. |
+
 #### `delete` (Delete)
 
 A session gone: its agent stopped and waited for, its transcript and the folder beside it (its subagents'), pi's own copy of it, and a Bot's folder moved to the trash; then it's gone from the list. One whose files can't be moved stays: error, saying why.
@@ -416,6 +462,16 @@ A container's or a Compose project's log, followed (logs): one a connection, the
 | `context` | string |  | The context, by its name. |
 | `page` | string |  | The category's page, by its key: a container's or a Compose project's. |
 | `id` | string |  | The container's id, or the Compose project's name. |
+
+#### `draft_save` (DraftSave)
+
+A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `text` | string | yes | What's written in its box now (empty: nothing, as once it's sent). |
+| `head` | string/null |  | The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save. |
 
 #### `edit_adopt` (EditAdopt)
 
@@ -969,7 +1025,7 @@ One of a Bot's tasks, its script and latest runs.
 
 #### `task_ask` (TaskAsk)
 
-A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as the Bot calls its answer_task tool (answer_task); a turn that ends without it reminded once, then failed (refused, as a failure, for a task whose failures aren't handed over too).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1254,6 +1310,7 @@ attach's answer.
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
 | `login` | ChatLogin? |  | Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws. |
 | `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
+| `draft` | ChatDraft? |  | Its draft, as its host keeps it (draft_save); null if none's been written, or the head may only read the chat. |
 
 #### `autofix` (AutofixReply)
 
@@ -1353,6 +1410,30 @@ deactivate's answer.
 |---|---|---|---|
 | `any` | boolean |  | There was one. |
 
+#### `decided` (Decided)
+
+decide's answer: each question's, by name; or, unavailable, why the decider couldn't be asked (not running, not answering, not there, its host out of reach), the script's to deal with: nothing else is asked instead.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `decider` | string |  | The decider asked, by its name. |
+| `host` | string |  | Its host's name. |
+| `model` | string |  | The model that answered. |
+| `answers` | object |  | Each question's answer, by name. |
+| `latency_ms` | number |  | How long it took its server. |
+| `unavailable` | string |  | Why it couldn't be asked. |
+
+#### `deciders` (DecidersReply)
+
+deciders' answer: the host's own deciders (with their URLs), then the other members'.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `list` \| `add` \| `remove` \| `test` |  | What was asked. |
+| `deciders` | array of Decider |  | The deciders. |
+| `tested` | Decider |  | add, test: the one looked at. |
+| `error` | string |  | Why it couldn't be done (a name taken, a URL that isn't one). |
+
 #### `deleted` (Deleted)
 
 delete's answer (and an event to those attached: nothing to carry on).
@@ -1415,6 +1496,15 @@ docker_follow logs: more of the log.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `text` | string |  | The lines. |
+
+#### `draft_saved` (DraftSaved)
+
+draft_save's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft as kept now. |
 
 #### `edit` (EditReply)
 
@@ -1881,6 +1971,18 @@ task_ask's answer: the Bot's.
 | `text` | string | yes | What it said. |
 | `values` | object/null |  | A form's values, as the Bot filled them. |
 
+#### `task_answered` (TaskAnswered)
+
+answer_task's answer: the ask answered, its run going on.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id. |
+| `run` | string | yes | The run's id. |
+| `task` | string | yes | The run's task, by its name. |
+| `values` | object |  | A form's values, as they were taken (checked against its fields). |
+| `text` | string |  | The answer to an ask with no form. |
+
 #### `task_reported` (TaskReported)
 
 task_report's answer.
@@ -2048,6 +2150,15 @@ What a session's agent says, as it says it (claude's stream-json); to those atta
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `msg` | object |  | A stream-json message. |
+
+#### `draft_changed` (DraftChanged)
+
+A chat's draft written by a head (draft_save): told every other head attached to it that may write it, as attach's answer tells one attaching.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft now. |
 
 #### `emission_call` (EmissionCall)
 
@@ -2361,6 +2472,17 @@ What a Codex browser sign-in's server on the host answered the address a browser
 | `body` | string | yes | The page. |
 | `location` | string |  | Where it sends the browser on to, if it does (a page of OpenAI's). |
 
+#### ChatDraft
+
+A chat's draft, as its host keeps it: the text written in its box and not sent, the same on every head that opens the chat, on any machine. Only the text: what's attached is a file on the head's own machine, kept there.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes | What's written (empty once it's sent). |
+| `rev` | integer | yes | Its revision: one more with every save, never less (a head drops one it's seen a later revision than). |
+| `head` | string/null |  | The box that wrote it (draft_save's head): what that box knows as its own save, coming back. |
+| `at` | number/null |  | When it was written, epoch seconds. |
+
 #### ChatLogin
 
 A sign-in, as its host has it: a chat's to Claude, from which every head draws the chat's sign-in card alone (LoginCard), whichever head started what's going on; or a Codex account's sign-in in Subscriptions (accounts sign_in's login), from which the head that asked draws its card.
@@ -2484,6 +2606,46 @@ A table (or view, or collection) and its columns.
 | `kind` | string |  | r table, p partitioned table, v view, m materialized view, f foreign table, e edge collection. |
 | `rows` | integer |  | About how many rows it has. |
 | `columns` | array of DbColumn |  | Its columns, in order. |
+
+#### DecideQuestion
+
+One of a decision's questions, as System One has them: noul (yes or no: the probability it's true), choice (one of criteria's options, by name) or score (an ordered rubric, criteria's levels from low to high).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `type` | `choice` \| `noul` \| `score` | yes | What kind of question it is. |
+| `instructions` | string/object/array | yes | Text, or structured data the decider renders as it does text. |
+| `criteria` | object/array/null |  | choice: each option's name and what it means (null for a bare name); score: its levels, lowest first; noul: what true and false mean, or nothing. |
+
+#### Decider
+
+A decider a host knows (baudelib/deciders.py): a server that answers Strands Decider's System One API (POST /v1/systemone, GET /health), as the deciders op lists it, and as a member's record says it (no url). What a task's decider variable binds, and what decide's decider names, is its value.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `value` | string |  | What decide's decider names it as, on the host that listed it: its id for one of that host's own, <its host's name>/<its id> for another member's. |
+| `id` | string | yes | Its id on its host. |
+| `name` | string |  | Its name. |
+| `host` | string/null |  | The member that has it, by its id (the listing host's own: null). |
+| `host_name` | string/null |  | That member's name. |
+| `url` | string/null |  | Where it's served (the listing host's own only). |
+| `reachable` | boolean |  | It answered as a decider when it was last looked at: a variable bound to one that didn't is warned of before a run. |
+| `model` | string/null |  | The model it serves, as its /health says. |
+| `error` | string/null |  | Why it didn't answer. |
+
+#### Decision
+
+A decider's answer to one question, as System One gives it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `type` | `choice` \| `noul` \| `score` | yes | Its question's kind. |
+| `choice` | string |  | choice: the option picked. |
+| `noul` | number |  | noul: the probability it's true. |
+| `score` | number |  | score: the expected level, over the levels' indices (0 the lowest). |
+| `probabilities` | object |  | choice: each option's probability; score: each level's, by its index. |
+| `legend` | object |  | score: each level's index and what it is. |
+| `confidence` | number |  | How sure it is, calibrated (choice and score; a noul's probability says it). |
 
 #### Dep
 
@@ -2912,6 +3074,7 @@ A member of the mesh, as info's mesh lists it.
 | `made` | integer/null |  | When that commit was made, in seconds (null: not known). |
 | `heads` | array of Head |  | The apps on its machine connected to it, by the code they run. |
 | `behind` | integer/null |  | How many commits it lacks of the mesh's newest code (MeshView's newest), as this host's git counts them (null: it can't). |
+| `deciders` | array of Decider |  | Its deciders, and whether each answered when it last looked. |
 
 #### MemberInfo
 
@@ -2931,6 +3094,7 @@ Who a member is, in its record.
 | `commit` | string/null |  | The commit its code is (null: not a checkout, or it didn't say). |
 | `made` | integer/null |  | When that commit was made, in seconds (null: not known). |
 | `heads` | array of Head |  | The apps on its machine connected to it, by the code they run. |
+| `deciders` | array of Decider |  | Its deciders, and whether each answered when it last looked. |
 
 #### MeshView
 
@@ -3080,6 +3244,7 @@ One thing a pending restart waits for: a chat whose agent is running a command, 
 | `run` | string |  | A task run's: its id. |
 | `terminal` | string |  | A terminal's: its id (terminal's attach). |
 | `name` | string | yes | The chat's title, the task's name, the agent's model, or the terminal's title. |
+| `waiting` | boolean |  | A task run's: true while it waits for input (an ask of its Bot, asking); a restart would stop it. |
 | `what` | string |  | What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program. |
 
 #### RestartState
@@ -3154,6 +3319,7 @@ A session as a host lists it.
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it. |
+| `task_asks` | array of string |  | A Bot's: the uuids of the messages its tasks' runs have sent it as asks, each run waiting for input (asking) till the turn that message began ends. Empty for every other. |
 | `task_run` | TaskRunRef? |  | The task's run that started it (start's task_run), on its Bot's host. |
 | `desktop` | boolean |  | Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group. |
 | `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
@@ -3296,6 +3462,7 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `seconds` | number/null |  | How long it took. |
 | `exit` | integer/null |  | Its script's exit code. |
 | `error` | string/null |  | Why it failed or was skipped. |
+| `skips` | integer/null |  | A skipped run's: how many firings it stands for (its trigger fired again while the same run went on: one record, not one each). |
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
 | `chats` | array/null of string |  | The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them. |
@@ -3600,6 +3767,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `BATCH_MAX` | `25` | A browser batch's actions, at most. |
 | `BOT_PICTURE_MAX` | `2097152` | A Bot's picture, as bot sends it, at most, in bytes. |
 | `DEFAULT_WINDOW` | `32768` | A model's context window, in tokens, where its server or settings don't say one. |
+| `DRAFT_CHARS_MAX` | `200000` | A chat's draft, as draft_save sends it, at most, in characters: a longer one is refused, and stays the head's own. |
 | `EPHEMERAL_S` | `1` | A side question whose head's gone (or detached): gone this soon, in seconds. |
 | `FRAME_QUALITY` | `72` | A watched browser's frames' JPEG quality (emission_frame). |
 | `GRACE_MAX_S` | `86400` | start's grace, at most, in seconds. |
@@ -3616,6 +3784,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `24` | The wire's version, as a host's hello says it. |
+| `VERSION` | `29` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

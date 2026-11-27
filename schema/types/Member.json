@@ -68,6 +68,13 @@
     "behind": {
       "type": ["integer", "null"],
       "description": "How many commits it lacks of the mesh's newest code (MeshView's newest), as this host's git counts them (null: it can't)."
+    },
+    "deciders": {
+      "type": "array",
+      "items": {
+        "$ref": "Decider.json"
+      },
+      "description": "Its deciders, and whether each answered when it last looked."
     }
   },
   "required": ["id"],

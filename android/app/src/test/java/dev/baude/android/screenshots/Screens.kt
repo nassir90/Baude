@@ -142,8 +142,8 @@ abstract class Screens(private val theme: String) {
     }
 
     // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
-    // in to with claude auth login, Work the default, each card's usage read as the page is shown; Codex's Personal;
-    // then the Current Subscription row's menu, an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
+    // in to with claude auth login, each card's usage read as the page is shown; Codex's Personal;
+    // then an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
     @Test fun subscriptions() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -169,13 +169,38 @@ abstract class Screens(private val theme: String) {
         screen("05j-subscriptions-last-read")
     }
 
-    @Test fun subscriptionsPill() {
-        accountsFixture()
-        show { SettingsScreen({}, {}, page = 1) }
+    // (the home screen's ⋮ with its usage row: Work's, the account a new chat on workshop takes; then, the host not
+    // answering yet, its placeholder; each the menu's width written beside its picture)
+    @Test fun menuUsage() = menuUsageScene("05m-menu-usage", listing = true)
+
+    @Test fun menuUsageLoading() = menuUsageScene("05n-menu-usage-loading", listing = false)
+
+    // (the same at a 24-hour clock, and at text sizes 1.25 and 1.5, each loading and answered)
+    @Test fun menuUsage24h() = menuUsageScene("05o-menu-usage-24h", listing = true, h24 = true)
+
+    @Test fun menuUsageLoading24h() = menuUsageScene("05p-menu-usage-loading-24h", listing = false, h24 = true)
+
+    @Test fun menuUsageText125() = menuUsageScene("05q-menu-usage-text125", listing = true, text = 1.25f)
+
+    @Test fun menuUsageText150() = menuUsageScene("05r-menu-usage-text150", listing = true, text = 1.5f)
+
+    @Test fun menuUsageLoadingText150() = menuUsageScene("05s-menu-usage-loading-text150", listing = false, text = 1.5f)
+
+    private fun menuUsageScene(name: String, listing: Boolean, h24: Boolean = false, text: Float = 1f) {
+        android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24,
+            if (h24) "24" else "12")
+        dev.baude.android.Settings.textScale.value = text
+        (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
+            .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
+        dev.baude.android.MenuUsageHosts.readAt.clear()
+        dev.baude.android.MenuUsageHosts.listedAt.clear()
+        accountsFixture(listing = listing)
+        show { dev.baude.android.HomeMenu({}, {}, {}, {}, {}) }
         laidOut()
-        tap("Current Subscription")
+        tap(dev.baude.android.Wording.ChatHeader.menu)
         laidOut()
-        withMenus("05f-subscriptions-pill")
+        withMenus(name)
+        dev.baude.android.Settings.textScale.value = 1f
     }
 
     @Test fun subscriptionsMenu() {
@@ -187,20 +212,45 @@ abstract class Screens(private val theme: String) {
         withMenus("05b-subscriptions-menu")
     }
 
+    // (Add account (Claude) on workshop, each step: New login, Existing folder, starting, the page's link with the code
+    // box, a code typed, what claude said of it, failed)
     @Test fun subscriptionsSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
-        val login = dev.baude.android.ClaudeLogin(host, null).apply {
-            name.value = "Work"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
-            busy.value = true
-        }
+        val login = dev.baude.android.ClaudeLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.ClaudeSignIn(host, null, {}, login)
         }
         laidOut()
+        screen("05c-subscriptions-claude-new-login")
+        login.existing.value = true
+        login.folder.value = "/srv/claude-work"
+        laidOut()
+        screen("05c-subscriptions-claude-existing")
+        login.existing.value = false
+        login.active.value = true
+        laidOut()
+        screen("05d-subscriptions-sign-in-starting")
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
+        laidOut()
         screen("05d-subscriptions-sign-in")
+        login.code.value = "fixture-code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-code")
+        login.code.value = ""
+        login.note.value = "Invalid code, try again"
+        laidOut()
+        screen("05d-subscriptions-sign-in-invalid")
+        login.active.value = false
+        login.url.value = null
+        login.note.value = null
+        login.failed.value = "Login failed: Invalid code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed")
+        tap("Existing folder") // (the dialog's own button back in place of Try Again)
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed-then-folder")
     }
 
     // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
@@ -209,14 +259,19 @@ abstract class Screens(private val theme: String) {
     @Test fun subscriptionsCodexSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
-        val login = dev.baude.android.CodexLogin(host, null).apply {
-            name.value = "Work"
-            this.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
-        }
+        val login = dev.baude.android.CodexLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
         }
+        laidOut()
+        screen("05k-codex-new-login")
+        login.existing.value = true
+        login.home.value = "/srv/codex-work"
+        laidOut()
+        screen("05k-codex-existing")
+        login.existing.value = false
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
         laidOut()
         screen("05k-codex-browser-waiting")
         login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser", port = 1455,
@@ -248,14 +303,17 @@ abstract class Screens(private val theme: String) {
     @Test fun chatLoginCard() {
         accountsFixture()
         val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
-            stage.value = "page"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+            stage.value = "starting"
         }
-        render("05r-chat-login-card") {
+        render("05r-chat-login-card-starting") {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
                 dev.baude.android.LoginCard(login)
             }
         }
+        login.stage.value = "page"
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/05r-chat-login-card.png")
     }
 
     @Test fun subscriptionsRemove() {
@@ -621,15 +679,21 @@ abstract class Screens(private val theme: String) {
                     dep("xvfb", "Xvfb", true, "sudo apt install xvfb", "deps.multiplex"),
                     dep("webkit", "WebKitGTK", true, "sudo apt install gir1.2-webkit-6.0", "mesh_versions.emission").put("where", "app"),
                     dep("node", "Node.js", true, "sudo apt install nodejs npm", "side_panel.signal").put("where", "app"))))
+                "deciders" -> r.put("what", "list").put("deciders", org.json.JSONArray(listOf( // (one answering, one not)
+                    org.json.JSONObject().put("value", "triage").put("id", "triage").put("name", "Triage")
+                        .put("url", "http://127.0.0.1:8000").put("reachable", true).put("model", "strands-decider-E2B-gemma4-v2-2611"),
+                    org.json.JSONObject().put("value", "review").put("id", "review").put("name", "Review")
+                        .put("url", "http://127.0.0.1:8009").put("reachable", false).put("error", "isn't running at http://127.0.0.1:8009"))))
                 else -> null
             }
         }
     }
 
     /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
-    private fun accountsFixture(reading: Boolean = false) {
+    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
-            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage")) null
+            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage") ||
+                (!listing && m.optString("what") == "list")) null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))

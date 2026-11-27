@@ -351,6 +351,49 @@ class DbTable(Obj):
     _refs = {"columns": "DbColumn"}
 
 
+class DecideQuestion(Obj):
+    """One of a decision's questions, as System One has them: noul (yes or no: the probability it's true), choice (one
+    of criteria's options, by name) or score (an ordered rubric, criteria's levels from low to high).
+
+        type ('choice' | 'noul' | 'score'): What kind of question it is.
+        instructions (string or object or array): Text, or structured data the decider renders as it does text.
+        criteria (object or array or None): choice: each option's name and what it means (null for a bare name);
+            score: its levels, lowest first; noul: what true and false mean, or nothing.
+    """
+
+
+class Decider(Obj):
+    """A decider a host knows (baudelib/deciders.py): a server that answers Strands Decider's System One API (POST
+    /v1/systemone, GET /health), as the deciders op lists it, and as a member's record says it (no url). What a
+    task's decider variable binds, and what decide's decider names, is its value.
+
+        value (string): What decide's decider names it as, on the host that listed it: its id for one of that
+            host's own, <its host's name>/<its id> for another member's.
+        id (string): Its id on its host.
+        name (string): Its name.
+        host (string or None): The member that has it, by its id (the listing host's own: null).
+        host_name (string or None): That member's name.
+        url (string or None): Where it's served (the listing host's own only).
+        reachable (boolean): It answered as a decider when it was last looked at: a variable bound to one that
+            didn't is warned of before a run.
+        model (string or None): The model it serves, as its /health says.
+        error (string or None): Why it didn't answer.
+    """
+
+
+class Decision(Obj):
+    """A decider's answer to one question, as System One gives it.
+
+        type ('choice' | 'noul' | 'score'): Its question's kind.
+        choice (string): choice: the option picked.
+        noul (number): noul: the probability it's true.
+        score (number): score: the expected level, over the levels' indices (0 the lowest).
+        probabilities (object): choice: each option's probability; score: each level's, by its index.
+        legend (object): score: each level's index and what it is.
+        confidence (number): How sure it is, calibrated (choice and score; a noul's probability says it).
+    """
+
+
 class Dep(Obj):
     """A program or library a feature needs (schema/deps), as a host or an app has it: whether it's there, and how it's
     installed on that machine.
@@ -792,8 +835,9 @@ class Member(Obj):
         heads (array of Head): The apps on its machine connected to it, by the code they run.
         behind (integer or None): How many commits it lacks of the mesh's newest code (MeshView's newest), as
             this host's git counts them (null: it can't).
+        deciders (array of Decider): Its deciders, and whether each answered when it last looked.
     """
-    _refs = {"providers": "Provider", "heads": "Head"}
+    _refs = {"providers": "Provider", "heads": "Head", "deciders": "Decider"}
 
 
 class MemberInfo(Obj):
@@ -811,8 +855,9 @@ class MemberInfo(Obj):
         commit (string or None): The commit its code is (null: not a checkout, or it didn't say).
         made (integer or None): When that commit was made, in seconds (null: not known).
         heads (array of Head): The apps on its machine connected to it, by the code they run.
+        deciders (array of Decider): Its deciders, and whether each answered when it last looked.
     """
-    _refs = {"providers": "Provider", "heads": "Head"}
+    _refs = {"providers": "Provider", "heads": "Head", "deciders": "Decider"}
 
 
 class MeshView(Obj):
@@ -1064,9 +1109,9 @@ class Session(Obj):
             agent): every app keeps it read-only while it is.
         start_key (string or None): Its start's start_key, if it was given one.
         account (Account or None): The subscription account its agent runs under on its host, fixed as it's made
-            (the host's default for its provider then, or as it's first written in), or the one picked for it
-            since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account
-            since removed (account_gone).
+            (the one the host's new chats take for its provider then, accounts' defaults, or as it's first
+            written in), or the one picked for it since (accounts' use), from the moment it's picked; null for
+            the CLI's own sign-in, or an account since removed (account_gone).
         account_gone (boolean): Its subscription account was removed from its host after it was picked for it:
             its agent can't start till another is picked.
         held (array of HeldMessage): Messages held for it, oldest first.
@@ -1160,6 +1205,11 @@ class Task(Obj):
         version (string or None): Its script's version: the first 12 hex of its SHA-256.
         form (array or None of TaskField): Its form's fields.
         triggers (array or None of TaskTrigger): What starts it.
+        variables (array or None of TaskVariable): Its variables, each bound once (bindings), its script reading
+            them (baudetask.vars).
+        bindings (object or None): A variable's name: what it's bound to (one not here is unbound).
+        warnings (object or None): A bound variable's name: why what it's bound to isn't there now (a model not
+            served, a host out of reach, a pod gone), as the host last looked (the host's to say: not set).
         notify_failure (boolean or None): A run that fails is sent to its Bot, with its log.
         fallback (boolean or None): Notify on failure under its old name, for older heads: read when
             notify_failure isn't given, and sent as notify_failure is.
@@ -1170,7 +1220,36 @@ class Task(Obj):
         last (TaskRun or None): Its latest run.
         next (number or None): When a schedule of its fires next.
     """
-    _refs = {"form": "TaskField", "triggers": "TaskTrigger", "last": "TaskRun"}
+    _refs = {"form": "TaskField", "triggers": "TaskTrigger", "variables": "TaskVariable", "last": "TaskRun"}
+
+
+class TaskBinding(Obj):
+    """What a task's variable is bound to: value, and what else its type has. Picked from what its host offers
+    (task_choices), or typed in as any text.
+
+        value (string): What it is: a model's value, a decider's value (what decide's model takes), a host's id
+            or name, a context's, pod's, container's or database's name, or the text.
+        label (string or None): What it's shown as (a model's name, a host's), if not its value.
+        effort (string or None): A model's: its effort.
+        host (string or None): A model's: the member of the mesh that serves it, by name (its provider), if it
+            isn't this host.
+        model (string or None): A decider's: the model it serves, as it said.
+        context (string or None): A pod's: its Kubernetes context.
+        namespace (string or None): A pod's: its namespace.
+        container (string or None): A database's: the container it runs in.
+    """
+
+
+class TaskChoice(Obj):
+    """One thing a task's variable could be bound to, as its host offers it (task_choices): its own models, the mesh's
+    hosts, its kubeconfig's contexts, the workloads running in its local clusters, its Docker containers, the
+    databases running on it (what ⌘K lists), its deciders and the mesh's.
+
+        binding (TaskBinding): What it's bound to, picked.
+        detail (string or None): Where it is, beside its name (a pod's context and namespace).
+        efforts (array or None of string): A model's: the efforts it takes.
+    """
+    _refs = {"binding": "TaskBinding"}
 
 
 class TaskField(Obj):
@@ -1189,15 +1268,17 @@ class TaskLogLine(Obj):
     """A line of a run's log.
 
         at (number): When.
-        kind ('out' | 'err' | 'say' | 'ask' | 'answer' | 'status' | 'agent'): What it is: the script's output or
-            errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a
-            chat it started said as its first turn ended (told its Bot too).
+        kind ('out' | 'err' | 'say' | 'ask' | 'answer' | 'status' | 'agent' | 'warning'): What it is: the
+            script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state
+            changing, or what a chat it started said as its first turn ended (told its Bot too), or a bound
+            variable not there as the run started.
         text (string): What it says.
         values (object or None): An answer's values, from a form.
         error (boolean or None): An ask's: it was an error handed over. An agent's: the chat failed, or was
             stopped.
         session (string): An agent's: the chat's id.
         over ('finished' | 'stopped' | 'failed'): An agent's: how the chat's turn ended (Sender's over).
+        variable (string): A warning's: the variable's name.
     """
 
 
@@ -1262,6 +1343,20 @@ class TaskTrigger(Obj):
             the payload's key of its own name).
         fired (number or None): When it last fired.
         error (string or None): Why it couldn't look or fire, last time.
+    """
+
+
+class TaskVariable(Obj):
+    """A variable a task declares: a name its script reads it by (baudetask.vars), and a type, bound once for the task
+    (its bindings), by its Bot or a person, unlike its form's inputs, which each run fills.
+
+        name (string): Its name, as its row and the script say it ("Translation Model").
+        type ('model' | 'decider' | 'host' | 'browser_host' | 'terminal_host' | 'kube_context' | 'pod' |
+            'container' | 'database' | 'text'): What it's bound to: a model (with its effort), a decider
+            (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a
+            pod, a container, a database, or text. What's offered as it's bound is the host's own of that type;
+            any text can be given all the same.
+        description (string or None): What it's for, as its Bot said.
     """
 
 
@@ -1581,7 +1676,8 @@ class AccountsReply(Obj):
         what (string): What was asked.
         error (string): Why it couldn't be done, for the user as it is.
         accounts (array of Account): The host's accounts, by provider then name.
-        defaults (object): Each provider's default for new chats.
+        defaults (object): The account each provider's new chats take: the one a chat's provider picker
+            (accounts' use) last picked there, else the CLI's own sign-in.
         usage (array or None of UsageLimit): usage: the subscription's limits; null where they can't be read for
             its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's).
         line (string): sign_in (Claude's): a line the sign-in wrote (the page to open among them).
@@ -1743,6 +1839,30 @@ class Deactivated(Obj):
 
         any (boolean): There was one.
     """
+
+
+class Decided(Obj):
+    """decide's answer: each question's, by name; or, unavailable, why the decider couldn't be asked (not running, not
+    answering, not there, its host out of reach), the script's to deal with: nothing else is asked instead.
+
+        decider (string): The decider asked, by its name.
+        host (string): Its host's name.
+        model (string): The model that answered.
+        answers (object): Each question's answer, by name.
+        latency_ms (number): How long it took its server.
+        unavailable (string): Why it couldn't be asked.
+    """
+
+
+class DecidersReply(Obj):
+    """deciders' answer: the host's own deciders (with their URLs), then the other members'.
+
+        what ('list' | 'add' | 'remove' | 'test'): What was asked.
+        deciders (array of Decider): The deciders.
+        tested (Decider): add, test: the one looked at.
+        error (string): Why it couldn't be done (a name taken, a URL that isn't one).
+    """
+    _refs = {"deciders": "Decider", "tested": "Decider"}
 
 
 class Deleted(Obj):
@@ -2288,6 +2408,27 @@ class TaskAnswer(Obj):
     """
 
 
+class TaskAnswered(Obj):
+    """answer_task's answer: the ask answered, its run going on.
+
+        session (string): The Bot's session id.
+        run (string): The run's id.
+        task (string): The run's task, by its name.
+        values (object): A form's values, as they were taken (checked against its fields).
+        text (string): The answer to an ask with no form.
+    """
+
+
+class TaskChoicesReply(Obj):
+    """task_choices' answer.
+
+        session (string): The session's id.
+        type (string): The type asked for.
+        choices (array of TaskChoice): What it could be bound to, best first.
+    """
+    _refs = {"choices": "TaskChoice"}
+
+
 class TaskReply(Obj):
     """task's answer.
 
@@ -2456,11 +2597,12 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "Branch": Branch, "CallbackPage": CallbackPage, "ChatDraft": ChatDraft, "ChatLogin": ChatLogin,
          "Clock": Clock, "Command": Command, "Commit": Commit, "ContextCategory": ContextCategory,
          "ContextUsage": ContextUsage, "DbColumn": DbColumn, "DbLink": DbLink, "DbServer": DbServer,
-         "DbTable": DbTable, "Dep": Dep, "DirEntry": DirEntry, "DockerColumn": DockerColumn,
-         "DockerContext": DockerContext, "DockerFault": DockerFault, "DockerPage": DockerPage,
-         "DockerRow": DockerRow, "DockerSection": DockerSection, "Edit": Edit, "FoundLink": FoundLink,
-         "GitFound": GitFound, "GitMade": GitMade, "GitParent": GitParent, "Gone": Gone, "GoneFolder": GoneFolder,
-         "Head": Head, "HeldMessage": HeldMessage, "HostHello": HostHello, "Info": Info, "KubeColumn": KubeColumn,
+         "DbTable": DbTable, "DecideQuestion": DecideQuestion, "Decider": Decider, "Decision": Decision, "Dep": Dep,
+         "DirEntry": DirEntry, "DockerColumn": DockerColumn, "DockerContext": DockerContext,
+         "DockerFault": DockerFault, "DockerPage": DockerPage, "DockerRow": DockerRow,
+         "DockerSection": DockerSection, "Edit": Edit, "FoundLink": FoundLink, "GitFound": GitFound,
+         "GitMade": GitMade, "GitParent": GitParent, "Gone": Gone, "GoneFolder": GoneFolder, "Head": Head,
+         "HeldMessage": HeldMessage, "HostHello": HostHello, "Info": Info, "KubeColumn": KubeColumn,
          "KubeContainer": KubeContainer, "KubeContext": KubeContext, "KubeFault": KubeFault, "KubePage": KubePage,
          "KubeRef": KubeRef, "KubeRow": KubeRow, "KubeSample": KubeSample, "KubeSection": KubeSection,
          "KubeShare": KubeShare, "KubeShareColumn": KubeShareColumn, "KubeSummary": KubeSummary, "KubeUse": KubeUse,
@@ -2469,24 +2611,25 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "Proxy": Proxy, "PullInfo": PullInfo, "PullLink": PullLink, "Record": Record,
          "RestartBlocker": RestartBlocker, "RestartState": RestartState, "Running": Running, "Sender": Sender,
          "Session": Session, "SignalRef": SignalRef, "StoredSender": StoredSender, "SubagentFile": SubagentFile,
-         "Tab": Tab, "Task": Task, "TaskField": TaskField, "TaskLogLine": TaskLogLine, "TaskRun": TaskRun,
-         "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger, "TelemetryDay": TelemetryDay,
-         "TelemetryEvent": TelemetryEvent, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
-         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
-         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
-         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
-         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
-         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
-         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
-         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
-         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
-         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
-         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
-         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
-         "Deactivated": Deactivated, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd,
-         "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply,
-         "EditsReply": EditsReply, "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply,
-         "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
+         "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding, "TaskChoice": TaskChoice, "TaskField": TaskField,
+         "TaskLogLine": TaskLogLine, "TaskRun": TaskRun, "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger,
+         "TaskVariable": TaskVariable, "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent,
+         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
+         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
+         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
+         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
+         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
+         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
+         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
+         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
+         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
+         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
+         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
+         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
+         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
+         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
+         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
+         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
          "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
          "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
          "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
@@ -2496,9 +2639,10 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "NotesReply": NotesReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
          "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated, "SeenSet": SeenSet,
          "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply, "Started": Started, "Stopped": Stopped,
-         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskReply": TaskReply,
-         "TaskReported": TaskReported, "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted,
-         "TasksReply": TasksReply, "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
+         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskAnswered": TaskAnswered,
+         "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply, "TaskReported": TaskReported,
+         "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted, "TasksReply": TasksReply,
+         "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
          "TelemetrySetReply": TelemetrySetReply, "TerminalEnd": TerminalEnd, "TerminalOpened": TerminalOpened,
          "TerminalOut": TerminalOut, "TerminalsReply": TerminalsReply, "ThemeRemoved": ThemeRemoved,
          "ThemeSaved": ThemeSaved, "ThemesReply": ThemesReply, "TranscriptReply": TranscriptReply,
@@ -3163,9 +3307,9 @@ class Ops(Area):
         """accounts (Accounts): The host's Claude and Codex subscription accounts (hostaccounts): list them; add one
         (Claude: name and an existing signed-in config folder, or name and token where the host has no claude;
         Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id,
-        token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-
-        in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it,
-        resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in of
+        token); remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent
+        started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its
+        provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of
         provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign
         in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're
         written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device
@@ -3175,12 +3319,12 @@ class Ops(Area):
         sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave,
         or error). Each other is answered with accounts.
 
-            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'select' | 'use' | 'usage' | 'sign_in' |
-                'code' | 'callback'): What to do.
-            provider ('claude' | 'codex'): add, select, sign_in (a new account): whose. usage with id "": whose
-                CLI's own sign-in (Claude's where left out).
-            id (string): rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own
-                sign-in, select, use and usage only).
+            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'use' | 'usage' | 'sign_in' | 'code' |
+                'callback'): What to do.
+            provider ('claude' | 'codex'): add, sign_in (a new account): whose. usage with id "": whose CLI's
+                own sign-in (Claude's where left out).
+            id (string): rename, token, remove, use, usage, sign_in: the account ("" for the CLI's own sign-in,
+                use and usage only).
             session (string): use: the chat whose account it is, one of the host's sessions whose model is the
                 account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in
                 (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat
@@ -3240,6 +3384,19 @@ class Ops(Area):
             add (array of string): These added to them.
         """
         return self._call("always_allow", {"session": session, "tools": tools, "add": add}, host, Obj)
+
+    def answer_task(self, *, session=None, run=None, answer=None, text=None, host=None):
+        """answer_task (AnswerTask): An ask of one of a Bot's tasks' runs (task_ask) answered: the Bot's answer_task
+        tool's, or anyone's who may manage the Bot. Taken only for an ask of that run that's waiting on that Bot;
+        the run goes on at once. Refused, with what's wrong, if it doesn't fit the ask's form.
+
+            session (string): The Bot's session id: the one the ask's waiting on.
+            run (string): The asking run's id.
+            answer (object): An ask with a form: its fields' values, by name.
+            text (string): An ask with no form: the answer.
+        """
+        return self._call("answer_task", {"session": session, "run": run, "answer": answer,
+                                          "text": text}, host, Obj)
 
     def archive(self, *, session=None, host=None):
         """archive (Archive): A session archived: its agent stopped, and it's listed only to those subscribed with
@@ -3346,6 +3503,36 @@ class Ops(Area):
             where (Where): Where a link goes.
         """
         return self._call("deactivate", {"id": id, "where": where}, host, Obj)
+
+    def decide(self, *, decider=None, state=None, questions=None, images=None, run=None, token=None, host=None):
+        """decide (Decide): A decision asked of one of the host's deciders, or a member's through it
+        (baudetask.decide): the state, and each question about it by name. Answered with decided once it's asked. A
+        task's script asks on its host's own socket with its run's token; a member, as its access rules let it use
+        the host's providers.
+
+            decider (string or None): Which (a Decider's value: one of this host's by its id or name, another
+                member's as <member>/<its id or name>); none: this host's first.
+            state (string or object or array): Text, or structured data the decider renders as it does text.
+            questions (object): The questions, by name.
+            images (array of string): Base64 images, part of the state.
+            run (string): A task's script's run (BAUDE_TASK_RUN).
+            token (string): Its run's token (BAUDE_TASK_TOKEN).
+        """
+        return self._call("decide", {"decider": decider, "state": state, "questions": questions, "images": images,
+                                     "run": run, "token": token}, host, Obj)
+
+    def deciders(self, *, what=None, name=None, url=None, id=None, host=None):
+        """deciders (Deciders): The host's deciders (Settings → Dependencies, a task's decider variable): list them,
+        each with whether it answers, and the mesh's other members' as their records say; add one (name, url: a
+        Strands Decider's server's base, http://127.0.0.1:8000), looked at as it's added; remove one (id); test one
+        (id): looked at now. Each is answered with deciders.
+
+            what ('list' | 'add' | 'remove' | 'test'): What to do (list where left out).
+            name (string): add: its name.
+            url (string): add: where it's served.
+            id (string): remove, test: which.
+        """
+        return self._call("deciders", {"what": what, "name": name, "url": url, "id": id}, host, DecidersReply)
 
     def delete(self, *, session=None, host=None):
         """delete (Delete): A session gone: its agent stopped and waited for, its transcript and the folder beside it
@@ -4015,7 +4202,8 @@ class Ops(Area):
     def task_ask(self, *, run=None, token=None, text=None, form=None, error=None, host=None):
         """task_ask (TaskAsk): A running script asks its Bot (on the host's own socket, with its run's token):
         something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's
-        idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).
+        idle, answered as the Bot calls its answer_task tool (answer_task); a turn that ends without it reminded
+        once, then failed (refused, as a failure, for a task whose failures aren't handed over too).
 
             run (string): Its run's id.
             token (string): Its run's token.
@@ -4025,6 +4213,26 @@ class Ops(Area):
         """
         return self._call("task_ask", {"run": run, "token": token, "text": text, "form": form,
                                        "error": error}, host, Obj)
+
+    def task_bind(self, *, session=None, id=None, name=None, binding=None, host=None):
+        """task_bind (TaskBind): One of a Bot's task's variables bound (binding), or let go of (none): answered as task
+        is, with the variable's warning as it's looked at now.
+
+            session (string): The session's id.
+            id (string): The task's id.
+            name (string): The variable's name.
+            binding (TaskBinding or None): What it's bound to; none: unbound.
+        """
+        return self._call("task_bind", {"session": session, "id": id, "name": name, "binding": binding}, host, Obj)
+
+    def task_choices(self, *, session=None, type=None, host=None):
+        """task_choices (TaskChoices): What a task's variable of a type could be bound to, as the Bot's host has them.
+
+            session (string): The session's id.
+            type ('model' | 'decider' | 'host' | 'browser_host' | 'terminal_host' | 'kube_context' | 'pod' |
+                'container' | 'database' | 'text'): The variable's type (TaskVariable's).
+        """
+        return self._call("task_choices", {"session": session, "type": type}, host, TaskChoicesReply)
 
     def task_output(self, *, session=None, path=None, limit=None, host=None):
         """task_output (TaskOutput): The last part of a background task's output file, one a session's transcript

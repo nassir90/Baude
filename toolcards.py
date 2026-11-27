@@ -129,6 +129,37 @@ def _first_line(v, limit=120):
     return (v.splitlines()[0] if v else "")[:limit]
 
 
+ANSWER_TASK = "mcp__mesh__answer_task"  # (a Bot's answer to its task's ask: drawn as "Answered <task>")
+
+
+def answer_line(inp):
+    """An answer_task call's answer in a line of at most 120 characters: each field = value (its first line), · between
+    (a value as it's written: text as it is, the rest as JSON), or its text's first line."""
+    fields = inp.get("answer")
+    if isinstance(fields, str):  # (an answer given as JSON)
+        try:
+            fields = json.loads(fields)
+        except ValueError:
+            pass
+    if isinstance(fields, dict):
+        return _first_line(" · ".join(
+            f"{k} = {_first_line(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))}"
+            for k, v in fields.items()))
+    return _first_line(inp["text"]) if isinstance(inp.get("text"), str) else ""
+
+
+def answer_result(text):
+    """What an answer_task call came back with ({task, run, values or text}; Codex's: inside the MCP result it gives),
+    or None (it failed, or isn't that)."""
+    try:
+        got = json.loads(text or "")
+        if isinstance(got, dict) and isinstance(got.get("content"), list):
+            got = json.loads("".join(c.get("text") or "" for c in got["content"] if isinstance(c, dict)))
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) and isinstance(got.get("task"), str) else None
+
+
 def summarize_tool(name, inp):
     """One line for a tool card header: what the call is for (Claude's description), or failing that,
     what it touches (a path, a pattern, a URL). A command without a description gets nothing."""
@@ -141,6 +172,8 @@ def summarize_tool(name, inp):
             return " · ".join(f"{q.get('header') or q.get('question')}: {inp['answers'][q.get('question')]}"
                               for q in qs if isinstance(q, dict) and q.get("question") in inp["answers"])
         return _first_line(str(qs[0].get("question", ""))) + (f" (+{len(qs) - 1} more)" if len(qs) > 1 else "")
+    if name == ANSWER_TASK:
+        return answer_line(inp)
     if name == "ToolSearch" and (picked := toolnames.selected(inp.get("query"))) is not None:
         return ", ".join(tool_label(n) for n in picked)  # (the tools it loads, as their cards name them)
     if isinstance(inp.get("command"), str) and not (inp.get("description") or "").strip():
@@ -542,6 +575,7 @@ class ToolCard(Gtk.Box):
         self.name, self.tool_id, self.partial_json, self.input = name, tool_id, "", {}
         self.state, self.task, self.decision, self.listeners = "running", None, None, []
         self.artifact, self.asking, self.opened_to_ask = None, None, False
+        self.answer = None  # (an answer_task call's, once it's taken: answer_result)
         # one line:  Name [Command] [Output]  summary (cut off with …)        [spinner, while it runs]
         # and under it, what those open: what was asked, what came back (once there is some)
         grid = self.grid = Gtk.Grid()
@@ -644,7 +678,14 @@ class ToolCard(Gtk.Box):
         if self.decision == "denied":
             extra.append(wording.say("tool_calls.denied"))
         tail = "".join(f"  <span alpha='55%'>· {html.escape(e)}</span>" for e in extra)
-        self.title.set_markup(f"<b>{html.escape(tool_label(self.name))}</b>")
+        if self.answer is not None:  # (a task's ask answered: the task, and the answer as it was taken)
+            s = answer_line({"answer": self.answer.get("values"), "text": self.answer.get("text")})
+        title = wording.say("tool_calls.answered_task", task=self.answer["task"]) if self.answer is not None else \
+            tool_label(self.name)
+        if self.answer is not None:  # (a task's name, however long: cut, the chat no wider for it)
+            self.title.set_ellipsize(Pango.EllipsizeMode.END)
+            self.title.set_max_width_chars(40)
+        self.title.set_markup(f"<b>{html.escape(title)}</b>")
         shown = html.escape(s)
         if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):
             shown = image_link_markup(s, self.image_acts)
@@ -755,6 +796,8 @@ class ToolCard(Gtk.Box):
                 self.report = text.strip()
                 self.result_box.append(MarkdownView(text))  # a finished agent's answer is markdown
                 self.show_output()
+        elif self.name == ANSWER_TASK and not is_error and (got := answer_result(text)) is not None:
+            self.answer = got  # (it went through: the card says what was answered, no Output to open)
         elif text and not said_nothing(self.base, text, is_error):  # (it went through: no Output to open)
             self.add_output_text(text)
         for data in images:

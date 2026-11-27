@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "deciders' answer: the host's own deciders (with their URLs), then the other members'.",
+  "properties": {
+    "op": {
+      "const": "deciders",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": [
+        "list",
+        "add",
+        "remove",
+        "test"
+      ],
+      "description": "What was asked."
+    },
+    "deciders": {
+      "type": "array",
+      "items": {
+        "$ref": "Decider.json"
+      },
+      "description": "The deciders."
+    },
+    "tested": {
+      "$ref": "Decider.json",
+      "description": "add, test: the one looked at."
+    },
+    "error": {
+      "type": "string",
+      "description": "Why it couldn't be done (a name taken, a URL that isn't one)."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

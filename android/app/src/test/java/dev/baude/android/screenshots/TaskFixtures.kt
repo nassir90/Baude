@@ -145,4 +145,52 @@ def deploy(inputs):
         bot = "Juniper"
         page = "run"
     }
+
+    /** Translate notes: its variables, two models (one this host doesn't serve: warned of), a host, one not bound, text. */
+    val translate get() = Msg.Task(id = "t4", name = "Translate notes", runtime = "python", version = "5b0e19c4d2aa",
+        notifyFailure = true, paused = false,
+        variables = listOf(Msg.TaskVariable(name = "Translation Model", type = "model"),
+            Msg.TaskVariable(name = "Worker Agent Model", type = "model"),
+            Msg.TaskVariable(name = "Terminal Host", type = "terminal_host"),
+            Msg.TaskVariable(name = "Browser Host", type = "browser_host"), Msg.TaskVariable(name = "Glossary", type = "text")),
+        bindings = mapOf("Translation Model" to Msg.TaskBinding(value = "sonnet", label = "Sonnet 5.5", effort = "low"),
+            "Worker Agent Model" to Msg.TaskBinding(value = "ollama/gpt-oss:20b", label = "GPT OSS", effort = "low", host = "mac-mini"),
+            "Terminal Host" to Msg.TaskBinding(value = "workshop", label = "workshop"),
+            "Glossary" to Msg.TaskBinding(value = "docs/glossary.md")),
+        warnings = mapOf("Worker Agent Model" to "Not served on this host"),
+        last = run("v1", "t4", "Translate notes", "done", "manual", now - 600, 6.0, "5b0e19c4d2aa"))
+
+    /** The list with Translate notes, warned of. */
+    fun variablesList() = list().apply { tasks.add(0, translate) }
+
+    /** Translate notes' page: its Variables. */
+    fun variablesPage() = variablesList().apply {
+        task = translate
+        runs.add(run("v1", "t4", "Translate notes", "done", "manual", now - 600, 6.0, "5b0e19c4d2aa"))
+        page = "task"
+    }
+
+    /** Bind Translation Model: the host's models offered under it. */
+    fun bind() = variablesPage().apply {
+        val levels = listOf("low", "medium", "high")
+        choices.addAll(listOf(
+            Msg.TaskChoice(binding = Msg.TaskBinding(value = "opus", label = "Opus 5.5"), efforts = levels),
+            Msg.TaskChoice(binding = Msg.TaskBinding(value = "sonnet", label = "Sonnet 5.5"), efforts = levels),
+            Msg.TaskChoice(binding = Msg.TaskBinding(value = "claude-haiku-4-5", label = "Haiku 4.5")),
+            Msg.TaskChoice(binding = Msg.TaskBinding(value = "agent/m1/mlx/qwen3-4b", label = "Qwen3 4B", host = "mac-mini"),
+                detail = "mac-mini / MLX")))
+        binding = translate to translate.variables!![0]
+    }
+
+    /** Its run: the warning first in its log, then the script's own fallback. */
+    fun variablesRun() = variablesPage().apply {
+        run = Msg.TaskRun.from(run("v1", "t4", "Translate notes", "done", "manual", now - 600, 6.0, "5b0e19c4d2aa").json().put("offset", 0))
+        log.addAll(listOf(Msg.TaskLogLine(at = now, kind = "warning", text = "Worker Agent Model: Not served on this host",
+                variable = "Worker Agent Model"),
+            line("say", "translating with Sonnet 5.5 low"),
+            line("say", "worker model: Not served on this host - using Sonnet 5.5"),
+            line("say", "done: Traduit: notes de version 2.4.")))
+        bot = "Juniper"
+        page = "run"
+    }
 }

@@ -1,0 +1,19 @@
+{
+  "description": "Deciders: the decision models a host knows (a Strands Decider's server, or any that answers its System One API), what Settings → Dependencies says of them, and what a task's decide() is told when one can't answer.",
+  "messages": {
+    "title": "Deciders",
+    "url": "URL",
+    "add": "Add Decider",
+    "test": "Test",
+    "running": "Running at {$url}",
+    "not_decider": "{$url} doesn't answer as a decider",
+    "bad_url": "A decider's URL starts with http:// or https://",
+    "named": "Give the decider a name",
+    "taken": "This host has a decider named {$name}",
+    "none_here": "{$host} has no deciders",
+    "no_such": "{$host} has no decider named {$name}",
+    "host_gone": "{$host} isn't reachable in the mesh",
+    "unavailable": "{$name} on {$host} {$why}",
+    "said": "{$name} on {$host} refused the question: {$why}"
+  }
+}

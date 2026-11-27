@@ -34,7 +34,7 @@
       "properties": {
         "claude": {
           "type": "string",
-          "description": "Claude's default account's id, \"\" for the CLI's own sign-in."
+          "description": "Claude's account's id, \"\" for the CLI's own sign-in."
         },
         "codex": {
           "type": "string",
@@ -42,7 +42,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Each provider's default for new chats."
+      "description": "The account each provider's new chats take: the one a chat's provider picker (accounts' use) last picked there, else the CLI's own sign-in."
     },
     "usage": {
       "type": [

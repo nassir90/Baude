@@ -23,6 +23,10 @@ PAGE = wording.say("tasks.title")
 DAY_NAMES = tuple(wording.say(f"tasks.{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
 TYPES = (("text", "tasks.text"), ("number", "tasks.number"), ("bool", "tasks.yes_no"), ("choice", "tasks.choice"))
 KINDS = (("schedule", "tasks.schedule"), ("git_push", "tasks.git_push"))
+VARIABLE_TYPES = {"model": "common.model", "decider": "tasks.decider", "host": "new_session.host",
+                  "browser_host": "tasks.browser_host", "terminal_host": "tasks.terminal_host",
+                  "kube_context": "tasks.kube_context", "pod": "tasks.pod", "container": "kube.container",
+                  "database": "databases.database", "text": "tasks.text"}
 PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "after", "commit", "message", "author")}
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
                 "skipped": "go-next-symbolic", "asking": "baude-waiting-symbolic"}
@@ -104,6 +108,27 @@ def status_icon(run):
             w.add_css_class("warning")
     w.set_tooltip_text(wording.say("tasks.status", status=run.get("status") or ""))
     return w
+
+
+def warning_icon(tip):
+    w = Gtk.Image(icon_name="dialog-warning-symbolic", tooltip_text=tip, valign=Gtk.Align.CENTER)
+    w.add_css_class("warning")
+    return w
+
+
+def bound_text(b):
+    """What a variable's bound to, as its row says it: its label (a model's name, a host's) or value, a model's effort
+    after it."""
+    if not b:
+        return wording.say("tasks.not_bound")
+    return (b.get("label") or b.get("value") or "") + (f" · {b['effort']}" if b.get("effort") else "")
+
+
+def matches(choice, words):
+    """Does a choice offered for a variable have each word typed in its name, value or where it is?"""
+    b = choice.get("binding") or {}
+    hay = " ".join(x for x in (b.get("label"), b.get("value"), choice.get("detail")) if x).lower()
+    return all(w in hay for w in words)
 
 
 def flat(icon, tip, fn):
@@ -250,7 +275,8 @@ class TasksPage(Gtk.Box):
         self.asked += 1
         sid = self.sid
         op = msg.get("op")
-        doing = "run" if op == "run_task" else "stop" if op == "task_stop" else "save" if "set" in msg else \
+        doing = "run" if op == "run_task" else "stop" if op == "task_stop" else \
+            "save" if "set" in msg or op == "task_bind" else \
             "delete" if "delete" in msg else "load"
 
         def got(r):
@@ -311,6 +337,9 @@ class TasksPage(Gtk.Box):
                                 activatable=True)
             row.task_id = t["id"]
             row.add_prefix(status_icon(t.get("last")))
+            if t.get("warnings"):  # (a variable bound to what isn't there now: said before it runs)
+                row.add_suffix(warning_icon("\n".join(wording.say("tasks.variable_warning", name=k, warning=w)
+                                                      for k, w in t["warnings"].items())))
             on = Gtk.Switch(active=not t.get("paused"), valign=Gtk.Align.CENTER,
                             tooltip_text=wording.say("tasks.turn_off"))
             on.connect("notify::active", lambda sw, _p, x=t: self.save(self.kept(x, paused=not sw.get_active())))
@@ -402,6 +431,23 @@ class TasksPage(Gtk.Box):
             for f in t["form"]:
                 row = Adw.ActionRow(title=GLib.markup_escape_text(f.get("label") or f["name"]))
                 row.add_suffix(dim(wording.say(dict(TYPES)[f["type"]])))
+                lb.append(row)
+        # variables
+        if t.get("variables"):
+            g = self.group(wording.say("tasks.variables"))
+            lb = self.listbox(g)
+            lb.connect("row-activated", lambda _l, row: self.bind(t, row.variable))
+            for v in t["variables"]:
+                b = (t.get("bindings") or {}).get(v["name"])
+                row = Adw.ActionRow(title=GLib.markup_escape_text(v["name"]), activatable=True,
+                                    tooltip_text=v.get("description"))
+                row.variable = v
+                if (w := (t.get("warnings") or {}).get(v["name"])) and b:
+                    row.add_suffix(warning_icon(w))
+                said = dim(bound_text(b), ellipsize=Pango.EllipsizeMode.END, max_width_chars=28)
+                if b and b.get("label") and b["label"] != b.get("value"):
+                    said.set_tooltip_text(b["value"])
+                row.add_suffix(said)
                 lb.append(row)
         # runs
         g = self.group(wording.say("tasks.runs"))
@@ -540,6 +586,13 @@ class TasksPage(Gtk.Box):
             self.tail = (k, block, [text])
             return
         self.tail = None
+        if k == "warning":  # (a variable bound to what wasn't there as it started)
+            line = Gtk.Box(spacing=6)
+            line.append(warning_icon(None))
+            line.append(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, hexpand=True,
+                                  wrap_mode=Pango.WrapMode.WORD_CHAR))
+            self.run_body.append(line)
+            return
         if k in ("ask", "answer", "agent"):
             bot = self.bot or wording.say("sidebar.bot")
             chat = ((getattr(self.remote, "sessions", None) or {}).get(x.get("session")) or {}).get("title") or \
@@ -573,6 +626,100 @@ class TasksPage(Gtk.Box):
         alert(self.win, wording.say("tasks.change_heading"), name,
               [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)],
               lambda _r: self.save(self.kept(t, name=name.get_text())))
+
+    def bind(self, t, v):
+        """t's variable v bound: to one of what its host has of its type (each word typed found in its name or where
+        it is), picked from the list under what's typed, or to whatever's typed; a model's effort picked beside it.
+        Clear unbinds it."""
+        kind, bound = v["type"], (t.get("bindings") or {}).get(v["name"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        entry = Gtk.Entry(placeholder_text=wording.say(VARIABLE_TYPES.get(kind, "tasks.text")), hexpand=True,
+                          text=(bound or {}).get("label") or (bound or {}).get("value") or "")
+        box.append(entry)
+        listed = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        listed.add_css_class("boxed-list")
+        listed.add_css_class("tasks-rows")
+        scroll = Gtk.ScrolledWindow(child=listed, propagate_natural_height=True, max_content_height=260,
+                                    hscrollbar_policy=Gtk.PolicyType.NEVER, visible=False)
+        box.append(scroll)
+        effort_row = Gtk.Box(spacing=8, visible=kind == "model")
+        effort_row.append(Gtk.Label(label=wording.say("meta_settings.effort"), xalign=0, hexpand=True))
+        effort = Gtk.DropDown.new_from_strings([wording.say("meta_settings.effort_default")])
+        effort_row.append(effort)
+        box.append(effort_row)
+        state = {"choices": [], "picked": bound, "efforts": []}
+
+        def efforts(levels):
+            levels = list(levels or [])
+            have = (state["picked"] or {}).get("effort")
+            if have and have not in levels:
+                levels.append(have)
+            state["efforts"] = levels
+            effort.set_model(Gtk.StringList.new([wording.say("meta_settings.effort_default"), *levels]))
+            effort.set_selected(levels.index(have) + 1 if have in levels else 0)
+
+        def shown_text(b):
+            return (b or {}).get("label") or (b or {}).get("value") or ""
+
+        def fill(*_):
+            while (row := listed.get_row_at_index(0)) is not None:
+                listed.remove(row)
+            words = entry.get_text().lower().split()
+            if state["picked"] is not None and entry.get_text() == shown_text(state["picked"]):
+                words = []  # (what's picked shown: every choice offered again)
+            hits = [c for c in state["choices"] if matches(c, words)]
+            for c in hits[:100]:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(shown_text(c["binding"])), activatable=True)
+                row.choice = c
+                if state["picked"] is not None and c["binding"].get("value") == state["picked"].get("value"):
+                    row.add_suffix(Gtk.Image(icon_name="object-select-symbolic"))  # (what it's bound to now)
+                if c.get("detail"):
+                    row.add_suffix(dim(c["detail"], ellipsize=Pango.EllipsizeMode.END, max_width_chars=24))
+                listed.append(row)
+            scroll.set_visible(bool(hits))
+
+        def picked(_l, row):
+            state["picked"] = dict(row.choice["binding"])
+            entry.set_text(shown_text(state["picked"]))
+            efforts(row.choice.get("efforts"))
+            fill()
+        listed.connect("row-activated", picked)
+
+        def typed(*_):
+            if state["picked"] is not None and entry.get_text() != shown_text(state["picked"]):
+                state["picked"] = None  # (typed over: what's typed is what it's bound to)
+            fill()
+        entry.connect("changed", typed)
+
+        def got(r):
+            if r.get("op") != "task_choices":
+                return
+            state["choices"] = r.get("choices") or []
+            hit = next((c for c in state["choices"] if bound and c["binding"].get("value") == bound.get("value")), None)
+            efforts((hit or {}).get("efforts"))
+            fill()
+        efforts([])
+        if kind != "text":
+            self.remote.request({"op": "task_choices", "session": self.sid, "type": kind}, got)
+
+        def done(r):
+            if r == "clear":
+                binding = None
+            else:
+                text = entry.get_text().strip()
+                binding = dict(state["picked"]) if state["picked"] is not None and \
+                    entry.get_text() == shown_text(state["picked"]) else {"value": text} if text else None
+                if binding is not None and kind == "model":
+                    binding.pop("effort", None)
+                    if effort.get_selected() > 0:
+                        binding["effort"] = state["efforts"][effort.get_selected() - 1]
+            self.ask({"op": "task_bind", "session": self.sid, "id": t["id"], "name": v["name"], "binding": binding})
+        responses = [("cancel", wording.say("common.cancel"), False)] + \
+            ([("clear", wording.say("common.clear"), False)] if bound else []) + [("save", wording.say("common.save"), True)]
+        dlg = alert(self.win, wording.say("tasks.bind_heading", name=v["name"]), box, responses, done)
+        dlg.set_size_request(420, -1)
+        entry.connect("activate", lambda _e: (dlg.close(), done("save")))
+        return dlg
 
     def delete(self, t):
         """t deleted, once that's confirmed: its runs and scripts too."""

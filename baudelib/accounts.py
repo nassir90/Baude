@@ -93,11 +93,13 @@ def account(profile):
 
 
 def defaults():
-    """Each provider's default account's id ("" for the CLI's own sign-in)."""
+    """Each provider's account a new chat takes (selected): its id ("" for the CLI's own sign-in)."""
     return {p: selected(p) for p in PROVIDERS}
 
 
 def selected(provider):
+    """The account a new chat on provider's models takes here: the one select last kept (a chat's provider picker's
+    pick), else the CLI's own sign-in ("")."""
     if not _path().exists():
         return ""
     with database() as db:
@@ -106,6 +108,8 @@ def selected(provider):
 
 
 def select(provider, profile):
+    """A chat's provider picker's pick (profile; "": the CLI's own sign-in) kept as the one a new chat on provider's
+    models takes (selected)."""
     with database() as db:
         if profile and not db.execute("SELECT 1 FROM profiles WHERE provider=? AND id=?", (provider, profile)).fetchone():
             raise ValueError(wording.say("subscriptions.gone"))

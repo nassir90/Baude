@@ -62,12 +62,15 @@ SCHEMAS = {
               "fires (a schedule; a git push to a branch of a repo on the host), each one's triggers, form, last run "
               "and version. Their scripts call you mid-run (import baudetask: ask, fallback) when they can't decide "
               "or fail: see task for one's script.", {"session": BOT}, []),
-    "task": ("One of your tasks: its script, triggers and form, and its latest runs (when, what started each, how "
-             "long, how it ended, the version it ran).", {"session": BOT, "id": {"type": "string"}}, ["id"]),
+    "task": ("One of your tasks: its script, triggers, form and variables (what each's bound to, and a warning for "
+             "one bound to what isn't there now), and its latest runs (when, what started each, how long, how it "
+             "ended, the version it ran).", {"session": BOT, "id": {"type": "string"}}, ["id"]),
     "set_task": ("Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and "
-                 "form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, "
-                 "filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, "
-                 "form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
+                 "form, given, are given whole; variables and bindings too). A Python script imports baudetask: "
+                 "baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), baudetask.vars (its "
+                 "variables: vars[\"Translation Model\"] or vars.translation_model, typed, None if unbound, .warning "
+                 "if what it's bound to isn't there now; a model one passed straight to agent(model=)), say(text) "
+                 "(a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
                  "exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload "
                  "fills a field of the same name, or the one fills maps it to. Saving a new script makes a new "
                  "version.",
@@ -84,6 +87,18 @@ SCHEMAS = {
                                                                "fills: {field: payload key}. A git push's payload: repo, "
                                                                "branch, before, after, commit, message, author",
                                "items": {"type": "object"}},
+                  "variables": {"type": "array", "description": "Variables, each bound once for the task (not per run, "
+                                                               "as the form is): {name, type: model|decider|host|"
+                                                               "browser_host|terminal_host|kube_context|pod|container|"
+                                                               "database|text, description?}",
+                                "items": {"type": "object"}},
+                  "bindings": {"type": "object", "description": "A variable's name: what it's bound to, {value, "
+                                                                "effort? (a model's), host? (the host serving a model), "
+                                                                "model? (a decider's), context?, namespace? (a pod's), "
+                                                                "container? (a database's)}, or just its value as text; "
+                                                                "given, given whole. A model's value is as hosts lists "
+                                                                "it; anything else is taken too. One bound to what "
+                                                                "isn't there is warned of, and the run starts anyway"},
                   "notify_failure": {"type": "boolean", "description": "A failed run is sent to you (default true)"},
                   "notify_exit": {"type": "boolean", "description": "A run that finishes with exit 0 is told to you, for your information (default false)"},
                   "timeout_s": {"type": "integer"}, "paused": {"type": "boolean"},
@@ -94,6 +109,15 @@ SCHEMAS = {
                  {"session": BOT, "id": {"type": "string"}, "inputs": {"type": "object"},
                   "wait": {"type": "boolean"}}, ["id"]),
     "task_run": ("One run of one of your tasks, and its log.", {"session": BOT, "run": {"type": "string"}}, ["run"]),
+    "answer_task": ("Answer an ask of one of your tasks' runs whose message says to answer with this tool "
+                    "(mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its "
+                    "fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what "
+                    "you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. "
+                    "A message from a task that doesn't say to use this tool is answered in your reply, not with it.",
+                    {"session": BOT, "run": {"type": "string", "description": "The asking run's id (its table's run)"},
+                     "answer": {"type": "object", "description": "The form's fields, by name: each a text, number, "
+                                                                 "true or false, or one of a choice's choices"},
+                     "text": {"type": "string", "description": "The answer to an ask with no form"}}, ["run"]),
 }
 ASKED = ("set_task", "run_task")  # (run code on the host: asked about as Bash is, by the chat's permission mode)
 
@@ -451,12 +475,12 @@ class Mesh:
         if a.get("delete"):
             self.request(self.local, {"op": "tasks", "session": sid, "delete": a.get("id") or ""})
             return {"deleted": a.get("id")}
-        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "notify_failure", "notify_exit",
-                                  "timeout_s", "paused") if k in a}
+        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "variables", "bindings",
+                                  "notify_failure", "notify_exit", "timeout_s", "paused") if k in a}
         if a.get("id"):  # (fields left out: as they were)
             old = self.request(self.local, {"op": "task", "session": sid, "id": a["id"]})["task"]
-            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "notify_failure", "notify_exit",
-                                               "timeout_s", "paused")}, **task}
+            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "variables", "bindings",
+                                               "notify_failure", "notify_exit", "timeout_s", "paused")}, **task}
         got = self.request(self.local, {"op": "tasks", "session": sid, "set": task})
         return next(t for t in got["tasks"] if t["id"] == got.get("saved"))
 
@@ -477,6 +501,12 @@ class Mesh:
     def task_run(self, a):
         got = self.request(self.local, {"op": "task_run", "session": self._bot(a), "run": a["run"]})
         return {"run": got["run"], "log": got.get("log") or []}
+
+    def answer_task(self, a):
+        msg = {"op": "answer_task", "session": self._bot(a), "run": a["run"],
+               **{k: a[k] for k in ("answer", "text") if k in a}}
+        got = self.request(self.local, msg)
+        return {k: got[k] for k in ("task", "run", "values", "text") if k in got}
 
     def chats(self, a):
         out = []
@@ -624,11 +654,12 @@ def listed(schemas=None, server=NAME):
             for n, (d, props, req) in (schemas or SCHEMAS).items()]
 
 
-def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
+def serve(me=None, rfile=None, wfile=None, socket=None, meta=False, only=None):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
-    a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
+    a thread of its own (a subagent's answer can take a while: another call meanwhile is answered). only: the tools
+    it has, by name (None: all)."""
     mesh = Mesh(me, socket, meta)
-    serve_tools(NAME, SCHEMAS, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
+    serve_tools(NAME, {n: v for n, v in SCHEMAS.items() if only is None or n in only}, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
                 rfile, wfile)
 
 

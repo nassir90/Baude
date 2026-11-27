@@ -25,7 +25,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    access, accounts, codex, deciders, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
     selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
@@ -135,6 +135,7 @@ class Server(ServerRunning, ServerSessions):
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
         self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
+        self.deciders = deciders.Deciders(self.state_dir)  # (its decision models' servers: baudelib/deciders.py)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
         self.multiplex_pids = set()  # (the processes of this machine's Multiplex windows, likewise)
         self.emission_pids = set()  # (the processes of this machine's Emissions, as they last said: sampled too)

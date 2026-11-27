@@ -53,6 +53,36 @@
       },
       "description": "What starts it."
     },
+    "variables": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskVariable.json"
+      },
+      "description": "Its variables, each bound once (bindings), its script reading them (baudetask.vars)."
+    },
+    "bindings": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "TaskBinding.json"
+      },
+      "description": "A variable's name: what it's bound to (one not here is unbound)."
+    },
+    "warnings": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A bound variable's name: why what it's bound to isn't there now (a model not served, a host out of reach, a pod gone), as the host last looked (the host's to say: not set)."
+    },
     "notify_failure": {
       "type": [
         "boolean",

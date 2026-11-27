@@ -23,6 +23,7 @@ from baudelib.serverstate import (
 CARRY_TRIES = 5  # (copies of a chat's record made, each written to as it was copied, before its account waits again)
 FOLLOW_UP_WAIT = 30  # (s a claude's given to begin the turn a follow-up sent at the last one starts, before an account
 # picked at that turn's taken: begun by then, it's taken after that turn instead)
+TOOLED = ("claude", "pi", "codex")  # (the programs given the host's MCP servers: agent_tools)
 
 
 class ServerSessions:
@@ -307,12 +308,9 @@ class ServerSessions:
                 profile=profile,
                 env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
                 recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s), instructions=told,
-                servers={meshtools.NAME: {"command": sys.executable, "args": [
-                    agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
-                    ",".join(meshtools.BOT_ANSWERS)], "env": {"BAUDE_SESSION": s.id},
-                    "enabled_tools": list(meshtools.BOT_ANSWERS),  # (never asked about: Codex's own per-tool approval)
-                    "tools": {t: {"approval_mode": "approve"} for t in meshtools.BOT_ANSWERS}}}
-                if s.meta.get("bot") else None)
+                servers=self.codex_servers(servers, run["mode"]),
+                writable=[os.path.dirname(mem["path"])] if told is not None else ())  # (its memory's folder its to
+            # edit, as the chat's own is, without asking)
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -333,13 +331,14 @@ class ServerSessions:
     def agent_tools(self, s, program):
         """(lock held) The MCP servers a session's agent has of this host ({name: its --mcp-config entry}), and the
         rules allowing their tools without asking (claude's --allowedTools): chattools, every chat's; the mesh's
-        (baudelib.meshtools), a Bot's and Meta's; a Bot's browser and terminals too. None but for claude and pi."""
-        if program in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every chat's)
+        (baudelib.meshtools), a Bot's and Meta's; a Bot's browser and terminals too. None but for claude, pi and
+        codex (codex_servers)."""
+        if program in TOOLED and not s.meta.get("ephemeral"):  # (its own tools: chattools, every chat's)
             servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable, agentproxy.HEADLESS)}
             rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
         else:
             servers, rules = {}, []
-        if s.mesh_tools() and program in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
+        if s.mesh_tools() and program in TOOLED:  # (the mesh's tools: baudelib.meshtools, here)
             for name, cmd in [(meshtools.NAME, "mesh-tools")] + (  # (a Bot's browser too: its own Emission profile,
                     [(emissiontools.NAME, "emission-tools"), (multiplextools.NAME, "multiplex-tools")]  # on any host;
                     if s.meta.get("bot") else []):                                                       # its terminals)
@@ -352,6 +351,23 @@ class ServerSessions:
                 rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
                 rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
         return servers, rules
+
+    @staticmethod
+    def codex_servers(servers, mode):
+        """agent_tools's servers as a Codex thread's mcp_servers config: each tool run without asking, as claude's
+        --allowedTools has them, but for the mesh's that run code here (meshtools.ASKED), asked about as a command is
+        (mcpServer/elicitation/request: CodexProc.approval) but in full access; the mesh's given as long as its
+        longest wait (a subagent's answer). None for none."""
+        if not servers:
+            return None
+        out = {}
+        for name, entry in servers.items():
+            out[name] = {**entry, "default_tools_approval_mode": "approve"}
+            if name == meshtools.NAME:
+                out[name]["tool_timeout_sec"] = meshtools.WAIT_MAX_S + 60
+                if models.codex_mode(mode) != "bypassPermissions":
+                    out[name]["tools"] = {t: {"approval_mode": "prompt"} for t in meshtools.ASKED}
+        return out
 
     def grow_agent(self, s):
         """(lock held) A chat just made a Bot: its agent, running, given a Bot's tools as it runs (mcp_set_servers: the
@@ -524,6 +540,9 @@ class ServerSessions:
         if models.model_program(s.meta.get("model")) == "codex":
             s.meta["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")), s.meta["model"], s.meta.get("effort"))
         self.save(s)
+        if sub == "set_permission_mode" and models.model_program(s.meta.get("model")) == "codex" and \
+                s.mesh_tools() and (undo[1] == "bypassPermissions") != (undo[2] == "bypassPermissions"):
+            self.renew_agent(s)  # (the mesh's tools that run code asked about, or not, as it starts: codex_servers)
         if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
             if sub == "set_model":
                 self.rewindow(s)

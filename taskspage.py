@@ -36,7 +36,7 @@ def branch_icon():
 
 
 def kind_icon(kind):
-    return {"schedule": "alarm-symbolic", "git_push": branch_icon()}.get(kind, "media-playback-start-symbolic")
+    return {"schedule": "alarm-symbolic", "git_push": branch_icon()}.get(kind)
 
 
 def when(t):
@@ -408,7 +408,8 @@ class TasksPage(Gtk.Box):
                 row = Adw.ActionRow(title=GLib.markup_escape_text(ran_at(r, self.clock, True)), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))
-                row.add_suffix(Gtk.Image(icon_name=kind_icon(r.get("kind"))))
+                if kind_icon(r.get("kind")):
+                    row.add_suffix(Gtk.Image(icon_name=kind_icon(r.get("kind"))))
                 v = dim(r.get("version") or "")
                 v.add_css_class("mono")
                 row.add_suffix(v)

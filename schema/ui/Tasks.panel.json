@@ -177,7 +177,7 @@
         },
         {
           "name": "runs",
-          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. None: the dim line 'No runs yet'.",
+          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (alarm clock schedule, branch git push; none for a run by hand, whose run page says 'By hand') and the version, monospace, dim. No row has a play or re-run button. None: the dim line 'No runs yet'.",
           "copy": [
             "tasks.no_runs"
           ],
@@ -497,6 +497,20 @@
     }
   ],
   "removed": [
+    {
+      "name": "The play icon at the end of a run's row (a run started by hand)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "It looked like a button to run that run again. The owner: \"I'm never going to re-run older runs. Drop the play button from the rows.\" A run's row has no play or re-run control; the task's own Run (its list row and its page) starts a new run. The host keeps run_task, which that Run uses",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#275"
+        }
+      ]
+    },
     {
       "name": "Script group on a task's page, and the script and runtime in the task dialog",
       "apps": [

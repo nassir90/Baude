@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import accounts, autofix, desktopchats, models, transcripts, wire
+from baudelib import accounts, autofix, desktopchats, emissiontools, models, transcripts, wire
 
 
 IDLE_S = 30 * 60
@@ -234,7 +234,7 @@ class Session:
         self.login_heard = False  # (the turn going on's failed for want of it: counted once)
         self.busy = False         # at a turn
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
-        self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
+        self.acting = False       # at its browser's tools: an Emission call begun, nothing else since (turn_acting)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid, conn that sent it) sent at a turn, kept once it's over (Server.keep)
@@ -467,25 +467,30 @@ def context_kept(usage):
 
 
 def turn_acting(msg, was, streamed=False):
-    """Whether a turn's at its tools once msg (its agent's own, not a subagent's) has come, was being whether it
-    was before: a tool call's begun (its block started, as it's streamed; or come whole, as some agents send their
-    calls though they stream their text), and it is; text begun, and it isn't (it's writing to you). streamed: its
-    agent streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say),
-    not looked at. Thinking, and the rest, leave it as it was: between two calls it's still at them. Its result, or
-    its agent gone, ends it (from_claude, claude_exited)."""
+    """Whether a turn's at its browser's tools (Emission's: what its browser glows for) once msg (its agent's own, not
+    a subagent's) has come, was being whether it was before: a call of Emission's begun (its block started, as it's
+    streamed; or come whole, as some agents send their calls though they stream their text), and it is; another tool's
+    call, or text, begun, and it isn't (at other tools, or writing to you). streamed: its agent streams what it writes,
+    so text come whole is what was streamed already (late: after a call's begun, say), not looked at. Thinking, and
+    the rest, leave it as it was: between two of Emission's calls it's still at them. Its result, or its agent gone,
+    ends it (from_claude, claude_exited)."""
     if msg.get("type") == "stream_event":
         event = msg.get("event") or {}
         if event.get("type") != "content_block_start":
             return was
-        kinds = [(event.get("content_block") or {}).get("type")]
+        blocks = [event.get("content_block") or {}]
     else:
         content = (msg.get("message") or {}).get("content")
-        kinds = [c.get("type") for c in content if isinstance(c, dict)] if isinstance(content, list) else []
-    if any(k in ("tool_use", "server_tool_use") for k in kinds):
-        return True
+        blocks = [c for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+    calls = [b for b in blocks if b.get("type") in ("tool_use", "server_tool_use")]
+    if calls:
+        return any(str(b.get("name") or "").startswith(EMISSION_TOOL) for b in calls)
     if msg.get("type") != "stream_event" and streamed:
         return was
-    return False if "text" in kinds else was
+    return False if any(b.get("type") == "text" for b in blocks) else was
+
+
+EMISSION_TOOL = f"mcp__{emissiontools.NAME}__"  # (Emission's tools' names, as its agent calls them)
 
 
 BOT_PICTURE_MAX = wire.CONSTANTS["BOT_PICTURE_MAX"]  # (bytes: a Bot's picture, as sent)

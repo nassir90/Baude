@@ -327,6 +327,8 @@ def task_answer(n, text):
         answer = "Answered it with the tool."
     elif "answer_task tool" in text:
         answer = "Here's my answer, in words only."
+    elif "task finished" in text:
+        answer = "Noted."
     else:
         answer = "Looked into it: the script's fine, the input wasn't."
     say(answer, f"task{n}")
@@ -769,7 +771,7 @@ def main():
             if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
                 say(answer, f"answer{turns}")
                 result(answer)
-            elif re.search(r"An instance of the '.*' task (failed|asks:)|You haven't answered run", text):
+            elif re.search(r"An instance of the '.*' task (failed|finished|asks:)|You haven't answered run", text):
                 task_answer(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)

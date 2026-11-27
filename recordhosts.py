@@ -101,6 +101,7 @@ class RecordHosts:
         self.show_restart()
         for reader in [c for c in self.tabs.children() if isinstance(c, Reader) and c.chat]:
             reader.bot_changed()
+            reader.tell_seen()  # (its turn's end listed, in front of you: seen)
         store = self.store
         for r in network().remotes():  # (the one picked, known by another key now: by that one)
             if store.picked != HERE_HOST and store.picked in getattr(r, "was", ()) and host_key(r) != store.picked:

@@ -93,6 +93,17 @@ def chat_name(info):
     return (info.get("bot") or {}).get("name") or info.get("title")
 
 
+def unseen(listed):
+    """Has a chat's last turn's end (as its host lists it: ended, seen) not been seen yet, on any head of the mesh?"""
+    ended, seen = (listed or {}).get("ended"), (listed or {}).get("seen")
+    return isinstance(ended, dict) and (seen or {}).get("size", -1) < ended.get("size", 0)
+
+
+def seen_past(listed, size):
+    """Has a turn's end at size (its transcript's size then) been seen on a head of the mesh, or one after it?"""
+    return ((listed or {}).get("seen") or {}).get("size", -1) >= size
+
+
 def stopping_line(name, restart, left, total):
     """A host stopping (or restarting), how far along, as its menu bar item and the heads' banners say it."""
     if left is not None and left > 0:
@@ -124,6 +135,7 @@ class Remote:
         self.mirror_lock = threading.Lock()  # fetched before then isn't written; held as a mirror's written or let go of
         self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
         self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
+        self.ended = {}  # session id -> its last turn's end it's told of (turn_ended: {uuid, size, at: monotonic})
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
@@ -266,6 +278,9 @@ class Remote:
                                  "restart": bool(msg.get("restart")),
                                  "at": self.stopping["at"] if self.stopping else time.monotonic()}
                 self.network.changed()
+            elif op == "turn_ended":  # (said before any listing has it: what a notification of it is known by)
+                if wire.is_id(msg.get("uuid") or "") and isinstance(msg.get("size"), int):
+                    self.ended[msg.get("session")] = {"uuid": msg["uuid"], "size": msg["size"], "at": time.monotonic()}
             elif op != "ping":
                 self.answered(msg)
         with self.lock:

@@ -703,7 +703,8 @@ class WindowProc:
                 info = remote_info({**listed, "server": r})
                 self.tell_desktop(sid, wording.say("asks.waiting") if state == "waiting" else
                                   wording.say("meta.finished"),
-                                  title=baudelib.client.chat_name(listed), info=info)
+                                  title=baudelib.client.chat_name(listed), info=info,
+                                  turn=None if state == "waiting" else listed.get("ended"))
 
     def on_background_msg(self, proc, msg):
         t, req = msg.get("type"), msg.get("request") or {}

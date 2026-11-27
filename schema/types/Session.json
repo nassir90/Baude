@@ -202,6 +202,14 @@
         "$ref": "Ask.json"
       },
       "description": "What it's asking, not answered yet."
+    },
+    "ended": {
+      "anyOf": [{"$ref": "TurnEnd.json"}, {"type": "null"}],
+      "description": "Its last turn's end, as its host keeps it; null before one has ended (and always for a chat another chat's mesh tools, or a task's run, started)."
+    },
+    "seen": {
+      "anyOf": [{"$ref": "TurnEnd.json"}, {"type": "null"}],
+      "description": "The last turn's end that's been seen: a head showed it on screen (seen), or its user wrote in it since. Ended and not seen: every head keeps its notification of it, and its dot, till it is; then every head takes them back."
     }
   },
   "required": ["id"],

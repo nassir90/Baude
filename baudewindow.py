@@ -629,6 +629,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.connect("notify::is-active", lambda *_: self.is_active() and self.links_on_focus())
         self.connect("notify::is-active", lambda *_: self.is_active() and self.seen_chat())
         self.tabs.view.connect("notify::selected-page", lambda *_: self.seen_chat())
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (a key, wherever: you're here)
+        keys.connect("key-pressed", lambda *_: (self.acted(), False)[1])
+        self.add_controller(keys)
+        self.scroller.get_vadjustment().connect("value-changed", lambda *_: self.scrolled_chat())
         meshui.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
         self.signal_run_handler = self.signal_run.connect("notify::active", lambda sw, _p: self.set_signal(on=sw.get_active()))
         self.signal_show_handler = self.signal_show.connect("notify::active",

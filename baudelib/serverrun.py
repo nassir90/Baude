@@ -965,6 +965,11 @@ class ServerRunning:
                                                                                msg.get("limit")))
             if op == "subagents":
                 return reply("subagents", session=s.id, **self.read_subagents(s, msg.get("have"), msg.get("limit")))
+            if op == "seen":  # (a head shows it on screen, up to upto: its last turn's end seen once that reaches it)
+                upto = msg.get("upto")
+                if self.saw(s, upto if isinstance(upto, int) and not isinstance(upto, bool) else 0):
+                    self.changed()
+                return reply("seen_set", session=s.id, seen=s.meta.get("seen"))
             if op == "rename":
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "draft_save":  # (what's written in its box and not sent: kept here for every head, the last
@@ -1145,7 +1150,7 @@ class ServerRunning:
 
     # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
     THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
-                   "fork_from", "adopted", "desktop")
+                   "fork_from", "adopted", "desktop", "ended", "seen")
 
     def rotate(self, s):
         """(under the lock) A Bot's conversation archived as a past thread (a session of its own, read-only, named
@@ -1178,6 +1183,8 @@ class ServerRunning:
                         None if models.model_program(s.meta.get("model")) == "codex" else s.id))
         if not meta["cli_id"]:
             meta.pop("cli_id")
+        if meta.get("ended"):  # (its last turn's end, seen: rotated by hand, and read-only from now on)
+            meta["seen"] = dict(meta["ended"])
         thread = Session(self, meta)
         was = copy.deepcopy(s.meta)
         try:
@@ -1185,8 +1192,11 @@ class ServerRunning:
             for src, dst in self.rotated_files(s.id, thread.id):  # (2: the host's own transcript, its senders)
                 if os.path.exists(src):
                     os.replace(src, dst)
+            ended = s.meta.get("ended")
             for key in self.THREAD_KEYS:
                 s.meta.pop(key, None)
+            if ended:  # (the Bot's last turn's end, said seen: every head's notification of it taken back)
+                s.meta["seen"] = dict(ended)
             if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
                 s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
             s.meta.update(said=time.time(), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,

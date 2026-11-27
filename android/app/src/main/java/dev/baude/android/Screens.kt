@@ -256,6 +256,14 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             follow = !list.canScrollForward
         }
     }
+    LaunchedEffect(chat) { // (scrolled to its end, its last line drawn, or not: what's on screen seen, Mesh.tellSeen)
+        androidx.compose.runtime.snapshotFlow {
+            chat.loaded.value && list.layoutInfo.totalItemsCount > 0 && !list.canScrollForward && !list.isScrollInProgress
+        }.collect { end ->
+            chat.atEnd = end
+            if (end) Mesh.tellSeen(chat)
+        }
+    }
     LaunchedEffect(chat, chat.loaded.value) {
         if (!chat.loaded.value && chat.sender == null) return@LaunchedEffect
         kotlinx.coroutines.delay(1000)

@@ -62,7 +62,7 @@ object PhoneHost {
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
-        "access", "access_set", "draft_save", "ephemeral", "control",
+        "access", "access_set", "seen", "draft_save", "ephemeral", "control",
         "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
@@ -339,6 +339,7 @@ object PhoneHost {
             Op.BOT -> Msg.Bot.from(msg).session
             Op.BOT_PICTURE -> Msg.BotPicture.from(msg).session
             Op.MEMORY -> Msg.Memory.from(msg).session
+            Op.SEEN -> Msg.Seen.from(msg).session
             Op.DRAFT_SAVE -> Msg.DraftSave.from(msg).session
             else -> null
         }.orEmpty()
@@ -384,6 +385,10 @@ object PhoneHost {
             Op.CHAT_SIZE -> work.execute { reply(Op.CHAT_SIZE, "session" to s.id, *TelemetryStore.chatSize(transcript(s))) }
             Op.SENDERS -> senders(s)?.let { reply(Op.SENDERS, "session" to s.id, "senders" to JSONObject(it.toString()),
                 "rev" to s.meta.optInt("senders")) } ?: reply(Op.ERROR, "error" to "its sender store couldn't be read")
+            Op.SEEN -> { // (a head shows it on screen, up to upto: its last turn's end seen once that reaches it)
+                if (synchronized(lock) { saw(s, Msg.Seen.from(msg).upto?.toLong() ?: 0) }) changed()
+                reply(Op.SEEN_SET, "session" to s.id, "seen" to (synchronized(lock) { s.meta.optJSONObject("seen") } ?: JSONObject.NULL))
+            }
             Op.RENAME -> {
                 live(s) {
                     s.meta.put("title", Msg.Rename.from(msg).title.orEmpty().trim().take(200).ifBlank { null } ?: JSONObject.NULL)
@@ -609,6 +614,7 @@ object PhoneHost {
                     if (s.deleted) return
                     if (given != null && repeated(s, given)) return
                     if (sender != null) stamp(s, uuid, sender)
+                    else saw(s, null) // (its user wrote in it: what it last said has been seen)
                     if (s.busy) {
                         s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
                         s.queuedBy[uuid] = head
@@ -858,10 +864,34 @@ object PhoneHost {
         }
         if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
             s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)
-        val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns,
-            durationMs = ms).json()
+        val kept = synchronized(lock) { if (s.deleted) null else turnEnd(s) }
+        val end = Msg.TurnEnded(session = s.id, uuid = kept?.uuid, size = kept?.size, result = result, isError = error,
+            cost = 0, turns = turns, durationMs = ms).json()
         for (h in subscribed) h.send(end)
         changed()
+    }
+
+    /** (lock held) A turn's end kept (ended), as every head's notification of it is known: a uuid for it (its result
+     * has none of its own here) and its transcript's size now. An older end seen past it seen no more. None for one
+     * another chat's mesh tools started (spawned_by), or a side question's. */
+    private fun turnEnd(s: PhoneSession): Msg.TurnEnd? {
+        if (!s.meta.isNull("spawned_by") && s.meta.has("spawned_by") || s.meta.optBoolean("ephemeral")) return null
+        val end = Msg.TurnEnd(uuid = UUID.randomUUID().toString(), size = transcript(s).let { if (it.exists()) it.length() else 0L })
+        s.meta.put("ended", end.json())
+        if ((s.meta.optJSONObject("seen")?.optLong("size") ?: 0) > (end.size?.toLong() ?: 0)) s.meta.remove("seen")
+        save(s)
+        return end
+    }
+
+    /** (lock held) Its last turn's end seen, if it isn't yet: a head shows upto of its transcript, which reaches it, or
+     * (upto null) its user wrote in it. Whether that's news (kept: every head's told). */
+    private fun saw(s: PhoneSession, upto: Long?): Boolean {
+        val ended = s.meta.optJSONObject("ended") ?: return false
+        if (s.meta.optJSONObject("seen")?.toString() == ended.toString()) return false
+        if (upto != null && upto < ended.optLong("size")) return false
+        s.meta.put("seen", JSONObject(ended.toString()))
+        save(s)
+        return true
     }
 
     fun transcript(s: PhoneSession) = File(root, (if (s.meta.optBoolean("ephemeral")) "ephemeral/" else "transcripts/") + "${s.id}.jsonl")
@@ -984,6 +1014,7 @@ object PhoneHost {
             .put("acting", s.acting && s.busy && s.asks.isEmpty()).put("fork_from", JSONObject.NULL)
             .put("spawned_by", s.meta.opt("spawned_by") ?: JSONObject.NULL).put("start_key", s.meta.opt("start_key") ?: JSONObject.NULL)
             .put("always_allow", JSONArray(s.alwaysAllow.sorted()))
+            .put("ended", s.meta.optJSONObject("ended") ?: JSONObject.NULL).put("seen", s.meta.optJSONObject("seen") ?: JSONObject.NULL)
             .put("held", JSONArray()).put("senders", s.meta.optInt("senders"))
             .put("asks", JSONArray(s.asks.entries.map { (rid, m) ->
                 val r = m.optJSONObject("request") ?: JSONObject()

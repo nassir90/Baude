@@ -529,9 +529,11 @@ class SidebarMenu:
         claude going on in the background: working, or waiting while it asks you something."""
         if (p := background_proc(info.get("id"), type(self.win))) is not None:
             return "waiting" if p.asks else "working"
-        if info.get("remote") is not None:  # (a network session: as its server last said)
+        if info.get("remote") is not None:  # (a network session: as its server last said; between turns, done while
+            # its last turn's end hasn't been seen on any head of the mesh)
             return "inactive" if info.get("dead") else \
-                {"working": "working", "waiting": "waiting"}.get(info.get("remote_state"), "inactive")
+                {"working": "working", "waiting": "waiting"}.get(info.get("remote_state"),
+                                                                 "done" if info.get("unseen") else "inactive")
         path = info.get("path")
         try:
             mtime = os.stat(path).st_mtime

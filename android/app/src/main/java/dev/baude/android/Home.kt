@@ -726,7 +726,7 @@ private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
             else HeldTag(s)
-            StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
+            StatusDot(if (dead || off) "" else Mesh.dot(s), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
             MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
@@ -759,7 +759,7 @@ private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
             Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             HeldTag(item.s)
-            StatusDot(contact.state, contact.asking)
+            StatusDot(Mesh.dot(item.s), contact.asking)
             MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }

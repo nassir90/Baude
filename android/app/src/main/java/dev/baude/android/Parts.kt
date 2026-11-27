@@ -156,7 +156,7 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
             horizontalArrangement = if (lead == null && !left) Arrangement.Center else Arrangement.Start) {
             if (lead != null) {
                 lead()
-                Spacer(Modifier.width(Gap.avatarGap))
+                Spacer(Modifier.width(Tokens.Gap.avatarGap))
             }
             Column(horizontalAlignment = if (lead == null && !left) Alignment.CenterHorizontally else Alignment.Start) {
                 Text(title, style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -14,7 +14,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, counters, funccount, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
@@ -38,6 +38,7 @@ class ServerRunning:
         threading.Thread(target=self._emissions, daemon=True, name="emissions").start()
         threading.Thread(target=self._multiplexes, daemon=True, name="multiplexes").start()
         self.mesh.start()
+        counters.count_programs()  # (each program this process starts counted)
         self.telemetry.start()
         with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
             waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
@@ -377,6 +378,8 @@ class ServerRunning:
                     (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
                     break
                 conn.asking(msg)
+                began = time.perf_counter()
+                was = funccount.within("op", str(msg.get("op"))[:64])  # (what its handling runs: this op's, to aim)
                 try:
                     self.handle(conn, msg)
                 except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
@@ -388,6 +391,11 @@ class ServerRunning:
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
+                finally:
+                    funccount.within(*(was or ()))
+                if msg.get("op") != "ping":  # (counted with how long its handling took here: what it answers on a
+                    # thread of its own, till it's started)
+                    self.telemetry.counters.add("op", str(msg.get("op"))[:64], time.perf_counter() - began)
         finally:
             if getattr(conn, "agent_run", None) is not None:  # (its caller gone: the agent with it)
                 conn.agent_run.end()

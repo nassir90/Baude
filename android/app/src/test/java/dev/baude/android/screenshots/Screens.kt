@@ -508,6 +508,19 @@ abstract class Screens(private val theme: String) {
         screen("40e-telemetry-foot")
     }
 
+    // (the same page's Most Used and Slowest: what the user used most, what took longest each time)
+    @Test fun telemetryCounts() {
+        telemetryFixture()
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(2400.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        screen("40h-telemetry-counts")
+    }
+
     // (the same page's Errors, the latest opened: what was on screen, the screens before it, the code it ran)
     @Test fun telemetryErrors() {
         telemetryFixture()
@@ -689,6 +702,14 @@ abstract class Screens(private val theme: String) {
                             model("gpt-5.4-codex", null, 70, 120_000, 0, 9_800_000, 1_500_000, 22_000_000))))
                         .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 550_000, 2_400_000, 100_000_000, 6_400_000, 160_000_000)))))
                 }
+                "counted" -> out.put("counted", org.json.JSONArray(listOf(
+                    listOf("phone", "screen", "Composer.region", 41, 9340.0), listOf("baude", "part", "Composer.region/send button", 212, 3.4),
+                    listOf("baude", "screen", "Telemetry.dialog", 9, 410.0), listOf("phone", "part", "Settings.dialog|copy:telemetry.collect", 3, 0.02),
+                    listOf("record", "menu", "RecordMenu.menu/Settings…", 12, 0.9), listOf("host", "op", "input", 233, 1.2),
+                    listOf("baude", "part", "Sidebar.region/New session button", 17, 6.1), listOf("host", "op", "transcript", 88, 10.4),
+                    listOf("baude", "callback", "windowview.WindowView.load_history", 30, 8.7),
+                    listOf("baude", "callback", "windowview.WindowView.load_history_and_scroll_to_the_message_the_user_was_reading", 4, 2.1)).map { (app, kind, name, n, sec) ->
+                    org.json.JSONObject().put("app", app).put("kind", kind).put("name", name).put("count", n).put("seconds", sec) }))
                 "errors" -> out.put("errors", org.json.JSONArray(listOf(
                     org.json.JSONObject().put("app", "phone").put("kind", "send").put("fingerprint", "send:input:#")
                         .put("type", "input").put("message", "the server isn't there").put("count", 3)

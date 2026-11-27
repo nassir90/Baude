@@ -550,7 +550,7 @@ private fun FromRow(host: String, a: Msg.InboxAsk, all: List<Msg.InboxVersion>, 
     val name = a.bot?.ifBlank { null } ?: contact?.name ?: Wording.Sidebar.bot
     var menu by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = 20.dp)
+        Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = 20.dp.icon)
         val end = when {
             a.status == "stopped" -> Wording.Inbox.notAnswered
             a.sentToName != null -> Wording.Inbox.sentTo(bot = a.sentToName)
@@ -724,7 +724,7 @@ private fun RouteTo(host: String, a: Msg.InboxAsk, enabled: Boolean) {
                 MenuHeading(Wording.Inbox.sendToBot)
                 for (b in bots) MenuLine(onClick = { route(bot = b.id) }) {
                     LaunchedEffect(b.pictureKey) { Mesh.picture(b) }
-                    Avatar(b.name, Mesh.pictures[b.pictureKey], size = 22.dp)
+                    Avatar(b.name, Mesh.pictures[b.pictureKey], size = 20.dp.icon)
                     Text(b.name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
             }

@@ -4,7 +4,8 @@ its own process and of each app's on it: Baude's, Record's, Emission's, Multiple
 its own, and those its apps send), and the errors of every process on its machine (errorbook's: its own, and those its
 apps tell it), each row with the commit and wire version of the code that made it, while it's on; all read back over a stretch by telemetry_read, from any member of the
 mesh, and switched by telemetry_set (Settings → Telemetry, any head). Line profiling is switched on and off there too;
-what each process profiles is lineprofile.DEFAULTS unless telemetry_set names others for it (python3 -m
+what each process profiles is picked from what its counts show took the user's time (baudelib.aim, again every
+aim.ROTATE_S) unless telemetry_set names others for it (python3 -m
 baudelib.telemetry profile, from any member of the mesh). Kept in the host's state folder only,
 telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's),
 telemetry/errors.json (each error once, by its process and fingerprint), and
@@ -23,11 +24,11 @@ import sys
 import threading
 import time
 
-from baudelib import deps, errorbook, lineprofile, wire
+from baudelib import aim, counters, deps, errorbook, funccount, lineprofile, uiindex, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on)
 PROFILE_S = 30  # (how often what's profiled is saved)
-KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30, "errors": 90}  # (events back a year: the tokens' grid;
+KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30, "errors": 90, "counters": 90}  # (events back a year: the tokens' grid;
 # an error since it last happened)
 ERRORS_FLUSH_S = 1  # (errors written this long after one comes, those meanwhile with it)
 ERRORS_KEPT = 1000  # (errors kept: the latest by when they last happened)
@@ -51,6 +52,8 @@ _ERROR_LATEST = ("message", "file", "line", "function", "stack", "commit", "wire
                  "crumbs")  # (an error's, as it was the last time)
 CRUMB_ACTIONS = tuple(wire.DEFS["TelemetryCrumb"]["properties"]["action"]["enum"])
 CRUMBS_MAX = 8
+COUNT_KINDS = counters.KINDS
+COUNTS_MAX = 2000  # (one row's)
 
 
 def folder(state_dir):
@@ -114,11 +117,75 @@ def profile_of(p, app, ver=None):
              for x in p["lines"][:lineprofile.LINES_MAX] if isinstance(x, dict) and isinstance(x.get("file"), str)
              and isinstance(x.get("line"), int) and isinstance(x.get("function"), str)
              and isinstance(x.get("hits"), int) and _num(x.get("seconds"))]
-    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, **(ver or {})} if lines else None
+    picked = [aim.pick_of(x) for x in (p.get("picked") or [])[:aim.CANDIDATES]]
+    picked = [x for x in picked if x is not None]
+    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, "picked": picked,
+            **(ver or {})} if lines else None
 
 
 def _text(v, n=TEXT_MAX):
     return v[:n] if isinstance(v, str) and v else None
+
+
+def counters_of(row, app, ver=None):
+    """A told row of counts as it's kept, or None. A part named by its screen and a copy key ("Entity.kind|copy:key",
+    the phone's: it has no schema/ui of its own) named as its part, where the entity has one with that key."""
+    if not isinstance(row, dict) or not _num(row.get("at")) or not _num(row.get("from")) or \
+            not isinstance(row.get("counts"), list):
+        return None
+    counts = []
+    for c in row["counts"][:COUNTS_MAX]:
+        if not isinstance(c, dict) or c.get("kind") not in COUNT_KINDS or not isinstance(c.get("name"), str) or \
+                not c["name"] or not isinstance(c.get("count"), int) or c["count"] < 0 or not _num(c.get("seconds")):
+            continue
+        name = c["name"][:counters.NAME_MAX]
+        if c["kind"] in ("part", "menu") and "|copy:" in name:
+            entity, _, key = name.partition("|copy:")
+            part = uiindex.part_by_copy(entity, key)
+            name = f"{entity}/{part}" if part else f"{entity}/({key})"
+        counts.append({"kind": c["kind"], "name": name, "count": c["count"], "seconds": round(float(c["seconds"]), 6),
+                       "max": round(float(c["max"]), 6) if _num(c.get("max")) else None, **own_of(c)})
+    if not counts:
+        return None
+    return {"at": round(float(row["at"]), 3), "from": round(float(row["from"]), 3), "app": app, "counts": counts,
+            **(ver or {})}
+
+
+def own_of(c):
+    """A told function count's own time and what it ran within, as kept ({own, within}), or nothing."""
+    if c.get("kind") != "function" or not _num(c.get("own")):
+        return {}
+    within = [{"kind": w["kind"], "name": str(w["name"])[:counters.NAME_MAX], "seconds": round(float(w["seconds"]), 6)}
+              for w in (c.get("within") if isinstance(c.get("within"), list) else [])[:funccount.WITHIN_MAX]
+              if isinstance(w, dict) and w.get("kind") in ("part", "menu", "op") and isinstance(w.get("name"), str)
+              and _num(w.get("seconds"))]
+    return {"own": round(max(float(c["own"]), 0.0), 6), "within": within}
+
+
+def counted(rows, legacy=()):
+    """Rows of counts added up (TelemetryCount each, with its process): by process, kind and name, the most times
+    first. legacy: what Baude kept before counts (screen time per place, menu uses), added in as screens and menu
+    items named by their copy keys."""
+    out, own = {}, {}
+    for r in rows:
+        for c in r.get("counts") or []:
+            key = (r.get("app"), c["kind"], c["name"])
+            got = out.setdefault(key, [0, 0.0, 0.0])
+            got[0] += c["count"]
+            got[1] += c["seconds"]
+            got[2] = max(got[2], c.get("max") or 0)
+            if "own" in c:
+                mine = own.setdefault(key, [0.0, {}])
+                mine[0] += c["own"]
+                for w in c.get("within") or []:
+                    mine[1][(w["kind"], w["name"])] = mine[1].get((w["kind"], w["name"]), 0.0) + w["seconds"]
+    for app, kind, name, count, seconds in legacy:
+        got = out.setdefault((app, kind, name), [0, 0.0, 0.0])
+        got[0] += count
+        got[1] += seconds
+    return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None,
+             **counters.own_of(own.get((a, k, n)))}
+            for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (kv[0][1] == "function", -kv[1][0], -kv[1][1], kv[0][2]))]
 
 
 def crumb_of(c):
@@ -337,8 +404,10 @@ class Telemetry:
         self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
                       if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
+        self.picked, self.profiled_picks = {}, []  # (what each process's counts picked: aim's; the host's own now)
         self.errors_lock, self.errs, self.errors_due = threading.Lock(), None, None  # (errors.json's, as read;
         # its write waited for)
+        self.counters = counters.Counters()  # (its wire ops'; this process's own, COUNTERS, too where it has the book)
         self.book = errorbook.BOOK.claim("host", self._book_woke)  # (this process's own errors: the host's, unless
         # an app in it took them first)
 
@@ -349,13 +418,31 @@ class Telemetry:
         self._run()
 
     def functions(self, app):
-        """What app's process profiles while line profiling's on: what telemetry_set named for it, else the defaults."""
-        return list(self.named[app] if app in self.named else lineprofile.DEFAULTS[app])
+        """What app's process profiles while line profiling's on: what telemetry_set named for it, else what its
+        counts picked (aim's), else the developers' pick."""
+        if app in self.named:
+            return list(self.named[app])
+        return [p["function"] for p in self.picked.get(app) or []] or aim.defaults(app)
+
+    def aim(self, now=None):
+        """What each process profiles picked again from the last day's counts (while line profiling's on): its
+        apps told (Info's telemetry) if it's changed."""
+        now = time.time() if now is None else now
+        rows = counted(self.rows("counters", now - aim.SINCE_S, now, 0))
+        picked = {a: aim.picks(a, rows, now) for a in PROFILED}
+        if picked != self.picked:
+            self.picked = picked
+            self._profile_host()
+            self.changed()
 
     def _profile_host(self):
-        """The host's own profiler following the state: its functions while telemetry and line profiling are on."""
+        """The host's own profiler following the state: its functions while telemetry and line profiling are on (and
+        the functions counted, to aim it, in the same time)."""
+        picked = self.profiled_picks
+        self.profiled_picks = [] if "host" in self.named else list(self.picked.get("host") or [])
+        funccount.switch(self.on and self.profiling)
         if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
-            self._write("profiles", [last])
+            self._write("profiles", [{**last, "picked": picked}])
 
     def _run(self):
         with self.lock:
@@ -369,11 +456,23 @@ class Telemetry:
         if (last := self.profiler.set([])) is not None:
             self._write("profiles", [last])
         self._flush_errors()
+        self.flush_counts()
+
+    def flush_counts(self):
+        """What the host process counted since it last kept it, kept as a row (its ops'; and the process's own
+        callbacks and programs, where it's the host's)."""
+        rows = [r for r in (self.counters.take(), counters.COUNTERS.take() if self.book else None) if r]
+        if not rows or not self.on:
+            return
+        row = rows[0] if len(rows) == 1 else {"at": max(r["at"] for r in rows), "from": min(r["from"] for r in rows),
+                                              "counts": [c for r in rows for c in r["counts"]]}
+        self._write("counters", [{**row, "app": "host"}])
 
     # ---- its state
     def state(self):
         """As the wire's TelemetryState has it."""
         profiling = [{"app": a, "functions": self.functions(a), "default": a not in self.named,
+                      "picked": [] if a in self.named else list(self.picked.get(a) or []),
                       "error": self.profiler.error if a == "host" else self.errors.get(a)} for a in PROFILED]
         return {"on": self.on, "line_profiler": self.has_lp, "line_profiling": self.profiling, "profiling": profiling}
 
@@ -392,6 +491,8 @@ class Telemetry:
                     self.fronts.clear()
         if isinstance(msg.get("line_profiling"), bool):
             self.profiling = msg["line_profiling"]
+            if self.profiling:
+                self.aim()
         app = msg.get("app")
         if app in PROFILED and msg.get("default") is True:
             self.named.pop(app, None)
@@ -435,6 +536,8 @@ class Telemetry:
             self._write("events", events)
             if isinstance(msg.get("pid"), int) and self._front(msg["pid"], events):
                 self.changed()
+        if (c := counters_of(msg.get("counters"), app, ver)) is not None:
+            self._write("counters", [c])
         if app in PROFILED and (p := profile_of(msg.get("profile"), app, ver)) is not None:
             self._write("profiles", [p])
 
@@ -629,14 +732,21 @@ class Telemetry:
         return {"at": round(now, 3), "load": load, **memory(), "procs": procs}
 
     def _sampling(self):
-        profiled = time.monotonic()
+        profiled = counted_at = time.monotonic()
+        aimed = int(time.time() // aim.ROTATE_S)
         while not self.wake.wait(SAMPLE_S):
             try:
+                if time.monotonic() - counted_at >= counters.FLUSH_S:
+                    counted_at = time.monotonic()
+                    self.flush_counts()
+                if self.profiling and int(time.time() // aim.ROTATE_S) != aimed:
+                    aimed = int(time.time() // aim.ROTATE_S)
+                    self.aim()
                 self._write("metrics", [self.sample()])
                 if time.monotonic() - profiled >= PROFILE_S:
                     profiled = time.monotonic()
                     if (p := self.profiler.snapshot()) is not None:
-                        self._write("profiles", [p])
+                        self._write("profiles", [{**p, "picked": list(self.profiled_picks)}])
             except Exception as e:  # noqa: BLE001 (a sample gone wrong: said, and the next one taken)
                 self.log(f"telemetry: {type(e).__name__}: {e}")
 
@@ -683,6 +793,38 @@ class Telemetry:
             out["usage"] = usage(self.rows("events", start, end, 0))
         if "errors" in what:
             out["errors"] = self.error_rows(start, end, limit)
+        if "counters" in what:
+            out["counters"] = self.rows("counters", start, end, limit)
+        if "counted" in what:
+            out["counted"] = counted(self.rows("counters", start, end, 0), self.legacy(start, end))[:limit]
+        return out
+
+    def legacy(self, start, end):
+        """What Baude kept before counts, in telemetry/YYYY-MM-DD.jsonl (a line a telling: {at, app, seconds: {place:
+        s}, uses: {name: n}}): (app, kind, name, count, seconds) each, from start to end."""
+        out = []
+        try:
+            names = [n for n in os.listdir(self.dir) if n.endswith(".jsonl")]
+        except OSError:
+            return out
+        for n in names:
+            try:
+                with open(os.path.join(self.dir, n), encoding="utf-8") as f:
+                    lines = f.readlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict) or not _num(d.get("at")) or not start <= d["at"] <= end or \
+                        d.get("app") not in APPS:
+                    continue
+                out += [(d["app"], "screen", str(p)[:counters.NAME_MAX], 0, float(v))
+                        for p, v in (d.get("seconds") or {}).items() if _num(v)]
+                out += [(d["app"], "menu", str(u)[:counters.NAME_MAX], v, 0.0)
+                        for u, v in (d.get("uses") or {}).items() if isinstance(v, int)]
         return out
 
 
@@ -831,6 +973,12 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage", "err
     if "errors" in what:
         out["errors"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items() for r in rep.get("errors") or []),
                                key=lambda r: -r["last"])
+    if "counters" in what:
+        out["counters"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items()
+                                  for r in rep.get("counters") or []), key=lambda r: r["at"])
+    if "counted" in what:
+        out["counted"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items()
+                                 for r in rep.get("counted") or []), key=lambda r: (r["kind"] == "function", -r["count"], -r["seconds"]))
     if "usage" in what:
         out["usage"] = usage(out["events"])
     if "events" not in what:
@@ -840,11 +988,15 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage", "err
 
 def main(argv):
     """python3 -m baudelib.telemetry [hours]: every host's last hours, as JSON. python3 -m baudelib.telemetry errors
-    [hours]: every host's errors in its last hours (default a week), the latest first. python3 -m baudelib.telemetry profile
+    [hours]: every host's errors in its last hours (default a week), the latest first. python3 -m baudelib.telemetry
+    counted [hours]: every host's counts added up over its last hours (default a day), the most times first. python3 -m baudelib.telemetry profile
     [--host ID] [--on | --off] [APP [NAME ...] | APP --default]: line profiling switched, or what APP's process
     profiles named (NAME: a function or module's dotted name; none: nothing) or its defaults again, on every host in
     the mesh (or ID's only); each host's telemetry state after it, as JSON."""
     import argparse
+    if argv[:1] == ["counted"]:
+        hours = float(argv[1]) if len(argv) > 1 else 24
+        return json.dump(gather(time.time() - hours * 3600, what=("counted",))["counted"], sys.stdout, indent=1)
     if argv[:1] == ["errors"]:
         hours = float(argv[1]) if len(argv) > 1 else 24 * 7
         return json.dump(gather(time.time() - hours * 3600, what=("errors",))["errors"], sys.stdout, indent=1)

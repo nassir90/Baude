@@ -209,7 +209,11 @@ object PhoneHost {
     fun take(head: Head, msg: JSONObject?) {
         work.execute {
             try {
-                if (msg == null) gone(head) else handle(head, msg)
+                if (msg == null) gone(head) else {
+                    val began = System.nanoTime()
+                    handle(head, msg)
+                    msg.optString("op").takeIf { it != Op.PING }?.let { PhoneCounts.add("op", it.take(64), (System.nanoTime() - began) / 1e9) }
+                }
             } catch (e: Exception) {
                 msg?.let { head.send(Msg.Error(req = it.opt("req") as? Number,
                     error = "${e.javaClass.simpleName}: ${e.message}").json()) }

@@ -49,6 +49,10 @@
     "action_open": "Opened",
     "error_version": "Code Version",
     "version_of": "{$commit} · Wire {$wire}",
-    "error_first": "First Happened"
+    "error_first": "First Happened",
+    "slowest": "Slowest",
+    "average_ms": "{$ms} ms Each",
+    "picked_by": "Picked by Its Own Time: {$seconds}s in the Last Day",
+    "picked_within": "Mostly in {$name}: {$ms} ms Each"
   }
 }

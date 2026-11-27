@@ -418,7 +418,7 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             IconButton(Adwaita.UserTrash, Wording.Common.delete, onClick = delete)
         }
         Scrolled {
-            BoxedList(listOf(true, false), "") { failure ->
+            if (t.runtime != "bot") BoxedList(listOf(true, false), "") { failure ->
                 if (failure) SwitchRow(Wording.Tasks.notifyFailure, null, t.notifyFailure ?: true) { on -> notify(true, on) }
                 else SwitchRow(Wording.Tasks.notifyExit, null, t.notifyExit ?: false) { on -> notify(false, on) }
             }

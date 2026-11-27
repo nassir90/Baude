@@ -66,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of two switch rows, 'Notify on failure' and 'Notify on graceful exit', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of two switch rows, 'Notify on failure' and 'Notify on graceful exit' (none for a task given its Bot as a turn), then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -101,7 +101,7 @@
       "parts": [
         {
           "name": "notify switches",
-          "shows": "Above the groups, its own small boxed list of two switch rows (no subtitles, titles not markup). 'Notify on failure' is on while a failed run is sent to the Bot (on for a new task). 'Notify on graceful exit' is on while a run that finishes with exit 0, not stopped, is told to the Bot, for its information: the Bot isn't asked to act (off for a new task). A task kept before there were two has its one switch's value as 'Notify on failure', and 'Notify on graceful exit' off.",
+          "shows": "Above the groups, its own small boxed list of two switch rows (no subtitles, titles not markup). 'Notify on failure' is on while a failed run is sent to the Bot (on for a new task). 'Notify on graceful exit' is on while a run that finishes with exit 0, not stopped, is told to the Bot, for its information, once the Bot's idle: the Bot isn't asked to act, and no more than one such notice per task waits (a newer run's replaces it); a run the Bot itself started with run_task and waited for isn't told (off for a new task). A task kept before there were two has its one switch's value as 'Notify on failure', and 'Notify on graceful exit' off.",
           "copy": [
             "tasks.notify_failure",
             "tasks.notify_exit"
@@ -125,7 +125,7 @@
             },
             {
               "said": "\"Hand failures to the Bot\" -> \"Notify on failure\" + \"Notify on graceful exit\"",
-              "rule": "Every app has two switches on a task's page, 'Notify on failure' (the old 'Hand failures to the Bot', its value kept for a task made before) and 'Notify on graceful exit' (off unless set). A run that finishes with exit 0 and isn't stopped, of a task with the second on, sends its Bot a message in a failure's shape, 'An instance of the '<task>' task finished', the same table, and the last thing the run said (else the end of its output); the Bot isn't asked to act. The Bot's set_task takes both.",
+              "rule": "Every app has two switches on a task's page, 'Notify on failure' (the old 'Hand failures to the Bot', its value kept for a task made before) and 'Notify on graceful exit' (off unless set). A run that finishes with exit 0 and isn't stopped, of a task with the second on, sends its Bot a message in a failure's shape, 'An instance of the '<task>' task finished', the same table, and the last thing the run said (else the end of its output, if it printed any); the Bot isn't asked to act. The Bot's set_task takes both.",
               "decided": "2026-11-27",
               "source": [
                 {

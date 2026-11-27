@@ -855,6 +855,7 @@ One of a Bot's tasks run now, by hand.
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
 | `inputs` | object |  | Its form, filled. |
+| `waited` | boolean/null |  | Its Bot waits for the run's end in a tool call (its own run_task, wait true): it isn't told the run finished. |
 
 #### `seen` (Seen)
 
@@ -3240,6 +3241,7 @@ One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a t
 | `form` | array/null of TaskField |  | Its form's fields. |
 | `triggers` | array/null of TaskTrigger |  | What starts it. |
 | `notify_failure` | boolean/null |  | A run that fails is sent to its Bot, with its log. |
+| `fallback` | boolean/null |  | Notify on failure under its old name, for older heads: read when notify_failure isn't given, and sent as notify_failure is. |
 | `notify_exit` | boolean/null |  | A run that finishes, exit 0 and not stopped, is told to its Bot, with the end of its output; the Bot isn't asked to act. |
 | `timeout_s` | integer/null |  | The longest a run may take; it's stopped after. |
 | `paused` | boolean/null |  | Its triggers don't fire (it can still be run by hand). |

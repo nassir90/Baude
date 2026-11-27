@@ -60,6 +60,13 @@
       ],
       "description": "A run that fails is sent to its Bot, with its log."
     },
+    "fallback": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Notify on failure under its old name, for older heads: read when notify_failure isn't given, and sent as notify_failure is."
+    },
     "notify_exit": {
       "type": [
         "boolean",

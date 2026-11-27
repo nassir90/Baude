@@ -462,9 +462,10 @@ class Mesh:
 
     def run_task(self, a):
         sid = self._bot(a)
-        run = self.request(self.local, {"op": "run_task", "session": sid, "id": a["id"],
-                                        "inputs": a.get("inputs") or {}})["run"]
         own = sid == self.me  # (its asks are this turn's to answer, once it's over: never waited on in it)
+        run = self.request(self.local, {"op": "run_task", "session": sid, "id": a["id"],
+                                        "inputs": a.get("inputs") or {},
+                                        "waited": own and a.get("wait", False) is True})["run"]
         end = time.monotonic() + WAIT_MAX_S
         while a.get("wait", not own) is True and time.monotonic() < end:
             got = self.task_run({"session": sid, "run": run["id"]})

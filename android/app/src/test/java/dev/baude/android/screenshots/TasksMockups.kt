@@ -193,8 +193,8 @@ abstract class TasksMockups(private val theme: String) {
                     .padding(top = 24.dp)) {
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task finished\n\n" +
                         table + "| end time | 2026-11-27 00:05:11 |\n| duration | 48.0 s |\n" + tail +
-                        "| exit code | 0 |\n\nIt finished with exit code 0. This is for your information; nothing is asked of you.\n\n" +
-                        "The end of its output:\n\nuploaded 14 files to staging"), from)
+                        "| exit code | 0 |\n\nThis is for your information; nothing is asked of you.\n\n" +
+                        "It last said:\n\nuploaded 14 files to staging"), from)
                 }
             }
         }

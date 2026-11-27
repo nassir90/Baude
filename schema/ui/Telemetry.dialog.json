@@ -443,7 +443,7 @@
     },
     {
       "name": "Line Profiling",
-      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is Baude's developers' pick, shipped with the code (lineprofile.DEFAULTS), unless telemetry_set from any member of the mesh names others for it on that host (python3 -m baudelib.telemetry profile); nothing on the page names or edits them. Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
+      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is Baude's developers' pick, shipped with the code (lineprofile.DEFAULTS), unless telemetry_set from any member of the mesh names others for it on that host (python3 -m baudelib.telemetry profile); nothing on the page names or edits them. Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed), gone, with the switch in its place, as soon as line_profiler's installed there (looked for again each time the page asks; no restart). Not on the phone's own host (no Python there).",
       "copy": [
         "telemetry.line_profiling",
         "telemetry.top_lines",
@@ -487,6 +487,16 @@
           "source": [
             {
               "issue": "BaudeInternal#286"
+            }
+          ]
+        },
+        {
+          "said": "Line Profiling keeps saying it needs line_profiler after line_profiler's been installed (paraphrased)",
+          "rule": "Every app finds a dependency installed while the host (or the app) runs, without a restart: a Python module installed with pip --user is looked for again in the user's site-packages, even one that didn't exist when the process started, each time the page asks (its refresh, Try Again, the page opened), so Line Profiling and Settings → Dependencies stop saying it's missing as soon as it's there",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#309"
             }
           ]
         }

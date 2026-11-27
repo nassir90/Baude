@@ -616,6 +616,104 @@ class HostHello(Obj):
     """
 
 
+class InboxAnswer(Obj):
+    """How an ask was answered: the button pressed and the form's values.
+
+        button (integer): The button's index.
+        label (string): The button's label.
+        values (object): The form's values, checked against its fields.
+        by (string or None): A Bot's name, if a Bot answered it (sent to it, or the asking task's); none: a
+            person.
+        at (number): When (seconds since the epoch).
+    """
+
+
+class InboxAsk(Obj):
+    """A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it:
+    across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may
+    manage the asking Bot is told it as it changes (inbox_changed).
+
+        id (string): The ask's id.
+        session (string): The asking task's Bot's session id.
+        bot (string or None): That Bot's name.
+        task (string): The task's id.
+        task_name (string): The task's name.
+        run (string): The asking run's id.
+        at (number): When it was raised (seconds since the epoch).
+        status ('waiting' | 'answered' | 'withdrawn' | 'stopped'): waiting: for an answer; answered (answer:
+            how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it
+            unanswered.
+        versions (array of InboxVersion): Every version of it, oldest first: the last is what's answered.
+        proposal (InboxProposal or None): A model's answer waiting to be confirmed, if one was asked for.
+        sent_to (string or None): The Bot it's been sent to answer (its session id), till it does.
+        sent_to_name (string or None): That Bot's name.
+        answer (InboxAnswer or None): How it was answered.
+    """
+    _refs = {"versions": "InboxVersion", "proposal": "InboxProposal", "answer": "InboxAnswer"}
+
+
+class InboxButton(Obj):
+    """One of an ask's buttons, as its task gives it: pressing it tells the task, with the form's values. Sized to its
+    label, wrapping with the others as a whole.
+
+        label (string): What it says.
+        style ('primary' | 'secondary' | 'blue' | 'teal' | 'green' | 'yellow' | 'orange' | 'red' | 'pink' |
+            'purple' | 'slate'): How it's drawn: primary (the accent), secondary (plain, the default), or one of
+            the accent palette's colours (schema/tokens accent.*).
+        picture (string or None): One of the ask's pictures, by its name, drawn over its label: a picture
+            button.
+    """
+
+
+class InboxPicture(Obj):
+    """One of an ask's version's pictures, as it's listed: its bytes are fetched by its name (inbox_picture).
+
+        name (string): Its name, as the body and buttons use it.
+        mime (string): What it is (image/png, image/jpeg, ...).
+        size (integer): How many bytes it is.
+        width (integer or None): Its width in pixels, if it could be read.
+        height (integer or None): Its height in pixels, if it could be read.
+    """
+
+
+class InboxPictureData(Obj):
+    """A picture given with an ask (inbox_raise, inbox_revise): its bytes.
+
+        name (string): Its name, as the body and buttons use it (letters, digits, . _ -).
+        mime (string or None): What it is (found from its bytes, if none).
+        data (string): Its bytes, base64.
+    """
+
+
+class InboxProposal(Obj):
+    """A model's, or the asking Bot's, answer to an ask (Route to → Have a model answer; a Bot's answer_ask after the
+    person wrote to it): shown for the person to confirm or change, taking effect only as they press a button.
+
+        model (string): The model's value (a Bot's: its name).
+        name (string): The model or Bot, as it's named.
+        status ('answering' | 'ready' | 'failed'): answering: it's being asked; ready: its answer's here;
+            failed: it couldn't answer (text: why).
+        button (integer or None): The button it would press (its index), once it's answered.
+        values (object or None): The form's values as it would fill them.
+        text (string or None): Why, in a line or two (or why it failed).
+    """
+
+
+class InboxVersion(Obj):
+    """One version of an ask: as its task raised it, or as it (or its Bot) put it anew.
+
+        n (integer): Its number among the ask's versions, from 1, kept as older ones go.
+        at (number): When it came (seconds since the epoch).
+        by (string or None): A Bot's name, if a Bot put it; none: the task.
+        title (string or None): What it's called in the Inbox's list.
+        body (string): What it says (Markdown).
+        pictures (array of InboxPicture): Its pictures.
+        buttons (array of InboxButton): Its buttons.
+        form (array of TaskField): Its form's fields.
+    """
+    _refs = {"pictures": "InboxPicture", "buttons": "InboxButton", "form": "TaskField"}
+
+
 class Info(Obj):
     """What a host is, as its hello says (and sessions carries).
 
@@ -2239,6 +2337,48 @@ class HelloReply(Obj):
     _refs = {"server": "Info"}
 
 
+class InboxAnswered(Obj):
+    """inbox_wait's answer: the ask as it is.
+
+        ask (string): The ask's id.
+        status ('waiting' | 'answered' | 'withdrawn' | 'stopped'): Its status (waiting: not answered within the
+            timeout).
+        answer (InboxAnswer or None): How it was answered.
+    """
+    _refs = {"answer": "InboxAnswer"}
+
+
+class InboxDone(Obj):
+    """inbox_withdraw's, inbox_press's, inbox_route's, inbox_say's and inbox_remove's answer: done.
+
+        ask (string): The ask's id.
+    """
+
+
+class InboxPictureReply(Obj):
+    """inbox_picture's answer.
+
+        mime (string): What it is.
+        data (string): Its bytes, base64.
+    """
+
+
+class InboxRaised(Obj):
+    """inbox_raise's and inbox_revise's answer.
+
+        ask (string): The ask's id.
+        version (integer): Its version now (1 for the first).
+    """
+
+
+class InboxReply(Obj):
+    """inbox's answer.
+
+        asks (array of InboxAsk): The asks, oldest first.
+    """
+    _refs = {"asks": "InboxAsk"}
+
+
 class InferData(Obj):
     """infer's and files's answer: some of its body.
 
@@ -2712,11 +2852,14 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "DockerContext": DockerContext, "DockerFault": DockerFault, "DockerPage": DockerPage,
          "DockerRow": DockerRow, "DockerSection": DockerSection, "Edit": Edit, "FoundLink": FoundLink,
          "GitFound": GitFound, "GitMade": GitMade, "GitParent": GitParent, "Gone": Gone, "GoneFolder": GoneFolder,
-         "Head": Head, "HeldMessage": HeldMessage, "HostHello": HostHello, "Info": Info, "KubeColumn": KubeColumn,
-         "KubeContainer": KubeContainer, "KubeContext": KubeContext, "KubeFault": KubeFault, "KubePage": KubePage,
-         "KubeRef": KubeRef, "KubeRow": KubeRow, "KubeSample": KubeSample, "KubeSection": KubeSection,
-         "KubeShare": KubeShare, "KubeShareColumn": KubeShareColumn, "KubeSummary": KubeSummary, "KubeUse": KubeUse,
-         "Member": Member, "MemberInfo": MemberInfo, "MeshView": MeshView, "Notebook": Notebook, "OutLink": OutLink,
+         "Head": Head, "HeldMessage": HeldMessage, "HostHello": HostHello, "InboxAnswer": InboxAnswer,
+         "InboxAsk": InboxAsk, "InboxButton": InboxButton, "InboxPicture": InboxPicture,
+         "InboxPictureData": InboxPictureData, "InboxProposal": InboxProposal, "InboxVersion": InboxVersion,
+         "Info": Info, "KubeColumn": KubeColumn, "KubeContainer": KubeContainer, "KubeContext": KubeContext,
+         "KubeFault": KubeFault, "KubePage": KubePage, "KubeRef": KubeRef, "KubeRow": KubeRow,
+         "KubeSample": KubeSample, "KubeSection": KubeSection, "KubeShare": KubeShare,
+         "KubeShareColumn": KubeShareColumn, "KubeSummary": KubeSummary, "KubeUse": KubeUse, "Member": Member,
+         "MemberInfo": MemberInfo, "MeshView": MeshView, "Notebook": Notebook, "OutLink": OutLink,
          "PageNow": PageNow, "PointerEvent": PointerEvent, "Provider": Provider, "ProviderModel": ProviderModel,
          "Proxy": Proxy, "PullInfo": PullInfo, "PullLink": PullLink, "QueuedMessage": QueuedMessage,
          "Record": Record, "RestartBlocker": RestartBlocker, "RestartState": RestartState, "Running": Running,
@@ -2743,18 +2886,19 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
          "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
          "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
-         "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
-         "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd,
-         "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
-         "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
-         "NotesReply": NotesReply, "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed,
-         "Relaying": Relaying, "Renamed": Renamed, "RestartPending": RestartPending,
-         "ResumeCancelled": ResumeCancelled, "Rotated": Rotated, "SeenSet": SeenSet, "SendersReply": SendersReply,
-         "SignalNamesReply": SignalNamesReply, "Started": Started, "Stopped": Stopped,
-         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskAnswered": TaskAnswered,
-         "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply, "TaskReported": TaskReported,
-         "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted, "TasksReply": TasksReply,
-         "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
+         "HeldReply": HeldReply, "HelloReply": HelloReply, "InboxAnswered": InboxAnswered, "InboxDone": InboxDone,
+         "InboxPictureReply": InboxPictureReply, "InboxRaised": InboxRaised, "InboxReply": InboxReply,
+         "InferData": InferData, "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined,
+         "KubeContexts": KubeContexts, "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows,
+         "KubeText": KubeText, "Linking": Linking, "LoginEnd": LoginEnd, "LoginSaid": LoginSaid,
+         "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply, "NotesReply": NotesReply,
+         "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
+         "Renamed": Renamed, "RestartPending": RestartPending, "ResumeCancelled": ResumeCancelled,
+         "Rotated": Rotated, "SeenSet": SeenSet, "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply,
+         "Started": Started, "Stopped": Stopped, "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer,
+         "TaskAnswered": TaskAnswered, "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply,
+         "TaskReported": TaskReported, "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted,
+         "TasksReply": TasksReply, "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
          "TelemetrySetReply": TelemetrySetReply, "TerminalEnd": TerminalEnd, "TerminalOpened": TerminalOpened,
          "TerminalOut": TerminalOut, "TerminalsReply": TerminalsReply, "ThemeRemoved": ThemeRemoved,
          "ThemeSaved": ThemeSaved, "ThemesReply": ThemesReply, "TranscriptReply": TranscriptReply,
@@ -3941,6 +4085,127 @@ class Ops(Area):
             line (string): The line.
         """
         return self._call("in", {"line": line}, host, Obj)
+
+    def inbox(self, *, host=None):
+        """inbox (Inbox): The host's asks waiting (and those stopped, till they're removed) of the Bots the head may
+        manage: the Inbox. Changes come as inbox_changed to a head that's subscribed.
+        """
+        return self._call("inbox", {}, host, Obj)
+
+    def inbox_picture(self, *, ask=None, version=None, name=None, host=None):
+        """inbox_picture (InboxPictureGet): One of an ask's pictures, its bytes.
+
+            ask (string): The ask's id.
+            version (integer): Its version (1 for the first).
+            name (string): The picture's name.
+        """
+        return self._call("inbox_picture", {"ask": ask, "version": version, "name": name}, host, Obj)
+
+    def inbox_press(self, *, ask=None, button=None, values=None, as_=None, version=None, host=None):
+        """inbox_press (InboxPress): A button of a waiting ask pressed, with its form's values: its task told
+        (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as:
+        its own session id): one of an ask sent to that Bot answers it, one of the Bot's own task's is a proposal
+        for the person to confirm.
+
+            ask (string): The ask's id.
+            button (integer): The button's index.
+            values (object or None): The form's values, by its fields' names.
+            as (string or None): A Bot answering it: its own session id.
+            version (integer or None): The version (its n) it was pressed on: refused if the ask has a newer
+                one.
+        """
+        return self._call("inbox_press", {"ask": ask, "button": button, "values": values, "as": as_,
+                                          "version": version}, host, Obj)
+
+    def inbox_raise(self, *, run=None, token=None, title=None, body=None, pictures=None, buttons=None, form=None,
+                    host=None):
+        """inbox_raise (InboxRaise): A running task's script raises an ask of a person (on the host's own socket, with
+        its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn
+        or its run ends. Answered as a button's pressed (inbox_wait).
+
+            run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
+            token (string): Its run's token (BAUDE_TASK_TOKEN).
+            title (string or None): What it's called in the Inbox's list (its body's first line, if none).
+            body (string): What it says: Markdown, as a message is written. ![alt](name) on a line of its own,
+                or alone in a table's cell, shows one of its pictures there (by its name).
+            pictures (array or None of InboxPictureData): Its pictures, each by the name its body and buttons
+                use.
+            buttons (array of InboxButton): What may be pressed: each tells the task, with the form's values.
+            form (array or None of TaskField): Fields to fill (as a task's form has them): their values go with
+                the button pressed.
+        """
+        return self._call("inbox_raise", {"run": run, "token": token, "title": title, "body": body,
+                                          "pictures": pictures, "buttons": buttons, "form": form}, host, Obj)
+
+    def inbox_remove(self, *, ask=None, host=None):
+        """inbox_remove (InboxRemove): A stopped ask taken out of every Inbox (and off the host).
+
+            ask (string): The ask's id.
+        """
+        return self._call("inbox_remove", {"ask": ask}, host, Obj)
+
+    def inbox_revise(self, *, ask=None, run=None, token=None, title=None, body=None, pictures=None, buttons=None,
+                     form=None, host=None):
+        """inbox_revise (InboxRevise): A new version of a waiting ask: its task's script's (run, token), or the asking
+        Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it
+        again, waiting. Fields left out are the last version's.
+
+            ask (string): The ask's id.
+            run (string or None): The asking run's id: a script's.
+            token (string or None): Its run's token: a script's.
+            title (string or None): What it's called in the Inbox's list (its body's first line, if none).
+            body (string or None): What it says now (Markdown).
+            pictures (array or None of InboxPictureData): Its pictures, each by the name its body and buttons
+                use.
+            buttons (array or None of InboxButton): Its buttons now.
+            form (array or None of TaskField): Fields to fill (as a task's form has them): their values go with
+                the button pressed.
+        """
+        return self._call("inbox_revise", {"ask": ask, "run": run, "token": token, "title": title, "body": body,
+                                           "pictures": pictures, "buttons": buttons, "form": form}, host, Obj)
+
+    def inbox_route(self, *, ask=None, model=None, effort=None, bot=None, host=None):
+        """inbox_route (InboxRoute): A waiting ask handed on: model, a model of the host's asked to answer it (its
+        answer shown for confirming: proposal); bot, a Bot sent it to answer (its answer_ask tool). Neither: a
+        model's answer let go of.
+
+            ask (string): The ask's id.
+            model (string or None): A model's value, as the host lists it.
+            effort (string or None): Its effort.
+            bot (string or None): A Bot's session id, on this host.
+        """
+        return self._call("inbox_route", {"ask": ask, "model": model, "effort": effort, "bot": bot}, host, Obj)
+
+    def inbox_say(self, *, ask=None, text=None, host=None):
+        """inbox_say (InboxSay): What a person wrote in an ask's box, sent the asking task's Bot as a message (with the
+        ask): it may answer the ask or put a new version of it.
+
+            ask (string): The ask's id.
+            text (string): What they wrote.
+        """
+        return self._call("inbox_say", {"ask": ask, "text": text}, host, Obj)
+
+    def inbox_wait(self, *, ask=None, run=None, token=None, timeout=None, host=None):
+        """inbox_wait (InboxWait): A task's script's ask's answer (run, token), waited for: till it's answered (or
+        withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).
+
+            ask (string): The ask's id.
+            run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
+            token (string): Its run's token (BAUDE_TASK_TOKEN).
+            timeout (number or None): How long to wait, in seconds (0: not at all; none: till it's answered).
+        """
+        return self._call("inbox_wait", {"ask": ask, "run": run, "token": token,
+                                         "timeout": timeout}, host, Obj, waited(timeout))
+
+    def inbox_withdraw(self, *, ask=None, run=None, token=None, host=None):
+        """inbox_withdraw (InboxWithdraw): A waiting ask taken back by its task's script (run, token): out of every
+        Inbox.
+
+            ask (string): The ask's id.
+            run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
+            token (string): Its run's token (BAUDE_TASK_TOKEN).
+        """
+        return self._call("inbox_withdraw", {"ask": ask, "run": run, "token": token}, host, Obj)
 
     def infer(self, *, provider=None, method=None, path=None, headers=None, body=None, host=None):
         """infer (Infer): An HTTP request to one of this machine's model providers (an OpenAI-compatible server's: path

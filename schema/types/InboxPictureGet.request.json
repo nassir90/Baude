@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of an ask's pictures, its bytes.",
+  "properties": {
+    "op": {
+      "const": "inbox_picture",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "version": {
+      "type": "integer",
+      "description": "Its version (1 for the first)."
+    },
+    "name": {
+      "type": "string",
+      "description": "The picture's name."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "version",
+    "name"
+  ],
+  "additionalProperties": false
+}

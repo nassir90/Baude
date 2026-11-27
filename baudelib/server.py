@@ -25,7 +25,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, deciders, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    access, accounts, codex, deciders, desktopchats, emissionlink, inbox, mesh, multiplexlink, phonebrowser, models, notes, providers,
     selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
@@ -144,6 +144,7 @@ class Server(ServerRunning, ServerSessions):
         # profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
         self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
+        self.inbox = inbox.Inbox(self)  # (what its Bots' tasks ask of a person: baudelib/inbox.py)
         self.settle_bot_folders()  # (each Bot's folder by its name)
 
     def bind(self):

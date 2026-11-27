@@ -178,7 +178,8 @@ fun SideQuestionsPage(chat: Chat) {
 /** A box to ask in (the composer's look: rounded 12, its ring), its send button off while it's empty. compact: a line
  * tall wrapped close round its button (a follow-up's, the composer's); else the new question's, with room round it. */
 @Composable
-private fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = false, send: (String) -> Unit) {
+internal fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = false, sendLabel: String = "Ask",
+                    send: (String) -> Unit) {
     val c = LocalBaude.current
     var text by remember { mutableStateOf("") }
     val line = with(androidx.compose.ui.platform.LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
@@ -195,7 +196,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = fal
         }
         val ready = enabled && text.isNotBlank()
         Box(Modifier.padding(bottom = lift)) {
-            IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
+            IconButton(Adwaita.Return, sendLabel, enabled = ready, tip = sendLabel.takeIf { it != "Ask" }, tint = if (ready) c.accentFg else c.fg,
                 background = if (ready) c.accentBg else null, side = side) { send(text.trim()); text = "" }
         }
     }

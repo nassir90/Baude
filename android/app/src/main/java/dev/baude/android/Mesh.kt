@@ -465,6 +465,7 @@ object Mesh {
         if (conns[c.id] !== c) return
         tick.value++
         if (c.state != "up") live.remove(c.id)
+        if (c.state == "down") Inbox.down(c)
         if (c.state != "up") main.postDelayed({ tick.value++ }, LEEWAY_MS + 100) // (said plainly once it's been gone
                                                                                  // that long)
         PhoneBrowser.changed(c)
@@ -581,6 +582,7 @@ object Mesh {
                     }
                     if (catchUp.remove(c.id) && before != null) missed(c, before, now)
                     asked(c, before, now)
+                    Inbox.listed(c) // (its asks of a person, once each link: then kept as inbox_changed says)
                     withdrawSeen(c.id, now)
                     listedAt[c.id] = android.os.SystemClock.elapsedRealtime()
                     open?.let {
@@ -606,6 +608,7 @@ object Mesh {
                     }
                 }
                 Op.TURN_ENDED -> ended(c, msg)
+                Op.INBOX_CHANGED -> Inbox.changed(c.id, Msg.InboxChanged.from(msg))
                 Op.LOGIN_STATE -> open?.let { // (the open chat's sign-in, as its host has it: its card, as on every head)
                     val said = Msg.LoginState.from(msg)
                     if (it.hostId == c.id && it.sid == said.session.orEmpty()) main.post { if (open === it) Logins.hostSaid(it, said.login) }

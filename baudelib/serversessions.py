@@ -66,6 +66,7 @@ class ServerSessions:
         run = models.launch(model, mode, params.get("effort") or None)
         if not self.can_run(model):
             raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
+        account = self.spawn_account(model, params.get("account"))
         options = {k: params[k] for k, _flag in CLAUDE_OPTIONS if params.get(k)}
         if not isinstance(options.get("system", ""), str):
             raise ValueError("system is text")
@@ -106,6 +107,8 @@ class ServerSessions:
             # (its accounts: the chat's it's forked from or asked of, or that spawned it here; else the defaults)
             parent = origin or (self.sessions.get(meta["spawned_by"]) if meta["spawned_by"] else None)
             meta["profiles"] = dict(parent.meta.get("profiles", {})) if parent else accounts.defaults()
+            if account is not None:  # (one asked for: in place of the one it'd take, for its model's provider)
+                meta["profiles"][models.model_program(model)] = account
             s = Session(self, meta)
             if tools:
                 s.app_tools = agentproxy.AppTools(self, conn, s.id, tools)
@@ -1052,6 +1055,24 @@ class ServerSessions:
             threading.Timer(RENAME_S, unanswered).start()
             return
         write(False)
+
+    def spawn_account(self, model, asked):
+        """The account a new chat on model asks to run under (start's account: an account's id or name, "" for the CLI's
+        own sign-in), as its id; None if it asks for none. ValueError for a model that runs on no subscription, or one
+        that isn't an account here for its provider."""
+        if asked is None:
+            return None
+        program = models.model_program(model)
+        if not isinstance(asked, str) or program not in accounts.PROVIDERS:
+            raise ValueError(wording.say("subscriptions.spawn_no_account", model=model or program))
+        if not asked:
+            return ""
+        mine = [a for a in accounts.listing() if a["provider"] == program]
+        found = next((a for a in mine if a["id"] == asked), None) or \
+            next((a for a in mine if a["name"].casefold() == asked.casefold()), None)
+        if found is None:
+            raise ValueError(wording.say("subscriptions.spawn_unknown", name=asked, model=model or program))
+        return found["id"]
 
     def use_account(self, sid, profile):
         """A chat goes on under another of its host's accounts for its model's provider (profile; "": the CLI's own

@@ -10,12 +10,12 @@ it can be copied anywhere.
     answer = task.ask("Which of these is the release?")    # its Bot asked: what it said
     plan = task.ask("Resolve this conflict: ...", form=[{"name": "keep", "type": "choice",
                                                          "choices": ["ours", "theirs"]}])  # {"keep": "ours"}
-    task.fallback(error)   # a failure handed to its Bot mid-run (if the task's failures are): what it said
+    task.fallback(error)   # a failure sent to its Bot mid-run (if the task notifies on failure): what it said
     chat = task.agent("The deploy failed: ...", wait=False)  # a chat of its own started, nested under its Bot,
                            # kept with the run: {session, text, failed}; its Bot's told what it says as its turn ends
 
-    @task.main             # run with the inputs; an exception's traceback printed, the run failed (and handed to
-    def deploy(inputs): ...  # the Bot by its host once it's over, if the task's failures are)
+    @task.main             # run with the inputs; an exception's traceback printed, the run failed (and sent to
+    def deploy(inputs): ...  # the Bot by its host once it's over, if the task notifies on failure)
 
 Run outside a task (no BAUDE_TASK_RUN), its asks are answered with stand-ins: each field its default, its first
 choice, 0, false or "" (the script itself runs as it is, side effects and all), and its agents too. baude-oneshot and
@@ -131,7 +131,7 @@ def ask(text, form=None, error=False):
 
 
 def fallback(error):
-    """A failure (an exception, or what went wrong) handed to the task's Bot, with the log so far: what it said."""
+    """A failure (an exception, or what went wrong) sent to the task's Bot, with the log so far: what it said."""
     if isinstance(error, BaseException):
         error = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     return ask(f"This failed:\n\n{error}", error=True)
@@ -194,8 +194,8 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
 
 def main(fn):
     """fn run with the inputs, as the script's main: an exception's traceback printed and the run failed. Its host
-    hands the failure, with the end of the run's log, to the Bot once the run's over (if the task's failures are), so
-    the Bot may run the task again as it's handed it."""
+    sends the failure, with the end of the run's log, to the Bot once the run's over (if the task notifies on
+    failure), so the Bot may run the task again as it's told it."""
     try:
         fn(inputs)
     except SystemExit:

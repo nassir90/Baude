@@ -98,7 +98,8 @@ Make one of your tasks, or change one (by its id; a field left out kept as it wa
 | `script` | string |  |  |
 | `form` | array of object |  | Fields: {name, label?, type: text\|number\|bool\|choice, choices?, default?, required?} |
 | `triggers` | array of object |  | {kind: schedule, every (minutes) or at (HH:MM) and days (0 Monday … 6 Sunday)} or {kind: git_push, repo (a folder on the host), branch, poll_s}; each may have fills: {field: payload key}. A git push's payload: repo, branch, before, after, commit, message, author |
-| `fallback` | boolean |  | A failed run is handed to you (default true) |
+| `notify_failure` | boolean |  | A failed run is sent to you (default true) |
+| `notify_exit` | boolean |  | A run that finishes with exit 0 is told to you, for your information (default false) |
 | `timeout_s` | integer |  |  |
 | `paused` | boolean |  |  |
 | `delete` | boolean |  | Delete the task (id) |
@@ -854,6 +855,7 @@ One of a Bot's tasks run now, by hand.
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
 | `inputs` | object |  | Its form, filled. |
+| `waited` | boolean/null |  | Its Bot waits for the run's end in a tool call (its own run_task, wait true): it isn't told the run finished. |
 
 #### `seen` (Seen)
 
@@ -3238,7 +3240,9 @@ One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a t
 | `version` | string/null |  | Its script's version: the first 12 hex of its SHA-256. |
 | `form` | array/null of TaskField |  | Its form's fields. |
 | `triggers` | array/null of TaskTrigger |  | What starts it. |
-| `fallback` | boolean/null |  | A run that fails is handed to its Bot, with its log. |
+| `notify_failure` | boolean/null |  | A run that fails is sent to its Bot, with its log. |
+| `fallback` | boolean/null |  | Notify on failure under its old name, for older heads: read when notify_failure isn't given, and sent as notify_failure is. |
+| `notify_exit` | boolean/null |  | A run that finishes, exit 0 and not stopped, is told to its Bot, with the end of its output; the Bot isn't asked to act. |
 | `timeout_s` | integer/null |  | The longest a run may take; it's stopped after. |
 | `paused` | boolean/null |  | Its triggers don't fire (it can still be run by hand). |
 | `last` | TaskRun? |  | Its latest run. |

@@ -299,8 +299,8 @@ class TasksPage(Gtk.Box):
 
     def kept(self, task, **changed):
         """task as it's sent to be set again (its script left as it is: the Bot's to change), with changed."""
-        return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "fallback", "timeout_s",
-                                            "paused")}, **changed}
+        return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "notify_failure",
+                                            "notify_exit", "timeout_s", "paused")}, **changed}
 
     # ---- the list
     def draw_list(self):
@@ -366,11 +366,14 @@ class TasksPage(Gtk.Box):
         head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.change(t)))
         head.append(flat("user-trash-symbolic", wording.say("common.delete"), lambda: self.delete(t)))
         # failures
-        lb = self.listbox(self.task_body)
-        lb.set_margin_top(2)
-        hand = Adw.SwitchRow(title=wording.say("tasks.fallback"), use_markup=False, active=t.get("fallback", True))
-        hand.connect("notify::active", lambda r, _p: self.save(self.kept(t, fallback=r.get_active())))
-        lb.append(hand)
+        if t.get("runtime") != "bot":  # (a Bot's own turn: nothing to notify it of)
+            lb = self.listbox(self.task_body)
+            lb.set_margin_top(2)
+            for key, active in (("notify_failure", t.get("notify_failure", True)),
+                                ("notify_exit", t.get("notify_exit", False))):
+                row = Adw.SwitchRow(title=wording.say(f"tasks.{key}"), use_markup=False, active=active)
+                row.connect("notify::active", lambda r, _p, key=key: self.save(self.kept(t, **{key: r.get_active()})))
+                lb.append(row)
         # triggers
         g = self.group(wording.say("tasks.triggers"),
                        flat("list-add-symbolic", wording.say("tasks.add_trigger"), lambda: self.add_trigger(t)))

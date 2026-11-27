@@ -25,6 +25,13 @@
     "inputs": {
       "type": "object",
       "description": "Its form, filled."
+    },
+    "waited": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Its Bot waits for the run's end in a tool call (its own run_task, wait true): it isn't told the run finished."
     }
   },
   "required": [

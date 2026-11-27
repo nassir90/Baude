@@ -197,6 +197,28 @@ abstract class TasksMockups(private val theme: String) {
         shoot("asked")
     }
 
+    /** A Bot's chat told its task's run finished (Notify on graceful exit): the same heading and table, the end of its output. */
+    @Test fun finished() {
+        val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-27 00:04:23 |\n"
+        val tail = "| version | 2009f5f91a9f |\n" +
+            "| command | /usr/bin/python3 -u /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
+        val from = dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
+            hostName = "workshop", session = "s1", task = "t1", run = "r4")
+        activity.setContent {
+            BaudeTheme {
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .padding(top = 24.dp)) {
+                    dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task finished\n\n" +
+                        table + "| end time | 2026-11-27 00:05:11 |\n| duration | 48.0 s |\n" + tail +
+                        "| exit code | 0 |\n\nThis is for your information; nothing is asked of you.\n\n" +
+                        "It last said:\n\nuploaded 14 files to staging"), from)
+                }
+            }
+        }
+        settle()
+        shoot("finished")
+    }
+
     /** A run opened from a chat's from line (its Bot's chat, at that run), then Back: the run's own task. */
     @Test fun runBack() {
         dev.baude.android.TaskLinks.pending = listOf("h1", "s1", "t1", "r3")

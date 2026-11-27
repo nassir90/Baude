@@ -52,14 +52,14 @@ def deploy(inputs):
         run("r1", "t1", "Deploy site", "done", "schedule", at(9, 0, 3), 186.0, V_OLD))
 
     val deploy get() = Msg.Task(id = "t1", name = "Deploy site", runtime = "python", script = DEPLOY_SCRIPT, version = V, form = form,
-        triggers = triggers, fallback = true, paused = false, last = runs.first())
+        triggers = triggers, notifyFailure = true, notifyExit = true, paused = false, last = runs.first())
 
     val tasks get() = listOf(
         deploy,
-        Msg.Task(id = "t2", name = "Nightly backup", runtime = "shell", version = "c03b91fe2d48", fallback = true, paused = true,
+        Msg.Task(id = "t2", name = "Nightly backup", runtime = "shell", version = "c03b91fe2d48", notifyFailure = true, paused = true,
             triggers = listOf(Msg.TaskTrigger(id = "s2", kind = "schedule", at = "02:30", days = (0..6).toList())),
             last = run("b9", "t2", "Nightly backup", "failed", "schedule", at(2, 30), 14.0, "c03b91fe2d48")),
-        Msg.Task(id = "t3", name = "Triage issues", runtime = "bot", version = "51e7aa09bd32", fallback = true, paused = false,
+        Msg.Task(id = "t3", name = "Triage issues", runtime = "bot", version = "51e7aa09bd32", notifyFailure = true, paused = false,
             triggers = listOf(Msg.TaskTrigger(id = "s3", kind = "schedule", every = 120)),
             last = run("i5", "t3", "Triage issues", "running", "schedule", now - 40, null, "51e7aa09bd32")))
 

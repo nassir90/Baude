@@ -553,6 +553,15 @@ object Mesh {
                     asked(c, before, now)
                     open?.let {
                         if (it.hostId != c.id) return@let
+                        val rotated = { l: List<Msg.Session>? -> l?.firstOrNull { s -> s.id == it.sid }?.rotated }
+                        if (before != null && rotated(before) != rotated(now)) { // (a Bot rotated: its new conversation,
+                            restart(it)                                          // read from nothing)
+                            it.sent.clear()
+                            it.asks.clear()
+                            it.sendersRev = -1
+                            it.senders.clear()
+                            it.again = it.reading
+                        }
                         senders(it) // (who its messages from others are from, if its host's store is newer)
                         read(it) // (its first read, or what it missed)
                     }

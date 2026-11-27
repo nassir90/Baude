@@ -881,6 +881,12 @@ class Tasks:
             self._update(st, rid, status="running")
         return wait["text"] or "", wait["failed"]
 
+    def asking(self, sid):
+        """Is an ask of one of the Bot sid's tasks waiting on it (sent, or to be sent once it's idle)?"""
+        with self.lock:
+            turn = self.turns.get(sid)
+            return bool(self.waiting.get(sid)) or turn is not None and turn.locked()
+
     def turn_over(self, s, msg):
         """(server's lock held) s's turn ended (its result, msg): the ask it was sent for, answered with what it
         said."""

@@ -26,8 +26,8 @@ from widgets import load_settings, save_settings, toast  # noqa: E402,F401
 
 from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
-    HERE_HOST, background_proc, bot_picture, can_be_bot, chat_group, host_key, network, remote_info, remote_name,
-    stopping_said,
+    HERE_HOST, background_proc, bot_picture, can_be_bot, can_rotate, chat_group, host_key, network, remote_info,
+    remote_name, stopping_said,
 )
 
 
@@ -65,6 +65,9 @@ class SidebarMenu:
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
+        if info.get("bot") and can_rotate(info):  # (after Bot Settings…, a Codex Bot's too: it has no Bot items)
+            at = next((i + 1 for i, (_label, action) in enumerate(items) if action == "make_bot"), 1)
+            items.insert(at, (wording.say("sidebar.rotate"), "rotate"))
         if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
                 info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
             items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
@@ -220,6 +223,27 @@ class SidebarMenu:
         if info is not None and info.get("remote") is not None:
             info["remote"].request({"op": "bot", "session": info["id"], "bot": None},
                                    lambda reply: self.bot_set(info, reply))
+
+    def rotate(self, info):
+        """Rotate: a Bot's conversation archived on its host as a past thread ("<Bot> / <its title>"), and the Bot
+        carried on in a new, empty one: listed so as the host answers; a window with the Bot open shows the new one
+        (on_network: its listed rotated)."""
+        if info is None or info.get("remote") is None:
+            return
+        r = info["remote"]
+
+        def done(reply):
+            if reply.get("op") != "rotated":
+                toast(self, wording.say("trash.host_refused", host=remote_name(r), op="rotate",
+                                        why=baudelib.wire.said(reply)))
+                return
+            for listed in (reply.get("session"), reply.get("thread")):
+                if isinstance(listed, dict) and baudelib.wire.is_id(listed.get("id") or ""):
+                    if listed.get("rotated") != (r.sessions.get(listed["id"]) or {}).get("rotated"):
+                        r.forget_mirror(listed["id"])
+                    r.sessions[listed["id"]] = listed
+            r.network.changed()
+        r.request({"op": "rotate", "session": info["id"]}, done)
 
     def bot_set(self, info, reply):
         """A host answered Make Bot…, Bot Settings…, a Bot's Rename… or Turn Back into a Chat: listed as it answered

@@ -11,6 +11,7 @@ import base64
 import itertools
 import json
 import os
+import shutil
 import socket
 import threading
 import time
@@ -242,9 +243,13 @@ class Remote:
                 toolnames.learn(self.info.get("tool_names"))
                 # (this machine's Claude Desktop chats its host only lists: Baude lists them itself, from Desktop's
                 # own list, as its own claude runs them; Record has no chats)
-                self.sessions = {s["id"]: s for s in msg.get("sessions") or []
-                                 if isinstance(s, dict) and wire.is_id(s.get("id"))
-                                 and not (self.mine and s.get("taken_up") is False)}
+                now = {s["id"]: s for s in msg.get("sessions") or []
+                       if isinstance(s, dict) and wire.is_id(s.get("id"))
+                       and not (self.mine and s.get("taken_up") is False)}
+                for sid, s in now.items():  # (a Bot rotated since: its conversation's another, fetched from nothing)
+                    if (s.get("rotated") or None) != ((self.sessions.get(sid) or {}).get("rotated") or None):
+                        self.forget_mirror(sid)
+                self.sessions = now
                 if self.state != "alive":
                     self.state = "alive"
                 if self.mine:
@@ -353,6 +358,20 @@ class Remote:
             if isinstance(path, str) and path.endswith(".jsonl") and os.path.isfile(path):
                 return path
         return os.path.join(self.network.home, self.key, f"{session_id}.jsonl")
+
+    def forget_mirror(self, session_id):
+        """A session's copy here let go of (a Bot rotated: its conversation's a new one), its subagents' and who its
+        messages were from with it: fetched again from nothing."""
+        self.agents_synced.pop(session_id, None)
+        self.senders.pop(session_id, None)
+        if self.local:
+            return  # (read where it is: nothing copied)
+        try:
+            with open(self.mirror(session_id), "wb"):
+                pass
+        except OSError:
+            pass
+        shutil.rmtree(self.subagents_mirror(session_id), ignore_errors=True)
 
     def direct(self, session_id):
         """Is a session's transcript read where it is (mirror), not copied?"""

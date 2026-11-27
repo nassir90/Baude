@@ -187,11 +187,17 @@ An entry or a part may carry:
   Copy and dots, a side question's dots and meter) is as tall as the chat's status line, and Clear isn't bold. The owner
   asked for Meta's box and the chat's to start on the same line (2026-11-12) and for side questions' to match them when
   maximised (2026-11-14). Source: `[{"issue": "BaudeInternal#50"}, {"issue": "BaudeInternal#85"}]`.
-- **A dropdown opens as the button goes down.** Every dropdown (a picker's button, a choice row, a host picker) opens
-  its list as the mouse button goes down on it; let go over a choice and that one's picked and the list closes, let go
-  outside and it closes, let go on the dropdown itself (a plain click) and the list stays open to pick from
-  (pickers.press_opens_dropdowns; a touch screen's tap is a plain click). The owner found dropdowns behaved unnaturally
-  and asked for open on press, close on release (2026-11-14). Source: `[{"issue": "BaudeInternal#74"}]`.
+- **A menu opens as the button goes down.** Every dropdown (a picker's button, a choice row, a host picker, ☰'s
+  carets) and every right-click menu (a sidebar row's, a card's, a chat's) opens as the mouse button goes down on it,
+  and stays open as the button comes up. Held, and let go over a choice (a menu's item, a list's row, a popover's
+  button) a quarter second or more after the press, that one's picked and it closes (sooner is a click, as a native
+  menu takes it, and picks nothing); let go on what was pressed or between choices and it stays open to pick from with
+  a click; let go outside it and it closes (pickers.press_opens_dropdowns; a touch screen's tap is a plain click). Nothing rebuilds what an open menu
+  hangs from: the sessions sidebar waits for a row's menu to close before it lists again. The owner found dropdowns
+  behaved unnaturally and asked for open on press, close on release (2026-11-14), then found right-click menus and the
+  new dropdowns jittered and closed as the button came up, and asked again that they show on the press over what's
+  pressed and go on the release over a choice (2026-11-26).
+  Source: `[{"issue": "BaudeInternal#74"}, {"issue": "BaudeInternal#273"}]`.
 - **A row opens by growing into its page.** Where a list's row opens a page in the side panel (a subagent, a process, a
   side question), the row's line grows into the page's header and its darker square grows to fill the panel, from
   wherever the row is scrolled to, and closes back the same way; never a slide. While it grows the row's hover highlight

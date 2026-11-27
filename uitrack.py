@@ -244,11 +244,21 @@ def context():
                 "crumbs": [dict(c) for c in STATE["crumbs"]]}
 
 
+def _dialog(win, *_):
+    dialog = win.get_visible_dialog()
+    if isinstance(dialog, Adw.PreferencesDialog) and not getattr(dialog, "_tracked", False):
+        dialog._tracked = True  # (its pages: a page shown is the screen)
+        dialog.connect("notify::visible-page", refresh)
+    refresh()
+
+
 def _watch(win):
-    """win's focus, dialog and tab changes looked at as they happen."""
-    for prop in ("focus-widget", "visible-dialog", "is-active"):
+    """win's focus, dialog (and its pages) and tab changes looked at as they happen."""
+    for prop in ("focus-widget", "is-active"):
         if win.find_property(prop) is not None:
             win.connect(f"notify::{prop}", refresh)
+    if isinstance(win, Adw.ApplicationWindow):
+        win.connect("notify::visible-dialog", _dialog)
     view = getattr(getattr(win, "tabs", None), "view", None)
     if view is not None:
         view.connect("notify::selected-page", refresh)
@@ -262,7 +272,6 @@ def _watching():
     for win in app.get_windows():
         _watch(win)
     app.connect("window-added", lambda _app, win: _watch(win))
-    GLib.timeout_add_seconds(2, lambda: refresh() or True)  # (a dialog's page, a panel: what has no signal here)
 
 
 # ---- hooks

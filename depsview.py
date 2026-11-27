@@ -1,7 +1,7 @@
 """What Baude and Record show of a dependency (baudelib.deps, schema/deps): Missing, the state a feature shows in its
 place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Databases
 without Docker, the Git page without git; the phone's MissingDep the same), and Settings → Dependencies (Page: the host
-picked beside New session's, as its deps op says them, under what needs them)."""
+picked beside New session's, as its deps op says them, under what needs them, then its deciders: decidersview)."""
 import threading
 
 from gi.repository import Adw, GLib, Gtk, Pango
@@ -156,6 +156,9 @@ class Page(Adw.PreferencesPage):
         top.add(name)
         self.add(top)
         self.groups = []  # (the groups shown, once the host's answered)
+        import decidersview
+        self.deciders = decidersview.Group(where)  # (last, under the groups)
+        self.add(self.deciders)
         ask(where, self.took)
 
     def took(self, reply):
@@ -171,6 +174,7 @@ class Page(Adw.PreferencesPage):
             for dep in listed:
                 group.add(row(dep))
             self.groups.append(group)
-        for group in self.groups:
+        self.remove(self.deciders)
+        for group in (*self.groups, self.deciders):
             self.add(group)
         return False

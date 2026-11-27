@@ -396,6 +396,30 @@ A member deactivated here: its links let go of and not made, its joins and tunne
 | `id` | string |  | Its id. |
 | `where` | Where |  | Where a link goes. |
 
+#### `decide` (Decide)
+
+A decision asked of one of the host's deciders, or a member's through it (baudetask.decide): the state, and each question about it by name. Answered with decided once it's asked. A task's script asks on its host's own socket with its run's token; a member, as its access rules let it use the host's providers.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `decider` | string/null |  | Which (a Decider's value: one of this host's by its id or name, another member's as <member>/<its id or name>); none: this host's first. |
+| `state` | string/object/array |  | Text, or structured data the decider renders as it does text. |
+| `questions` | object | yes | The questions, by name. |
+| `images` | array of string |  | Base64 images, part of the state. |
+| `run` | string |  | A task's script's run (BAUDE_TASK_RUN). |
+| `token` | string |  | Its run's token (BAUDE_TASK_TOKEN). |
+
+#### `deciders` (Deciders)
+
+The host's deciders (Settings → Dependencies, a task's decider variable): list them, each with whether it answers, and the mesh's other members' as their records say; add one (name, url: a Strands Decider's server's base, http://127.0.0.1:8000), looked at as it's added; remove one (id); test one (id): looked at now. Each is answered with deciders.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `list` \| `add` \| `remove` \| `test` |  | What to do (list where left out). |
+| `name` | string |  | add: its name. |
+| `url` | string |  | add: where it's served. |
+| `id` | string |  | remove, test: which. |
+
 #### `delete` (Delete)
 
 A session gone: its agent stopped and waited for, its transcript and the folder beside it (its subagents'), pi's own copy of it, and a Bot's folder moved to the trash; then it's gone from the list. One whose files can't be moved stays: error, saying why.
@@ -1385,6 +1409,30 @@ deactivate's answer.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `any` | boolean |  | There was one. |
+
+#### `decided` (Decided)
+
+decide's answer: each question's, by name; or, unavailable, why the decider couldn't be asked (not running, not answering, not there, its host out of reach), the script's to deal with: nothing else is asked instead.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `decider` | string |  | The decider asked, by its name. |
+| `host` | string |  | Its host's name. |
+| `model` | string |  | The model that answered. |
+| `answers` | object |  | Each question's answer, by name. |
+| `latency_ms` | number |  | How long it took its server. |
+| `unavailable` | string |  | Why it couldn't be asked. |
+
+#### `deciders` (DecidersReply)
+
+deciders' answer: the host's own deciders (with their URLs), then the other members'.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `list` \| `add` \| `remove` \| `test` |  | What was asked. |
+| `deciders` | array of Decider |  | The deciders. |
+| `tested` | Decider |  | add, test: the one looked at. |
+| `error` | string |  | Why it couldn't be done (a name taken, a URL that isn't one). |
 
 #### `deleted` (Deleted)
 
@@ -2559,6 +2607,46 @@ A table (or view, or collection) and its columns.
 | `rows` | integer |  | About how many rows it has. |
 | `columns` | array of DbColumn |  | Its columns, in order. |
 
+#### DecideQuestion
+
+One of a decision's questions, as System One has them: noul (yes or no: the probability it's true), choice (one of criteria's options, by name) or score (an ordered rubric, criteria's levels from low to high).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `type` | `choice` \| `noul` \| `score` | yes | What kind of question it is. |
+| `instructions` | string/object/array | yes | Text, or structured data the decider renders as it does text. |
+| `criteria` | object/array/null |  | choice: each option's name and what it means (null for a bare name); score: its levels, lowest first; noul: what true and false mean, or nothing. |
+
+#### Decider
+
+A decider a host knows (baudelib/deciders.py): a server that answers Strands Decider's System One API (POST /v1/systemone, GET /health), as the deciders op lists it, and as a member's record says it (no url). What a task's decider variable binds, and what decide's decider names, is its value.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `value` | string |  | What decide's decider names it as, on the host that listed it: its id for one of that host's own, <its host's name>/<its id> for another member's. |
+| `id` | string | yes | Its id on its host. |
+| `name` | string |  | Its name. |
+| `host` | string/null |  | The member that has it, by its id (the listing host's own: null). |
+| `host_name` | string/null |  | That member's name. |
+| `url` | string/null |  | Where it's served (the listing host's own only). |
+| `reachable` | boolean |  | It answered as a decider when it was last looked at: a variable bound to one that didn't is warned of before a run. |
+| `model` | string/null |  | The model it serves, as its /health says. |
+| `error` | string/null |  | Why it didn't answer. |
+
+#### Decision
+
+A decider's answer to one question, as System One gives it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `type` | `choice` \| `noul` \| `score` | yes | Its question's kind. |
+| `choice` | string |  | choice: the option picked. |
+| `noul` | number |  | noul: the probability it's true. |
+| `score` | number |  | score: the expected level, over the levels' indices (0 the lowest). |
+| `probabilities` | object |  | choice: each option's probability; score: each level's, by its index. |
+| `legend` | object |  | score: each level's index and what it is. |
+| `confidence` | number |  | How sure it is, calibrated (choice and score; a noul's probability says it). |
+
 #### Dep
 
 A program or library a feature needs (schema/deps), as a host or an app has it: whether it's there, and how it's installed on that machine.
@@ -2986,6 +3074,7 @@ A member of the mesh, as info's mesh lists it.
 | `made` | integer/null |  | When that commit was made, in seconds (null: not known). |
 | `heads` | array of Head |  | The apps on its machine connected to it, by the code they run. |
 | `behind` | integer/null |  | How many commits it lacks of the mesh's newest code (MeshView's newest), as this host's git counts them (null: it can't). |
+| `deciders` | array of Decider |  | Its deciders, and whether each answered when it last looked. |
 
 #### MemberInfo
 
@@ -3005,6 +3094,7 @@ Who a member is, in its record.
 | `commit` | string/null |  | The commit its code is (null: not a checkout, or it didn't say). |
 | `made` | integer/null |  | When that commit was made, in seconds (null: not known). |
 | `heads` | array of Head |  | The apps on its machine connected to it, by the code they run. |
+| `deciders` | array of Decider |  | Its deciders, and whether each answered when it last looked. |
 
 #### MeshView
 
@@ -3694,6 +3784,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `28` | The wire's version, as a host's hello says it. |
+| `VERSION` | `29` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

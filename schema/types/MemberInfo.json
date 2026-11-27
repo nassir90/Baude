@@ -56,6 +56,13 @@
         "$ref": "Head.json"
       },
       "description": "The apps on its machine connected to it, by the code they run."
+    },
+    "deciders": {
+      "type": "array",
+      "items": {
+        "$ref": "Decider.json"
+      },
+      "description": "Its deciders, and whether each answered when it last looked."
     }
   },
   "required": ["id"],

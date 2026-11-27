@@ -177,7 +177,7 @@
           "type": "null"
         }
       ],
-      "description": "The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone)."
+      "description": "The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone)."
     },
     "account_gone": {
       "type": "boolean",

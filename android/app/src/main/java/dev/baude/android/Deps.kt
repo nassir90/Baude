@@ -92,7 +92,8 @@ fun DepRow(dep: Msg.Dep, title: String? = null) {
 
 /** Settings → Dependencies (depsview.Page), Settings' third page: the host picked beside New session (a computer host:
  * the phone runs none of them), then what its features and its machine's apps need and whether it's there, under a
- * heading for each thing that needs them (Providers, Git and GitHub, Kubernetes, …), as its deps answer says. */
+ * heading for each thing that needs them (Providers, Git and GitHub, Kubernetes, …), as its deps answer says, then its
+ * deciders (DecidersGroup). */
 @Composable
 fun DepsPage() {
     val c = LocalBaude.current
@@ -119,5 +120,6 @@ fun DepsPage() {
             if (group.isNotEmpty()) Heading(Wording.byKey[group] ?: group)
             BoxedList(deps, "") { DepRow(it) }
         }
+        if (hostId != null) DecidersGroup(hostId)
     }
 }

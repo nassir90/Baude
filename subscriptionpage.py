@@ -1,7 +1,6 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
-Databases are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
-picking the subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
+Databases are), changed there through its accounts op (hostaccounts): for each provider, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
 Token…, Remove…; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
@@ -16,13 +15,14 @@ import os
 import re
 import threading
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from baudelib import deps, icons, tokens, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
 CODEX_CLI = "codex"  # (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
+MENU_USAGE_W = tokens.px("subscriptions.menu-usage-width")  # (☰'s usage row's least width: MenuUsage.fit)
 STALE_OPACITY = tokens.number("subscriptions.stale-opacity")  # (a card's usage as the host last read it, till the page's own read answers)
 
 
@@ -149,10 +149,9 @@ class Page(Adw.PreferencesPage):
                 clamp.set_tightening_threshold(100_000)
         self.where, self.host = win.terminal_host()
         self.here = wire.is_local(self.where)  # (the host's this machine's: a sign-in's page opened here at once)
-        self.accounts, self.defaults, self.filling, self.claude_cli, self.missing = [], {}, False, True, {}
+        self.accounts, self.claude_cli, self.missing = [], True, {}
         self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
-        self.choices = {}
-        self.lists, self.pills, self.usage, self.bars, self.reading, self.last = {}, {}, {}, {}, set(), {}
+        self.lists, self.usage, self.bars, self.reading, self.last = {}, {}, {}, set(), {}
         self.shown, self.timer, self.window_watch = None, None, None
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
@@ -169,17 +168,12 @@ class Page(Adw.PreferencesPage):
             label.add_css_class("heading")
             heading.append(label)
             box.append(heading)
-            current = Adw.ComboRow(title=wording.say("subscriptions.current"), model=Gtk.StringList.new([]))
-            current.connect("notify::selected", self.picked, provider)
-            current_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
-            current_list.append(current)
-            box.append(current_list)
             cards = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             box.append(cards)
             group.add(box)
             group.update_property([Gtk.AccessibleProperty.LABEL], [wording.say(title)])
             self.add(group)
-            self.lists[provider], self.pills[provider] = cards, (current_list, current)
+            self.lists[provider] = cards
         self.fill()
         self.ask({"what": "list"})
         self.connect("map", self.shown_now)
@@ -200,10 +194,10 @@ class Page(Adw.PreferencesPage):
         return Ask(self.where, msg, answered)
 
     def took(self, reply):
-        """An answer's accounts, defaults, whether the host has claude and what it lacks, kept and shown (drawn again
+        """An answer's accounts, whether the host has claude and what it lacks, kept and shown (drawn again
         only if they changed), and the usage the host last read, shown greyed where this page hasn't read it yet; a
         subscription not read yet, read."""
-        self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
+        self.accounts = reply["accounts"]
         last = {p: _limits(r["usage"]) for p, r in (reply.get("last_usage") or {}).items()}
         if last != self.last:
             self.last = last
@@ -213,7 +207,7 @@ class Page(Adw.PreferencesPage):
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
         self.codex_usage = bool(reply.get("codex_usage"))
-        if (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage) != self.shown:
+        if (self.accounts, self.claude_cli, self.missing, self.codex_usage) != self.shown:
             self.fill()
         if self.get_mapped():
             self.read_usage([p for p in self.usage_ids() if p not in self.usage])
@@ -235,20 +229,17 @@ class Page(Adw.PreferencesPage):
         return self.claude_cli if provider == "claude" else provider not in self.missing and self.codex_usage
 
     def fill(self, error=None):
-        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage)
+        self.shown = None if error else (self.accounts, self.claude_cli, self.missing, self.codex_usage)
         self.bars = {}
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
                 cards.remove(child)
-            current_list, current = self.pills[provider]
-            current_list.set_visible(not error)
             if error:
                 rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
                 rows.append(Adw.ActionRow(title=GLib.markup_escape_text(error), sensitive=False))
                 cards.append(rows)
                 continue
             mine = [a for a in self.accounts if a["provider"] == provider]
-            self.fill_pill(provider, current, mine)
             if self.cli_card(provider):
                 cards.append(self.card(provider, None))
             for account in mine:
@@ -262,18 +253,6 @@ class Page(Adw.PreferencesPage):
                 add.connect("activated", lambda _row, p=provider: (add_claude if p == "claude" else add_codex)(self))
                 rows.append(add)
             cards.append(rows)
-
-    def fill_pill(self, provider, row, mine):
-        """The Current Subscription row over a provider's cards: the subscription a new chat on this host takes, and the
-        others to pick from; set from what the host says its default is."""
-        names = {"": wording.say("subscriptions.cli_default"), **{a["id"]: a["name"] for a in mine}}
-        active = self.defaults.get(provider, "")
-        active = active if active in names else ""
-        self.choices[provider] = list(names)
-        self.filling = True
-        row.set_model(Gtk.StringList.new(list(names.values())))
-        row.set_selected(list(names).index(active))
-        self.filling = False
 
     def card(self, provider, account):
         """A subscription's card: its name and ⋮ (an account's: Rename…, Sign In Again… or Replace Token…, Remove…),
@@ -326,20 +305,6 @@ class Page(Adw.PreferencesPage):
                               tooltip_text=wording.say("subscriptions.more_tip"), css_classes=["flat"])
         more.insert_action_group("account", actions)
         return more
-
-    def picked(self, row, _pspec, provider):
-        if self.filling:
-            return
-        choices = self.choices.get(provider, [])
-        if row.get_selected() >= len(choices):
-            return
-        profile = choices[row.get_selected()]
-        if profile != self.defaults.get(provider, ""):
-            def answered(reply):  # (a refusal leaves the row on the host's own default)
-                if reply.get("error"):
-                    self.toast(reply["error"])
-                    self.fill_pill(provider, row, [a for a in self.accounts if a["provider"] == provider])
-            self.ask({"what": "select", "provider": provider, "id": profile}, answered)
 
     def shown_now(self, *_):
         """The page in front: its subscriptions' usage read now and every USAGE_S till it isn't."""
@@ -395,18 +360,21 @@ class Page(Adw.PreferencesPage):
                      {"what": "usage", "id": profile}, done)
 
 
-def usage_lines(box, read):
+def usage_lines(box, read, narrow=None):
     """read (a subscription's limits [(key, name, percent, resets)], or what to say instead) drawn into box: a line for
-    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's)."""
+    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's). narrow (☰'s:
+    its width in characters, MenuUsage.fit's): no word asks for more width than the row's, a limit's name cut with …
+    where it doesn't fit, what's said instead wrapped within it."""
     while (child := box.get_first_child()) is not None:
         box.remove(child)
     if not isinstance(read, list):
         box.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
-                             css_classes=["dim-label"]))
+                             css_classes=["dim-label"], **({"max_width_chars": narrow} if narrow else {})))
         return
     for key, name, percent, resets in read:
         line = Gtk.Box(spacing=8)
-        line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True, wrap=True))
+        line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True,
+                              **({"ellipsize": 3, "max_width_chars": 1} if narrow else {"wrap": True})))
         line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
                               css_classes=["dim-label", "numeric"]))
         box.append(line)
@@ -428,28 +396,43 @@ def _pages(dialog):
     return [w for w in walk(dialog) if isinstance(w, Adw.PreferencesPage)]
 
 
+def usage_account(win):
+    """Whose usage win's ☰ usage row shows: (where, provider, account id, "" for the CLI's own sign-in; None for the one
+    a new chat there takes): the chat's (its window's usage_account: the account it actually runs under, its model's
+    provider's, on its host), else, with no chat on a Claude or Codex model (Record's), the account a new chat on the
+    default model (Claude's) takes on the host picked beside New session."""
+    chat = getattr(win, "usage_account", None)
+    found = chat() if chat is not None else None
+    return found or (win.terminal_host()[0], "claude", None)
+
+
 class MenuUsage(Gtk.Button):
-    """☰'s usage row (Baude's and Record's): the current Claude subscription on the host picked beside New session (the
-    one a new chat there takes), its name, then each limit's name, percentage and bar as its Subscriptions card has them,
-    read as ☰ opens (again once USAGE_S has passed, after an answer or an error); the host's last reading greyed till
-    then. An answer that comes after the host picked has changed (or after a newer ask) is dropped. Where the host has no
-    Claude subscription its item is out of section (so no rule is drawn round nothing). A click opens Settings →
-    Subscriptions. Holds its window weakly."""
+    """☰'s usage row (Baude's and Record's): the subscription the chat runs under (usage_account), its name, then each
+    limit's name, percentage and bar as its Subscriptions card has them, read as ☰ opens (again once USAGE_S has
+    passed, after an answer or an error, or at once for another subscription); the host's last reading greyed till then,
+    else a placeholder as high as two limits. It's in ☰ as ☰ opens, as wide as the longest limit a host can say needs
+    at the viewer's clock and text size (fit; MENU_USAGE_W at least) whatever it shows (a longer name cut with …), so the
+    menu opens at its final width and keeps it, even as the row goes. An answer that comes after the subscription shown has changed
+    (or after a newer ask) is dropped. Where the host has no such subscription its item is out of section (so no rule
+    is drawn round nothing), from the next opening on before ☰ shows. A click opens Settings → Subscriptions. Holds its
+    window weakly."""
 
     def __init__(self, win, popover, section):
-        super().__init__(css_classes=["flat", "baude-menu-usage"])
+        super().__init__(css_classes=["flat", "baude-menu-usage"], hexpand=True)
         import weakref
         self.win = weakref.ref(win)
         self.popover, self.section = popover, section
         inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4, margin_bottom=4)
-        self.name = Gtk.Label(xalign=0, ellipsize=3, css_classes=["heading"])
+        self.name = Gtk.Label(xalign=0, ellipsize=3, max_width_chars=1, css_classes=["heading"])
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         inside.append(self.name)
         inside.append(self.bars)
         self.set_child(inside)
-        self.read_at, self.where, self.ticket, self.profile = 0.0, None, 0, None
+        self.inside, self.chars = inside, 1
+        self.read_at, self.target, self.ticket, self.profile, self.none_for = 0.0, None, 0, None, None
         self.connect("clicked", MenuUsage._clicked, popover)
         popover.connect("show", lambda *_: self.refresh())
+        popover.connect("closed", lambda p: p.get_child().set_size_request(-1, -1))  # (held while open: shown)
         self.set_visible(False)
 
     @staticmethod
@@ -466,6 +449,9 @@ class MenuUsage(Gtk.Button):
             self.section.append_item(item)
             self.popover.add_child(self, "usage")
         elif not on and self.section.get_n_items():
+            if self.popover.get_mapped():  # (taken out of ☰ while it's open: it keeps its width)
+                inside = self.popover.get_child()
+                inside.set_size_request(inside.get_width(), -1)
             if self.get_parent() is not None:
                 self.popover.remove_child(self)
             self.section.remove(0)
@@ -476,53 +462,96 @@ class MenuUsage(Gtk.Button):
         win = self.win()
         if win is None:
             return
-        where, _name = win.terminal_host()
-        if where == self.where and time.monotonic() - self.read_at < USAGE_S:
+        target = usage_account(win)
+        if target != self.target:
+            self.target, self.profile, self.read_at = target, None, 0.0
+            self.placeholder()
+        if target != self.none_for:  # (in ☰ as it opens: not added once it's open, widening or moving it)
+            self.shown(True)
+            self.fit()
+        if time.monotonic() - self.read_at < USAGE_S:
             return
-        if where != self.where:
-            self.where, self.profile, self.read_at = where, None, 0.0
-            self.name.set_label("")
-            usage_lines(self.bars, None)
-            self.shown(False)
         self.ticket += 1
         ticket = self.ticket
         self.read_at = time.monotonic()  # (asked: not again till USAGE_S has passed, whatever it answers)
-        Ask(where, {"what": "list"}, lambda reply: self.listed(ticket, where, reply))
+        Ask(target[0], {"what": "list"}, lambda reply: self.listed(ticket, target, reply))
 
-    def current(self, ticket, where):
-        """Whether an answer to ask ticket (on host where) is still the one to show."""
+    def fit(self):
+        """Its width (as it's in ☰, at the viewer's text size), for good: room for the longest limit line a host can
+        say at the viewer's clock, Weekly Limit (Resets <the longest day's name> <the widest time>) and 100%, as
+        usage_lines draws it, beside its padding; MENU_USAGE_W at least."""
+        clock = "%H:%M" if clock_24h() else "%-I:%M %p"
+        days = [GLib.DateTime.new_local(2026, 11, 23 + i, 12, 0, 0).format("%A") for i in range(7)]
+        times = [GLib.DateTime.new_local(2026, 11, 23, h, 59, 0).format(clock) for h in (0, 10, 12, 20, 22, 23)]
+        probe = Gtk.Label()
+        longest = max((wording.say("subscriptions.weekly_limit", day=d, time=t) for d in days for t in times),
+                      key=lambda text: (probe.set_label(text), probe.measure(Gtk.Orientation.HORIZONTAL, -1)[1])[1])
+        line = Gtk.Box(spacing=8)  # (a line as usage_lines draws it, its name on one line)
+        line.append(Gtk.Label(label=longest))
+        line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent="100"),
+                              css_classes=["dim-label", "numeric"]))
+        self.set_size_request(-1, -1)
+        pad = self.measure(Gtk.Orientation.HORIZONTAL, -1)[1] - self.inside.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+        text = max(MENU_USAGE_W - pad, line.measure(Gtk.Orientation.HORIZONTAL, -1)[1])
+        self.set_size_request(pad + text, -1)
+        probe.set_label("")
+        probe.add_css_class("dim-label")
+        metrics = probe.get_pango_context().get_metrics(None, None)  # (as a label counts its characters)
+        char = max(metrics.get_approximate_char_width(), metrics.get_approximate_digit_width()) / Pango.SCALE
+        self.chars = max(1, int(text / char))  # (what's said in its place wraps within it: usage_lines)
+
+    def placeholder(self):
+        """Till the first answer: Checking… over two empty limits, as high as two limits are."""
+        self.name.set_label(wording.say("subscriptions.checking"))
+        self.name.set_visible(True)
+        usage_lines(self.bars, [("", " ", 0, None)] * 2, narrow=self.chars)
+        for child in list(_children(self.bars)):
+            if isinstance(child, Gtk.Box):
+                for label in _children(child):
+                    label.set_opacity(0)  # (no 0%: only the line's height kept)
+        self.bars.set_opacity(STALE_OPACITY)
+
+    def current(self, ticket, target):
+        """Whether an answer to ask ticket (for target: usage_account's) is still the one to show."""
         win = self.win()
-        return win is not None and ticket == self.ticket and where == self.where == win.terminal_host()[0]
+        return win is not None and ticket == self.ticket and target == self.target == usage_account(win)
 
-    def listed(self, ticket, where, reply):
-        if not self.current(ticket, where):
+    def listed(self, ticket, target, reply):
+        if not self.current(ticket, target):
             return False
         if reply.get("error") or "accounts" not in reply:
             self.name.set_label("")
             self.show_read(None, reply.get("error") or wording.say("host_status.no_answer"))
             return False
-        accounts = [a for a in reply["accounts"] if a.get("provider") == "claude"]
-        profile = (reply.get("defaults") or {}).get("claude", "")
+        where, provider, profile = target
+        accounts = [a for a in reply["accounts"] if a.get("provider") == provider]
+        if profile is None:
+            profile = (reply.get("defaults") or {}).get(provider, "")
         account = next((a for a in accounts if a["id"] == profile), None)
         if account is None:
             profile = ""
-        if account is None and not reply.get("claude_cli", True):
+        cli = reply.get("claude_cli", True) if provider == "claude" else \
+            provider not in (reply.get("missing") or {}) and bool(reply.get("codex_usage"))
+        if account is None and not cli:
+            self.none_for = target
             self.shown(False)
             return False
-        if profile != self.profile:
-            usage_lines(self.bars, None)
-        self.profile = profile
+        self.none_for = None
+        was, self.profile = self.profile, profile
         self.name.set_label(account["name"] if account else wording.say("subscriptions.cli_default"))
-        last = (reply.get("last_usage") or {}).get(profile)
-        if last and last.get("usage") and not self.get_visible():
-            self.show_read(_limits(last["usage"]), None, stale=True)
-        elif not self.get_visible():
-            self.show_read(None, None)
-        Ask(where, {"what": "usage", "id": profile}, lambda r: self.read(ticket, where, profile, r))
+        key = CODEX_CLI if provider == "codex" and not profile else profile
+        last = (reply.get("last_usage") or {}).get(key)
+        if was != profile:  # (the placeholder's, or another's reading: the host's last of this one, greyed, till it's read)
+            self.show_read(_limits(last["usage"]) if last and last.get("usage") else None, None, stale=True)
+        else:
+            self.name.set_visible(True)
+            self.shown(True)
+        Ask(where, {"what": "usage", "provider": provider, "id": profile},
+            lambda r: self.read(ticket, target, profile, r))
         return False
 
-    def read(self, ticket, where, profile, reply):
-        if not self.current(ticket, where) or profile != self.profile:
+    def read(self, ticket, target, profile, reply):
+        if not self.current(ticket, target) or profile != self.profile:
             return False
         if reply.get("error"):
             self.show_read(None, reply["error"])
@@ -534,9 +563,16 @@ class MenuUsage(Gtk.Button):
 
     def show_read(self, limits, said, stale=False):
         self.bars.set_opacity(STALE_OPACITY if stale else 1)
-        usage_lines(self.bars, limits if limits is not None else said)
+        usage_lines(self.bars, limits if limits is not None else said, narrow=self.chars)
         self.name.set_visible(bool(self.name.get_label()))
         self.shown(True)
+
+
+def _children(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        child = child.get_next_sibling()
 
 
 def attach_menu_usage(win, menu_button, section):

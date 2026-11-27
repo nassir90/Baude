@@ -111,7 +111,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
             family(Wording.Window.databaseSchemas, "databases", hostId, { tool("databases", it) }) { screen("databases") },
             family(Wording.Multiplex.terminalMenu, "terminal", hostId, { tool("terminal", it) }) { screen("terminal") },
         ),
-        listOf(usage { screen("subscriptions") }),
+        listOf(usage(hostId to sid) { screen("subscriptions") }),
         listOf(
             MenuItem(Wording.Window.settings) { screen("settings") },
             MenuItem(Wording.Changelog.title) { screen("changelog") },
@@ -137,7 +137,7 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
             family(Wording.Window.databaseSchemas, "databases", host, { tool("databases", it) }) { host?.let { tool("databases", it) } },
             family(Wording.Multiplex.terminalMenu, "terminal", host, { tool("terminal", it) }) { host?.let { tool("terminal", it) } },
         ),
-        listOf(usage(subscriptions)),
+        listOf(usage(null, subscriptions)),
         listOf(
             MenuItem(Wording.Window.settings) { settings() },
             MenuItem(Wording.Changelog.title) { changelog() },
@@ -155,8 +155,10 @@ private fun family(label: String, op: String, host: String?, on: (String) -> Uni
     return MenuItem(label, enabled = host != null && takes(host, op), hosts = Hosts(op, host, on), go = go)
 }
 
-/** ☰'s usage row (MenuUsage): the current subscription's usage; tapped, Settings → Subscriptions (go). */
-private fun usage(go: () -> Unit) = MenuItem(Wording.Subscriptions.title, content = { MenuUsage(it) }, go = go)
+/** ☰'s usage row (MenuUsage): the usage of the subscription the chat (host, sid; null: none) runs under; tapped,
+ * Settings → Subscriptions (go). */
+private fun usage(chat: Pair<String, String>?, go: () -> Unit) =
+    MenuItem(Wording.Subscriptions.title, content = { MenuUsage(chat, it) }, go = go)
 
 /** Whether a chat is archived on its host: read-only till it's unarchived (baudewindow's chat_archived). */
 fun isArchived(hostId: String, sid: String) = sid.isNotEmpty() && Mesh.session(hostId, sid)?.archived == true

@@ -288,7 +288,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         tools = Gio.Menu()  # (Baude's views over the window, and Browser: menufamily.attach; Files and Git are in the
         # right bar, code in tabs)
         menu.append_section(None, tools)
-        usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
+        usage = Gio.Menu()  # (the usage of the subscription the chat runs under: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
@@ -306,7 +306,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         import subscriptionpage
         menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Baude's too)
-        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Baude's too)
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the chat's subscription's usage, Baude's too)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
                          ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),

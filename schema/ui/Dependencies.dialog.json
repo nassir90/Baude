@@ -18,7 +18,11 @@
     "baudelib/serverrun.py:ServerRunning.handle",
     "Deps.kt:DepsPage",
     "Deps.kt:DepRow",
-    "Settings.kt:SettingsScreen"
+    "Settings.kt:SettingsScreen",
+    "decidersview.py:Group",
+    "decidersview.py:status",
+    "baudelib/deciders.py:Deciders",
+    "Deciders.kt:DecidersGroup"
   ],
   "copy": [
     "deps",
@@ -26,7 +30,8 @@
     "common",
     "window",
     "mesh_versions",
-    "side_panel"
+    "side_panel",
+    "deciders"
   ],
   "parts": [
     {
@@ -63,6 +68,54 @@
         "deps.unchecked",
         "deps.running_key",
         "common.copy"
+      ]
+    },
+    {
+      "name": "Deciders",
+      "shows": "The page's last group, under the dependencies' groups, headed \"Deciders\": the decision models' servers the picked host knows (a Strands Decider's, or any that answers its System One API), one row each: its name, then, dim and right-aligned, \"Running at <its URL>\" or why it isn't answering (\"Isn't running at http://127.0.0.1:8009\"), then Test (a refresh icon: looked at again now) and Remove (a bin). Under them, entry rows Name and URL (http://127.0.0.1:8000 to start with) and a button row \"Add Decider\", which adds it, looked at at once (a name taken, or a URL that isn't http or https, toasted, the list kept). The host's error, if it can't be asked, in the rows' place. The host's own deciders only: other members' are on their own Settings.",
+      "copy": [
+        "deciders.title",
+        "common.name",
+        "deciders.url",
+        "deciders.add",
+        "deciders.test",
+        "common.remove",
+        "deciders.running"
+      ],
+      "decisions": [
+        {
+          "said": "A new part of the SDK that I was unsure of how to incorporate earlier is a decision model SDK… These would be things like strands decider that are picked up on MLX or ollama (wherever you have them hosted). In addition to ask() we would offer decide().",
+          "rule": "Every app lets each host's decision-model servers (System One endpoints, such as strands-decider serve) be added, tested and removed in Settings, kept on that host, and a task's script asks one with decide() through its own host and the mesh, never straight to the server's URL; chat models (Ollama's, MLX's) are not deciders",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+            }
+          ]
+        },
+        {
+          "said": "If the model is unavailable, and also bound as a variable, the user gets a warning in advacce. Let the code itself handle the fallback.",
+          "rule": "Every host lists each decider with whether it answered when last looked (Decider's reachable, its own and the mesh's), so whatever binds one can warn before a run; decide() raises DecisionUnavailable when its decider can't be asked, and nothing picks another model in its place",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0cc3a949-77b2-47c9-a6e0-14ccf4a20a17"
+            }
+          ]
+        },
+        {
+          "said": "Just make the whole thing mate it's not a \"step toward decide\" I gave you a full proposal and vision and we decided on a plan",
+          "rule": "decide() ships whole: the call with typed answers, deciders as hosted models across the mesh, Settings on every app, and availability for typed variables",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "508838ac-2041-4f9f-a9f8-9fe0bee1f449"
+            }
+          ]
+        }
       ]
     }
   ],

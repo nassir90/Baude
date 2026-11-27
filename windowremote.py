@@ -1232,12 +1232,11 @@ class WindowRemote:
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
         left = self.take_background(self.session_id)  # (left mid-turn in a window, still at it)
-        if left is None and not self.agent_running():  # (said only where its agent's started again: one still
-            # running, at a turn or between them, is attached to, not resumed)
-            if reason:  # (its claude gone meanwhile: drop, on_exit)
-                self.note(wording.say("chat_notes.resumed_from", reason=reason))
-            elif self.resumed_note:
-                self.note(wording.say("chat_notes.resumed"))
+        if left is None and reason:  # (its claude gone meanwhile: drop, on_exit; said even if it's running again)
+            self.note(wording.say("chat_notes.resumed_from", reason=reason))
+        elif left is None and self.resumed_note and not self.agent_running():  # (said only where its agent's started
+            # again: one still running, at a turn or between them, is attached to, not resumed)
+            self.note(wording.say("chat_notes.resumed"))
         self.resumed_note, self.resume_reason = False, None
         if left is not None:
             self.attach_proc(left)

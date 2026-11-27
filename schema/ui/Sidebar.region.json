@@ -471,12 +471,22 @@
           "decisions": [
             {
               "said": "Those images illustrate that apk bot images are too small, compared ratios.",
-              "rule": "Every app sizes a Bot's picture to the desktop's ratio against the text beside it: in its list row 32px to the name's 12px (2.67 times the text size), 8px from the name; the Inbox's from-line and Send to Bot list 20px, Bot Settings 64px, and a chat header that shows one as its list row does. On the phone these are given in the desktop's px through Dp.icon, as icons are, so they grow with its text and its icon size.",
+              "rule": "Every app sizes a Bot's picture to the desktop's ratio against the text beside it: in its list row 32px to the name's 12px (2.67 times the text size), 8px from the name; the Inbox's from-line and Send to Bot list 20px, and Bot Settings 64px. On the phone these are given in the desktop's px through Dp.icon, as icons are, so they grow with its text and its icon size. The chat header's picture and its gap to the title are not: they keep the desktop's 32px and 8px as plain dp.",
               "decided": "2026-11-27",
               "source": [
                 {
                   "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
                   "message": "407b47f4-de13-41a9-8b64-b1909abd1007"
+                }
+              ]
+            },
+            {
+              "said": "The chat header's (top bar's) Bot picture size was fine before; it is mostly the main page (home list) that had to change.",
+              "rule": "The phone's chat header keeps its Bot picture and the gap to its title at the desktop's 32px and 8px as plain dp, the size it had before the Bot pictures were sized to their text. Only the home list's Bot rows (and the Bots page, Inbox and Bot Settings) follow the larger, text-matched size.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685"
                 }
               ]
             }

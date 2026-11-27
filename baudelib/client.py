@@ -11,6 +11,7 @@ import base64
 import itertools
 import json
 import os
+import shutil
 import socket
 import threading
 import time
@@ -130,6 +131,8 @@ class Remote:
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
+        self.eras = {}  # session id -> how many times its mirror's been let go of (forget_mirror): what a sync
+        self.mirror_lock = threading.Lock()  # fetched before then isn't written; held as a mirror's written or let go of
         self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
         self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
         self.ended = {}  # session id -> its last turn's end it's told of (turn_ended: {uuid, size, at: monotonic})
@@ -254,9 +257,13 @@ class Remote:
                 toolnames.learn(self.info.get("tool_names"))
                 # (this machine's Claude Desktop chats its host only lists: Baude lists them itself, from Desktop's
                 # own list, as its own claude runs them; Record has no chats)
-                self.sessions = {s["id"]: s for s in msg.get("sessions") or []
-                                 if isinstance(s, dict) and wire.is_id(s.get("id"))
-                                 and not (self.mine and s.get("taken_up") is False)}
+                now = {s["id"]: s for s in msg.get("sessions") or []
+                       if isinstance(s, dict) and wire.is_id(s.get("id"))
+                       and not (self.mine and s.get("taken_up") is False)}
+                for sid, s in now.items():  # (a Bot rotated since: its conversation's another, fetched from nothing)
+                    if (s.get("rotated") or None) != ((self.sessions.get(sid) or {}).get("rotated") or None):
+                        self.forget_mirror(sid)
+                self.sessions = now
                 if self.state != "alive":
                     self.state = "alive"
                 if self.mine:
@@ -369,6 +376,24 @@ class Remote:
                 return path
         return os.path.join(self.network.home, self.key, f"{session_id}.jsonl")
 
+    def forget_mirror(self, session_id):
+        """A session's copy here let go of (a Bot rotated: its conversation's a new one), its subagents' and who its
+        messages were from with it: fetched again from nothing. A sync going on writes nothing it fetched before this
+        (its era's gone: fetched again), so nothing of the old conversation's added after. Not under its sync's lock:
+        this runs on the thread that reads the host's answers, which that sync waits on."""
+        self.agents_synced.pop(session_id, None)
+        self.senders.pop(session_id, None)
+        if self.local:
+            return  # (read where it is: nothing copied)
+        with self.mirror_lock:
+            self.eras[session_id] = self.eras.get(session_id, 0) + 1
+            try:
+                with open(self.mirror(session_id), "wb"):
+                    pass
+            except OSError:
+                pass
+            shutil.rmtree(self.subagents_mirror(session_id), ignore_errors=True)
+
     def direct(self, session_id):
         """Is a session's transcript read where it is (mirror), not copied?"""
         return not self.mirror(session_id).startswith(os.path.join(self.network.home, ""))
@@ -392,13 +417,16 @@ class Remote:
             lock = self.syncing.setdefault(session_id, threading.Lock())
         with lock:
             while True:
-                at = self.mirrored(session_id)
+                era, at = self.eras.get(session_id, 0), self.mirrored(session_id)
                 r = self.call({"op": "transcript", "session": session_id, "offset": at}, timeout)
                 if r.get("op") != "transcript":
                     return False
                 data = base64.b64decode(r.get("data") or "")
-                with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
-                    f.write(data)
+                with self.mirror_lock:
+                    if self.eras.get(session_id, 0) != era:  # (let go of meanwhile: fetched again, from nothing)
+                        continue
+                    with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
+                        f.write(data)
                 if not data or r["next"] >= r["size"]:
                     break
         if subagents and self.subagents_behind(session_id):  # (not under the transcript's lock: a window that
@@ -449,43 +477,53 @@ class Remote:
     def _sync_subagents(self, session_id, timeout):
         folder = self.subagents_mirror(session_id)
         while True:
-            had = self.subagents_had(session_id)
+            era, had = self.eras.get(session_id, 0), self.subagents_had(session_id)
             r = self.call({"op": "subagents", "session": session_id, "have": had}, timeout)
             if r.get("op") != "subagents":
                 return False
-            got, listed = False, set()
-            for f in r.get("files") or []:
-                name = f.get("name") if isinstance(f, dict) else None
-                if not _subagent_file(name):
-                    continue
-                listed.add(name)
-                path, at = os.path.join(folder, name), (had.get(name) or [0])[0]
-                data = base64.b64decode(f.get("data") or "")
-                got |= bool(data)
-                if f.get("offset") == at and at:
-                    if data:
-                        with open(path, "ab") as fh:
-                            fh.write(data)
-                elif data or f.get("offset") != at or name not in had:  # (new, changed, or shorter there)
-                    os.makedirs(folder, exist_ok=True)
-                    with open(os.path.join(folder, f".{name}.tmp"), "wb") as fh:
-                        fh.write(data)
-                    os.replace(os.path.join(folder, f".{name}.tmp"), path)
-                if isinstance(f.get("mtime"), int) and os.path.exists(path) and \
-                        (not data or (f.get("next") or 0) >= (f.get("size") or 0)):  # (as it is there, all of it)
-                    os.utime(path, ns=(f["mtime"], f["mtime"]))
-            if r.get("more") and got:
+            with self.mirror_lock:
+                if self.eras.get(session_id, 0) == era:
+                    done = self._take_subagents(session_id, folder, had, r)
+                    if done is not None:
+                        return done
+            # (more to fetch; or let go of meanwhile: fetched again, from nothing)
+
+    def _take_subagents(self, session_id, folder, had, r):
+        """(_sync_subagents', its mirror's lock held) What the server sent of a session's subagents' files, written:
+        True, or None if there's more to fetch."""
+        got, listed = False, set()
+        for f in r.get("files") or []:
+            name = f.get("name") if isinstance(f, dict) else None
+            if not _subagent_file(name):
                 continue
-            if not r.get("more"):
-                for name in set(had) - listed:  # (gone there)
-                    try:
-                        os.remove(os.path.join(folder, name))
-                    except OSError:
-                        pass
-                self.agents_synced[session_id] = max(  # (what the server lists now: its files' newest)
-                    (f["mtime"] for f in r.get("files") or [] if isinstance(f, dict) and isinstance(f.get("mtime"), int)),
-                    default=0)
-            return True
+            listed.add(name)
+            path, at = os.path.join(folder, name), (had.get(name) or [0])[0]
+            data = base64.b64decode(f.get("data") or "")
+            got |= bool(data)
+            if f.get("offset") == at and at:
+                if data:
+                    with open(path, "ab") as fh:
+                        fh.write(data)
+            elif data or f.get("offset") != at or name not in had:  # (new, changed, or shorter there)
+                os.makedirs(folder, exist_ok=True)
+                with open(os.path.join(folder, f".{name}.tmp"), "wb") as fh:
+                    fh.write(data)
+                os.replace(os.path.join(folder, f".{name}.tmp"), path)
+            if isinstance(f.get("mtime"), int) and os.path.exists(path) and \
+                    (not data or (f.get("next") or 0) >= (f.get("size") or 0)):  # (as it is there, all of it)
+                os.utime(path, ns=(f["mtime"], f["mtime"]))
+        if r.get("more") and got:
+            return None
+        if not r.get("more"):
+            for name in set(had) - listed:  # (gone there)
+                try:
+                    os.remove(os.path.join(folder, name))
+                except OSError:
+                    pass
+            self.agents_synced[session_id] = max(  # (what the server lists now: its files' newest)
+                (f["mtime"] for f in r.get("files") or [] if isinstance(f, dict) and isinstance(f.get("mtime"), int)),
+                default=0)
+        return True
 
     def stop(self):
         self.stopped = True

@@ -101,6 +101,10 @@
       ],
       "description": "A Bot's; null for a chat."
     },
+    "rotated": {
+      "type": ["number", "null"],
+      "description": "A Bot's: when it was last rotated (its conversation archived as a past thread, a new one begun), epoch seconds; null if it never has. A head's copy of its transcript is let go of as it changes."
+    },
     "autofix": {
       "anyOf": [
         {

@@ -80,7 +80,7 @@ object Groups {
     }
 }
 
-/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, Bot items,
+/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, Bot items (Rotate among them),
  * Move to Group ▸ (its list in place of the items, a back row first), Archive, Stop, Access…, Move to Trash…; Delete alone
  * while its host's gone. at: where it was pressed, in the row. */
 @Composable
@@ -114,9 +114,19 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
             return@Popover
         }
         if (!gone) MenuChoice(Wording.Common.renameEllipsis, false) { dismiss(); renaming = true }
+        val canRotate = !gone && !active && s.bot != null && takes(h, "rotate") // (a Codex Bot's too; not at a turn,
+        // as Archive isn't)
+        fun rotate() {
+            dismiss()
+            Mesh.ask(h, Msg.Rotate(session = sid).json()) { r ->
+                if (r.optString("op") != "rotated") toast(Wording.Trash.hostRefused(host = Mesh.label(h), op = "rotate", why = said(r)))
+            }
+        }
+        if (canRotate && !canBot) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
         if (!gone && canBot && (top || s.bot != null)) {
             if (s.bot != null) {
                 MenuChoice(Wording.Sidebar.botSettingsEllipsis, false) { dismiss(); botting = true }
+                if (canRotate) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
                 MenuChoice(Wording.Sidebar.unbot, false) {
                     dismiss()
                     Mesh.ask(h, Msg.Bot(session = sid, bot = null).json().put("bot", JSONObject.NULL)) { r ->

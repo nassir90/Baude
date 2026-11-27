@@ -293,6 +293,7 @@ class WindowRemote:
             MarkdownView.base_dir = cwd  # (its relative links are its server's: not one of this machine's files)
         self.reset_stream_state()
         self.session_id, self.remote, self.desktop_chat = info["id"], r, False
+        self.shown_rotated = (r.sessions.get(info["id"]) or {}).get("rotated")  # (a Bot rotated since: on_network)
         path = r.mirror(info["id"])
         if not os.path.exists(path) and not r.local:  # (one on this machine is read where it is, once it's there)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -387,6 +388,11 @@ class WindowRemote:
         if (git := getattr(getattr(self, "panel", None), "git_page", None)) is not None:
             git.show_autofix()  # (Auto-fix turned on or off elsewhere: its agent, the phone)
         listed = self.remote.sessions.get(self.session_id)
+        if listed and listed.get("rotated") != getattr(self, "shown_rotated", None):  # (the Bot rotated: its new
+            self.shown_rotated = listed.get("rotated")                                 # conversation shown)
+            info = remote_info({**listed, "server": self.remote})
+            GLib.idle_add(lambda: self.session_id == info["id"] and self.open_remote(info) and False)
+            return
         if listed and (listed.get("title") or getattr(self, "session_title", None)) and \
                 (self.bot_name() or listed.get("title") or self.session_title) != self.title_label.get_text():
             self.show_title(listed.get("title") or self.session_title)  # (a new title, or made a Bot or renamed one)

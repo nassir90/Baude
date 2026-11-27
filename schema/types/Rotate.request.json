@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's conversation archived as a past thread of its own (\"<Bot> / <its title>\", read-only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.",
+  "properties": {
+    "op": {
+      "const": "rotate",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The Bot's session id."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

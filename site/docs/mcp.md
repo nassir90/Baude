@@ -837,6 +837,14 @@ The host process's restart, as a head asks for it: once nothing's running (its p
 |---|---|---|---|
 | `do` | `free` \| `now` \| `pause` | yes | free: restart once no chat's running a command and no task's running (and this head's pause let go of); now: restart at once, what's running stopped and turns cut short; pause: no restart while this head holds it (till it says free, or its connection goes). |
 
+#### `rotate` (Rotate)
+
+A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id. |
+
 #### `run_task` (RunTask)
 
 One of a Bot's tasks run now, by hand.
@@ -846,6 +854,15 @@ One of a Bot's tasks run now, by hand.
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
 | `inputs` | object |  | Its form, filled. |
+
+#### `seen` (Seen)
+
+A session seen: a head shows it on screen (its window the one in front, its chat shown; the phone's app in front, on its chat), up to upto. Its last turn's end is seen once upto reaches it, and every head is told so in its listing (seen): each takes back its notification of it, and its dot.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `upto` | integer | yes | How much of its transcript the head shows (its size, as the head has read it). |
 
 #### `senders` (SendersOp)
 
@@ -1776,6 +1793,24 @@ restart's answer: the restart it keeps, as info's restart says it (it goes once 
 |---|---|---|---|
 | `restart` | RestartState? |  | Its restart, or null: none pending. |
 
+#### `rotated` (Rotated)
+
+rotate's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | Session | yes | The Bot, as it's listed now: in its new conversation. |
+| `thread` | Session | yes | Its past thread, as it's listed now: archived. |
+
+#### `seen_set` (SeenSet)
+
+seen's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `seen` | TurnEnd? |  | The last turn's end seen now (null: none yet). |
+
 #### `senders` (SendersReply)
 
 Its sender store.
@@ -2119,6 +2154,8 @@ A session's turn ended.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
+| `uuid` | string/null |  | The uuid of the message it ended with (its listing's ended's: what a notification of it is known by); null for a chat that keeps no turn's end (ended). |
+| `size` | integer/null |  | Its transcript's size as it ended (its listing's ended's). |
 | `result` | string/null |  | Its result. |
 | `is_error` | boolean |  | It ended in an error. |
 | `cost` | number/null |  | Its cost, USD. |
@@ -3108,6 +3145,7 @@ A session as a host lists it.
 | `commands` | array of Command |  | What its agent is running; none once its agent's gone. |
 | `cut` | number/null |  | When the host process stopped its agent at a turn or asking (shutting down, a quit, a restart), so a head can offer to carry it on; null once a user message is sent to it. |
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
+| `rotated` | number/null |  | A Bot's: when it was last rotated (its conversation archived as a past thread, a new one begun), epoch seconds; null if it never has. A head's copy of its transcript is let go of as it changes. |
 | `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
 | `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
 | `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
@@ -3125,6 +3163,8 @@ A session as a host lists it.
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
 | `always_allow` | array of string |  | The tools allowed whenever it asks for them, sorted. |
 | `asks` | array of Ask |  | What it's asking, not answered yet. |
+| `ended` | TurnEnd? |  | Its last turn's end, as its host keeps it; null before one has ended (and always for a chat another chat's mesh tools, or a task's run, started). |
+| `seen` | TurnEnd? |  | The last turn's end that's been seen: a head showed it on screen (seen), or its user wrote in it since. Ended and not seen: every head keeps its notification of it, and its dot, till it is; then every head takes them back. |
 
 #### SignalRef
 
@@ -3255,6 +3295,7 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
 | `chats` | array/null of string |  | The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them. |
+| `command` | string/null |  | What it runs, as a command line: its interpreter, then its script's path on its host; null: a bot task's, given its Bot as a turn. |
 | `pid` | integer/null |  | Its script's process id, as it runs. |
 | `pgid` | integer/null |  | Its script's process group, as it runs: what's left of it killed as its host starts again, if its host was killed as it ran. |
 
@@ -3454,6 +3495,15 @@ How a host's MCP tools are named, for its heads to show (mcp__<server>__<tool> a
 | `servers` | object |  | Each server's title, by its name as it's put in its tools' names (each character not a letter, digit, _ or - made _): mesh: Mesh, claude_ai_Slack: Slack. |
 | `tools` | object |  | A tool's title, by its whole name, where its server gives one (mcp__emission__javascript_tool: Run JavaScript). |
 
+#### TurnEnd
+
+A turn's end, as its host keeps it: what every head's notification of it is known by, and what's seen of a chat is said in.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `uuid` | string | yes | The uuid of the message the turn ended with (its result's, as its agent said it; the host's own where it said none). |
+| `size` | integer | yes | Its transcript's size as the turn ended: a head that shows that much of it shows the turn's end. |
+
 #### Update
 
 Its own updater has a newer version ready, and waits for those commands to end before it restarts onto it.
@@ -3562,6 +3612,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `22` | The wire's version, as a host's hello says it. |
+| `VERSION` | `24` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

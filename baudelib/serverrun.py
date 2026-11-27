@@ -2,6 +2,7 @@
 a head's requests (handle), feedback, tasks and Bots.
 """
 import base64
+import copy
 import json
 import os
 import re
@@ -13,11 +14,11 @@ import uuid
 
 from baudelib import (
     access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire, wording,
-    worktree,
+    hostlogin, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire,
+    wording, worktree,
 )
 from baudelib.serverstate import (
-    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
+    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, clean_env,
 )
 
 
@@ -973,6 +974,12 @@ class ServerRunning:
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh)
+                try:
+                    thread = self.rotate(s)
+                except (OSError, ValueError) as e:
+                    return reply("error", error=str(e), plain=True)
+                return reply("rotated", session=s.listing(), thread=thread.listing())
             if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
                 # at once: kept if it can't be)
                 held = s.meta.get("held") or []
@@ -1120,6 +1127,117 @@ class ServerRunning:
         self.renew_agent(s)
         self.changed()
         return s.listing()
+
+    # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
+    THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
+                   "fork_from", "adopted", "desktop", "ended", "seen")
+
+    def rotate(self, s):
+        """(under the lock) A Bot's conversation archived as a past thread (a session of its own, read-only, named
+        "<Bot> / <its title>"), and the Bot carried on in a new, empty one with a new agent: its id, name, picture,
+        memory, tasks, browser, rules and place all as they were. Refused (ValueError) while it's at a turn, asking,
+        running commands or agents in the background, or a task's ask waits on it. Kept in an order a crash can't
+        spoil: the thread's settings first (rotating, till the Bot's are), then its files moved, then the Bot's;
+        one left half done is undone or finished as the host next starts (settle_rotations), or at once if a step
+        fails here. The thread: the new session, as it's kept."""
+        bot = s.meta.get("bot")
+        if not bot:
+            raise ValueError(wording.say("host_errors.not_a_bot"))
+        if s.busy or s.asks or s.queued or s.codex_queue:
+            raise ValueError(wording.say("host_errors.at_a_turn"))
+        if s.commands() or s.background_agents:
+            raise ValueError(wording.say("host_errors.background_running"))
+        if self.tasks.asking(s.id):
+            raise ValueError(wording.say("host_errors.task_asking"))
+        if s.transcript() is None:
+            raise ValueError(wording.say("host_errors.nothing_to_rotate"))
+        self.rescan(s)  # (its title as its transcript has it now)
+        listed = s.listing()
+        meta = copy.deepcopy(s.meta)
+        for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
+                    "start_key", "rotated", "last_thread"):
+            meta.pop(key, None)
+        title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
+        meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",
+                    rotating=True, cli_id=s.meta.get("cli_id") or (
+                        None if models.model_program(s.meta.get("model")) == "codex" else s.id))
+        if not meta["cli_id"]:
+            meta.pop("cli_id")
+        if meta.get("ended"):  # (its last turn's end, seen: rotated by hand, and read-only from now on)
+            meta["seen"] = dict(meta["ended"])
+        thread = Session(self, meta)
+        was = copy.deepcopy(s.meta)
+        try:
+            self.save(thread)  # (1: the thread, rotating: undone as the host starts, unless the Bot's kept below)
+            for src, dst in self.rotated_files(s.id, thread.id):  # (2: the host's own transcript, its senders)
+                if os.path.exists(src):
+                    os.replace(src, dst)
+            ended = s.meta.get("ended")
+            for key in self.THREAD_KEYS:
+                s.meta.pop(key, None)
+            if ended:  # (the Bot's last turn's end, said seen: every head's notification of it taken back)
+                s.meta["seen"] = dict(ended)
+            if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
+                s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
+            s.meta.update(said=time.time(), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
+                          last_thread=thread.id)
+            self.save(s)  # (3: the Bot afresh: from here the thread's its own)
+        except Exception:
+            s.meta = was
+            self.undo_rotation(s.id, thread.id)
+            raise
+        if s.proc is not None:  # (its agent between turns: let go of, as ensure_proc lets go of one that's stopping)
+            old, s.proc = s.proc, None
+            old.stopping = True
+            s.forget_commands()
+            old.kill()
+            self.drop_routes(s)
+        thread.meta.pop("rotating")
+        try:
+            self.save(thread)  # (4: settled; if it isn't kept, settle_rotations settles it next start)
+        except OSError as e:
+            self.log(f"rotating {s.id}: {thread.id} not marked done yet: {e}")
+        self.sessions[thread.id] = thread
+        self.rescan(thread)
+        thread.agents = thread.subagent_files()
+        s.scan = s.info = s.stat = s.agents = None
+        s.senders, s.outputs, s.outputs_at, s.context_asked = {}, set(), 0, 0.0
+        s.rewinds.clear()
+        s.reverting.clear()
+        self.rescan(s)
+        self.log(f"rotated {s.id}: its conversation archived as {thread.id}")
+        self.changed()
+        return thread
+
+    def rotated_files(self, bot, thread):
+        """(from, to) of what a rotation moves from the Bot to its thread: the host's own transcript, its senders."""
+        return [(os.path.join(self.state_dir, "transcripts", f"{bot}.jsonl"),
+                 os.path.join(self.state_dir, "transcripts", f"{thread}.jsonl")),
+                (self.senders_path(bot), self.senders_path(thread))]
+
+    def undo_rotation(self, bot, thread):
+        """A rotation not kept to its end (the Bot's settings never written): its files moved back to the Bot, and
+        the thread gone."""
+        for src, dst in self.rotated_files(bot, thread):
+            if os.path.exists(dst) and not os.path.exists(src):
+                os.replace(dst, src)
+        try:
+            os.remove(os.path.join(self.state_dir, "sessions", f"{thread}.json"))
+        except FileNotFoundError:
+            pass
+        self.sessions.pop(thread, None)
+
+    def settle_rotations(self):
+        """(as the host starts) Rotations a crash left half done: one whose Bot's settings were kept, finished; any
+        other undone, its Bot as it was."""
+        for t in [x for x in self.sessions.values() if x.meta.get("rotating")]:
+            b = self.sessions.get(t.meta.get("thread_of"))
+            if b is not None and b.meta.get("last_thread") == t.id:
+                t.meta.pop("rotating")
+                self.save(t)
+            else:
+                self.log(f"rotating {t.meta.get('thread_of')}: undone, the host stopped before it was")
+                self.undo_rotation(t.meta.get("thread_of"), t.id)
 
     def renew_agent(self, s):
         """(under the lock) A session's agent told what it's told at its start anew (a Bot made, its mesh's tools

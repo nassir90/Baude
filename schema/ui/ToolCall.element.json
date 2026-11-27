@@ -30,7 +30,11 @@
     "widgets.py:Disclosure",
     "widgets.py:_card_status",
     "widgets.py:_status_icon",
-    "widgets.py:Spinner"
+    "widgets.py:Spinner",
+    "toolcards.py:ToolCard.offer_background",
+    "windowdrafts.py:WindowDrafts.offers_background",
+    "windowdrafts.py:WindowDrafts.send_to_background",
+    "windowsignal.py:WindowSignal.task_from_result"
   ],
   "copy": [
     "meta",
@@ -57,7 +61,7 @@
         },
         {
           "name": "toggles",
-          "shows": "Small toggle buttons right after the name, 4px apart (0.85em text, 1px/7px padding, 4px corners; pressed look while open). The first opens the input; its label is \"Command\" for Bash/BashOutput/PowerShell, \"Prompt\" for Task/Agent, \"Diff\" for Edit/MultiEdit, else \"Input\". The second, \"Output\", appears only once there is output, and reads \"Error\" when the call failed. A subagent's card (Task/Agent run as a tracked subagent) has \"View\" instead of Output (Output kept only for an Error). A plain Read (just a path, no line range or pages) has no Input button; with no buttons at all, the summary follows the name directly.",
+          "shows": "Small toggle buttons right after the name, 4px apart (0.85em text, 1px/7px padding, 4px corners; pressed look while open). The first opens the input; its label is \"Command\" for Bash/BashOutput/PowerShell, \"Prompt\" for Task/Agent, \"Diff\" for Edit/MultiEdit, else \"Input\". The second, \"Output\", appears only once there is output, and reads \"Error\" when the call failed. A subagent's card (Task/Agent run as a tracked subagent) has \"View\" instead of Output (Output kept only for an Error). A plain Read (just a path, no line range or pages) has no Input button; with no buttons at all, the summary follows the name directly. While a command (Bash, PowerShell) or a subagent (Task, Agent) runs in the foreground of a chat whose agent can move it to the background (Claude Code, by its background_tasks control request; Codex, pi and Apple's model have no way to), \"Background\" comes last among them; gone once the call ends, waits for your permission, or is moved.",
           "copy": [
             "meta.input",
             "meta.output",
@@ -66,9 +70,29 @@
             "common.command",
             "common.prompt",
             "tool_calls.diff",
-            "tool_calls.view_tip"
+            "tool_calls.view_tip",
+            "tool_calls.to_background",
+            "tool_calls.to_background_tip",
+            "tool_calls.not_moved",
+            "tool_calls.not_moved_why"
           ],
           "actions": [
+            {
+              "by": "click Background",
+              "does": "Asks the chat's agent to move that call to the background (Claude Code's background_tasks, by the call's tool_use_id). The command or subagent keeps running there; the call's result says so, the card reads \"running in background\" with its spinner going until the task ends, and the turn goes on, so a message sent or queued meanwhile reaches the agent. If the agent says nothing was moved (the call ended first), or refuses, a quiet note in the chat says so and Background comes back while the call still runs. Tooltip \"Send to background: it keeps running, and the turn goes on, so a message you send reaches the agent\".",
+              "decisions": [
+                {
+                  "said": "Where an agent (pi, claude, codex) supports it I should be able to click a button to send a task to the background if I want a messagse to go through to the model.",
+                  "rule": "Every app offers a button on a running command's or subagent's call that moves it to the background, for every agent that can move one there as it runs (Claude Code); none for an agent that can't (Codex, pi, Apple's model)",
+                  "decided": "2026-11-27",
+                  "source": [
+                    {
+                      "issue": "BaudeInternal#291"
+                    }
+                  ]
+                }
+              ]
+            },
             {
               "by": "click Command / Prompt / Diff / Input",
               "does": "Slides the input view open under the line (120ms), or closed again. The button stays where it is on screen; what's below moves."

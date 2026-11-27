@@ -42,7 +42,7 @@ from gitview import GIT_POOL  # noqa: E402,F401
 from signalrefs import db_prefetch, pg_forget, tool_dir  # noqa: E402
 from signalcode import REF_LSP_PACKAGES, lsp_dir  # noqa: E402
 from signalnames import Signal  # noqa: E402
-from toolcards import artifact_from_tool  # noqa: E402
+from toolcards import BACKGROUNDED_RE, artifact_from_tool  # noqa: E402
 from sessionlist import bot_picture, network, remote_info  # noqa: E402
 from refpopovers import (  # noqa: E402
     LookupPopover, RefPopover, chat_checkout, in_chat, ref_busy, ref_column_table, ref_kind_label, ref_run_names,
@@ -1157,12 +1157,13 @@ class WindowSignal:
 
     # ---- background tasks rebuilt from a transcript (a viewed / tailed / resumed session has no
     # task events: those only exist on the live stream of the claude that runs it)
-    def task_from_result(self, card, content):
+    def task_from_result(self, card, content, from_file=True):
+        """from_file: a task the transcript tells of, which no live event will end; else one moved to the background
+        as it ran (send_to_background), whose end claude tells."""
         texts = content if isinstance(content, list) else [content]
         text = "\n".join(c.get("text", "") if isinstance(c, dict) else str(c or "") for c in texts)
         info = None
-        if m := re.search(r"Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)",
-                          text):
+        if m := BACKGROUNDED_RE.search(text):
             info = {"task_id": m.group(1), "task_type": "local_bash", "output_file": m.group(2).rstrip("."),
                     "description": card.input.get("description") or card.input.get("command")}
         elif "Async agent launched" in text and (m := re.search(r"agentId: (\w+)", text)):
@@ -1172,7 +1173,7 @@ class WindowSignal:
             return
         info.update({"tool_use_id": card.tool_id, "is_backgrounded": True})
         self.on_task_event("task_started", info)
-        self.tasks[info["task_id"]]["from_file"] = True
+        self.tasks[info["task_id"]]["from_file"] = from_file
         if info["task_type"] == "local_agent":
             self.follow_subagent(info["task_id"], card.tool_id, opened=False)
 

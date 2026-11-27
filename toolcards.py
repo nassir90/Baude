@@ -337,6 +337,10 @@ def tool_input_view(name, inp):
 # there is resumed from its transcript, and said so: show_cut). A call of one of these till its result (a subagent's
 # too), and a background task that isn't a subagent till its end.
 COMMAND_TOOLS = ("Bash", "PowerShell")
+BACKGROUNDABLE = COMMAND_TOOLS + ("Agent", "Task")  # (what Claude Code moves to the background: offer_background)
+# (a command's result that says it runs in the background: started there, or moved there as it ran)
+BACKGROUNDED_RE = re.compile(r"Command (?:running in background|was manually backgrounded by user) with ID: "
+                             r"(\S+?)\.?\s+Output is being written to: (\S+)")
 CUT_CONTINUE = wording.say("cut_short.message")
 
 
@@ -575,6 +579,7 @@ class ToolCard(Gtk.Box):
         self.name, self.tool_id, self.partial_json, self.input = name, tool_id, "", {}
         self.state, self.task, self.decision, self.listeners = "running", None, None, []
         self.artifact, self.asking, self.opened_to_ask = None, None, False
+        self.to_background, self.moving = None, False  # (its Background button, offered: offer_background)
         self.answer = None  # (an answer_task call's, once it's taken: answer_result)
         # one line:  Name [Command] [Output]  summary (cut off with …)        [spinner, while it runs]
         # and under it, what those open: what was asked, what came back (once there is some)
@@ -631,6 +636,28 @@ class ToolCard(Gtk.Box):
         self.status = _card_status(self.state) if self.asking is None else None  # (waiting on you: not running)
         if self.status is not None:
             self.line.append(self.status)
+        if getattr(self, "to_background", None) is not None:
+            self.to_background.set_visible(self.state == "running" and self.asking is None and not self.moving)
+
+    def offer_background(self, move):
+        """A command or subagent its agent can move to the background as it runs (Claude Code's background_tasks):
+        Background, beside its toggles while it runs, calls move(card). It keeps running there and its turn goes on,
+        so what's sent at the turn reaches the agent."""
+        if self.base not in BACKGROUNDABLE or self.to_background is not None:
+            return
+        btn = self.to_background = Gtk.Button(label=wording.say("tool_calls.to_background"), valign=Gtk.Align.CENTER,
+                                              focus_on_click=False)
+        btn.set_tooltip_text(wording.say("tool_calls.to_background_tip"))
+        btn.add_css_class("tool-toggle")
+        btn.connect("clicked", lambda *_: move(self))
+        self.toggles.append(btn)
+        self.toggles.set_visible(True)
+        self.show_status()
+
+    def moved(self, moving):
+        """Asked to move to the background (moving), or its agent said it couldn't: Background hidden meanwhile."""
+        self.moving = moving
+        self.show_status()
 
     def ask(self, buttons):
         """Asked whether to allow it, here in the card: what it would run, opened, and under it buttons (Allow, Deny…).

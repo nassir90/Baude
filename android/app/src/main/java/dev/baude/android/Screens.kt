@@ -370,7 +370,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
             val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
             drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
-                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
+                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id },
+                background = if (working && program(session?.model) == "claude") { call -> moveToBackground(chat, call) } else null) { line ->
                 val uuid = line.uuid
                 androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },

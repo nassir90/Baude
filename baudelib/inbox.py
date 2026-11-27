@@ -611,6 +611,8 @@ class Inbox:
             s = srv.sessions.get(ask["session"])
             if s is None or s.deleting:
                 raise ValueError(wording.say("host_errors.no_task"))
+            if is_chats(ask) and s.meta.get("archived"):  # (not started again by it)
+                raise ValueError(wording.say("inbox.chat_archived"))
             srv.take_input(conn, s, {"type": "user", "uuid": str(uuid.uuid4()),
                                      "message": {"role": "user", "content": told}})
         return {"ask": ask["id"]}

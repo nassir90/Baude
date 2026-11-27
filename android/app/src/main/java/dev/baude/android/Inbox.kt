@@ -221,12 +221,22 @@ object Inbox {
         }
     }
 
+    /** Is it a chat's own ask (its model's, raised with its chat's tools), not a task's run's? */
+    fun chats(a: Msg.InboxAsk) = a.run.isNullOrBlank()
+
+    /** Who an ask's from, as its from line and screen name it: a task's, its task's name; a chat's own, the chat's (its
+     * Bot's name, or its title as its host lists it now, else as it was when it asked). */
+    fun asker(host: String, a: Msg.InboxAsk): String =
+        if (!chats(a)) a.taskName.orEmpty()
+        else Mesh.session(host, a.session.orEmpty())?.let(::chatName) ?: a.chat?.ifBlank { null } ?: a.bot.orEmpty()
+
     /** The ask as Meta reads it (read_ask): its title, body, buttons by index, form and its values now, task and run. */
     fun described(host: String, a: Msg.InboxAsk): String {
         val v = a.versions?.lastOrNull() ?: return "(it has no version)"
         val values = form(host, a, v)
         return buildString {
-            append("<ask id=\"${a.id}\" status=\"${a.status}\" task=\"${a.taskName}\" task_id=\"${a.task}\" run=\"${a.run}\" ")
+            if (chats(a)) append("<ask id=\"${a.id}\" status=\"${a.status}\" chat=\"${asker(host, a)}\" session=\"${a.session}\" ")
+            else append("<ask id=\"${a.id}\" status=\"${a.status}\" task=\"${a.taskName}\" task_id=\"${a.task}\" run=\"${a.run}\" ")
             append("bot=\"${a.bot.orEmpty()}\" host=\"${Mesh.label(host)}\" version=\"${a.versions.orEmpty().size}\">\n")
             v.title?.let { append("Title: $it\n") }
             append(v.body.orEmpty().trim()).append("\n\n")
@@ -404,7 +414,7 @@ fun AskScreen(host: String, id: String, back: () -> Unit) {
     AskPictures {
     Box(Modifier.fillMaxSize().background(c.frame)) {
         Column(Modifier.fillMaxSize().imePadding()) {
-            Bar(a?.taskName?.ifBlank { null } ?: Wording.Inbox.title,
+            Bar(a?.let { Inbox.asker(host, it) }?.ifBlank { null } ?: Wording.Inbox.title,
                 start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
             Column(Modifier.weight(1f).fillMaxWidth().background(c.inside)) {
                 if (a == null) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -414,8 +424,9 @@ fun AskScreen(host: String, id: String, back: () -> Unit) {
                         .padding(horizontal = Gap.chatH, vertical = 12.dp)) {
                         AskView(host, a, inList = false, under = c.inside, gone = now == null, answered = back)
                     }
-                    val bot = a.bot?.ifBlank { null } ?: Mesh.contact(host, a.session.orEmpty())?.name ?: Wording.Sidebar.bot
-                    Box(Modifier.navigationBarsPadding()) {
+                    val bot = (if (Inbox.chats(a)) Inbox.asker(host, a).ifBlank { null } else null) ?: a.bot?.ifBlank { null }
+                        ?: Mesh.contact(host, a.session.orEmpty())?.name ?: Wording.Sidebar.bot
+                    if (!Inbox.chats(a) || a.status != "stopped") Box(Modifier.navigationBarsPadding()) {
                         AskBox("", compact = true, sendLabel = Wording.Inbox.sendTo(bot = bot)) { text ->
                             Mesh.ask(host, Msg.InboxSay(ask = id, text = text).json()) { r -> refused(r)?.let(::toast) }
                         }
@@ -563,25 +574,27 @@ private fun strikeFirstHeading(md: String): String {
     return lines.joinToString("\n")
 }
 
-/** Who it's from: the asking Bot's picture, "from Task “<task>” on <host>" (dim, small); at its end, a stopped ask's
- * "Not answered — the task stopped" or "Sent to <Bot>", then ⋮: History (each
+/** Who it's from: the asking Bot's picture, "from Task “<task>” on <host>" (a chat's own: "from <chat> on <host>", a
+ * picture only if it's a Bot's) (dim, small); at its end, a stopped ask's "Not answered — the task stopped" (a chat's:
+ * "Not answered — the chat was archived or deleted") or "Sent to <Bot>", then ⋮: History (each
  * version and when it came, the one shown ticked) and, on a stopped ask, Remove. */
 @Composable
 private fun FromRow(host: String, a: Msg.InboxAsk, all: List<Msg.InboxVersion>, at: Int) {
     val c = LocalBaude.current
     val contact = Mesh.contact(host, a.session.orEmpty())
     LaunchedEffect(contact?.pictureKey) { contact?.let { Mesh.picture(it) } }
-    val name = a.bot?.ifBlank { null } ?: contact?.name ?: Wording.Sidebar.bot
+    val name = a.bot?.ifBlank { null } ?: contact?.name ?: Inbox.asker(host, a).ifBlank { null } ?: Wording.Sidebar.bot
     var menu by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = 20.dp.icon)
+        if (!Inbox.chats(a) || !a.bot.isNullOrBlank()) Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = 20.dp.icon)
         val end = when {
-            a.status == "stopped" -> Wording.Inbox.notAnswered
+            a.status == "stopped" -> if (Inbox.chats(a)) Wording.Inbox.chatStopped else Wording.Inbox.notAnswered
             a.sentToName != null -> Wording.Inbox.sentTo(bot = a.sentToName)
             else -> null
         }
         // (what's at its end follows it on the line, wrapping under it where the phone's too narrow for both)
-        Text(Wording.Inbox.fromTask(task = a.taskName.orEmpty(), host = Mesh.label(host)) + (end?.let { " · $it" } ?: ""),
+        Text((if (Inbox.chats(a)) Wording.Inbox.fromChat(chat = Inbox.asker(host, a), host = Mesh.label(host))
+            else Wording.Inbox.fromTask(task = a.taskName.orEmpty(), host = Mesh.label(host))) + (end?.let { " · $it" } ?: ""),
             style = Type.caption, color = c.dim, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Box {
             IconButton(Adwaita.ViewMore, Wording.Inbox.more, side = 28.dp) { menu = true }

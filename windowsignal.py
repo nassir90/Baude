@@ -971,7 +971,8 @@ class WindowSignal:
             return None
         self.inbox_selected = (host_key, aid)
         return self.tabs.open(("ask", host_key, aid), lambda: inboxview.AskPage(self, ask),
-                              ask.get("task_name") or wording.say("inbox.title"), icon="alarm-symbolic", select=select)
+                              inboxview.asker(ask) or wording.say("inbox.title"), icon="alarm-symbolic",
+                              select=select)
 
     def selected_ask(self):
         """The ask Meta helps with: the one whose tab is shown, else the one last touched in the Inbox. (ask, its

@@ -1,5 +1,5 @@
 {
-  "description": "One ask a task raised, opened in a tab of its own (titled with the task's name, an alarm icon): who it's from and ⋯, its Markdown body with pictures, its form, its buttons and Route to…, and a message box at the foot that writes to the asking task's Bot. Full width.",
+  "description": "One ask a task raised, or a chat's model raised itself with its chat's tools, opened in a tab of its own (titled with the task's name, or the chat's, an alarm icon): who it's from and ⋯, its Markdown body with pictures, its form, its buttons and Route to…, and a message box at the foot that writes to the asking task's Bot (or the asking chat). Full width.",
   "apps": [
     "baude",
     "phone"
@@ -13,24 +13,27 @@
     "inboxview.py:AskPage",
     "inboxview.py:AskMarkdown",
     "baudelib/inbox.py:Inbox",
-    "Inbox.kt:AskScreen"
+    "Inbox.kt:AskScreen",
+    "baudelib/chattools.py"
   ],
   "copy": [
     "inbox",
     "composer"
   ],
   "phone": {
-    "does": "A screen of its own opened from the Inbox, titled with the task's name, Back returns to the Inbox",
+    "does": "A screen of its own opened from the Inbox, titled with the task's name (a chat's own ask: the chat's), Back returns to the Inbox",
     "why": "One column at a time on a phone",
     "decided": "2026-11-27"
   },
   "parts": [
     {
       "name": "From line",
-      "shows": "The asking Bot's picture, then \"from Task “<task>” on <host>\" (dim, small), as a message's from line; at the end, on a stopped ask \"Not answered — the task stopped\", on one sent to a Bot \"Sent to <Bot>\", and ⋯.",
+      "shows": "The asking Bot's picture, then \"from Task “<task>” on <host>\" (dim, small), as a message's from line; a chat's own ask: \"from <chat> on <host>\" (the chat's Bot's name, else its title), with the Bot's picture only if it's a Bot. At the end, on a stopped ask \"Not answered — the task stopped\" (a chat's: \"Not answered — the chat was archived or deleted\"), on one sent to a Bot \"Sent to <Bot>\", and ⋯.",
       "copy": [
         "inbox.from_task",
+        "inbox.from_chat",
         "inbox.not_answered",
+        "inbox.chat_stopped",
         "inbox.sent_to"
       ]
     },
@@ -46,7 +49,7 @@
     },
     {
       "name": "Body",
-      "shows": "The task's Markdown, as a message is drawn: headings, bold, lists, code, tables. A picture on a line of its own is as wide as the text, its height as its shape has it, rounded; a table cell holding only a picture shows it; never a file path. Click a picture to see it large (the image viewer).",
+      "shows": "The task's (or chat's) Markdown, as a message is drawn: headings, bold, lists, code, tables. A picture on a line of its own is as wide as the text, its height as its shape has it, rounded; a table cell holding only a picture shows it; never a file path. Click a picture to see it large (the image viewer).",
       "copy": [
         "inbox.no_picture"
       ]
@@ -57,11 +60,11 @@
     },
     {
       "name": "Buttons",
-      "shows": "The task's buttons, each sized to its label, wrapping as whole buttons when a row is full (Adw.WrapBox; the phone's FlowRow): style primary (the accent), secondary (plain), or a colour of the accent palette (blue, teal, green, yellow, orange, red, pink, purple, slate: schema/tokens accent.*). Picture buttons come first, large enough to judge their pictures in place: as many to a row as fit (at least 240 px wide each, three to a row at most on the desktop; at least 150 dp, two at most on the phone), each wrapping as a whole. A picture button is its picture, framed, with a magnifier in its corner, over a button with its label in the button's style. Route to… at the row's end.",
+      "shows": "The ask's buttons, each sized to its label, wrapping as whole buttons when a row is full (Adw.WrapBox; the phone's FlowRow): style primary (the accent), secondary (plain), or a colour of the accent palette (blue, teal, green, yellow, orange, red, pink, purple, slate: schema/tokens accent.*). Picture buttons come first, large enough to judge their pictures in place: as many to a row as fit (at least 240 px wide each, three to a row at most on the desktop; at least 150 dp, two at most on the phone), each wrapping as a whole. A picture button is its picture, framed, with a magnifier in its corner, over a button with its label in the button's style. Route to… at the row's end.",
       "actions": [
         {
           "by": "click a button (a picture button's label)",
-          "does": "Answers the ask: its task is told which button, with the form's values, and the ask leaves every Inbox. There's no separate Submit."
+          "does": "Answers the ask: its task is told which button, with the form's values, and the ask leaves every Inbox. A chat's own ask: the button's label and the form's values go into that chat as a message from the Inbox (not the person's words), its model's next turn once it's idle, unless it's waiting on the ask (read_ask), which gets them there. There's no separate Submit."
         },
         {
           "by": "click a picture button's picture, or a picture in the body",
@@ -114,14 +117,14 @@
     },
     {
       "name": "Message box",
-      "shows": "The composer at the foot, its send button's tooltip \"Send to <Bot>\" (the asking task's Bot).",
+      "shows": "The composer at the foot, its send button's tooltip \"Send to <Bot>\" (the asking task's Bot; a chat's own ask: the asking chat). Not shown on a chat's own ask once it's stopped (its chat archived or deleted).",
       "copy": [
         "inbox.send_to"
       ],
       "actions": [
         {
           "by": "send",
-          "does": "What's written goes to the asking task's Bot as a message, with the ask; the Bot may propose an answer (answer_ask: shown over the buttons as a model's is, for the person to confirm, never pressing for them) or put a new version of it (revise_ask), which shows here at once."
+          "does": "What's written goes to the asking task's Bot as a message, with the ask; the Bot may propose an answer (answer_ask: shown over the buttons as a model's is, for the person to confirm, never pressing for them) or put a new version of it (revise_ask), which shows here at once. A chat's own ask: it goes to the asking chat as the person's message, with the ask; its model may put a new version (revise_ask) or withdraw it (withdraw_ask)."
         }
       ]
     }
@@ -129,9 +132,10 @@
   "states": [
     {
       "name": "stopped",
-      "shows": "Its task went away unanswered: the body's first heading struck through and the body greyed, \"Not answered — the task stopped\" on the from line, form and buttons off, Route to… off, the box still writes to the Bot.",
+      "shows": "Its task went away unanswered (a chat's own ask: its chat was archived or deleted): the body's first heading struck through and the body greyed, \"Not answered — the task stopped\" (\"Not answered — the chat was archived or deleted\") on the from line, form and buttons off, Route to… off, the box still writes to the Bot (a chat's: no box).",
       "copy": [
-        "inbox.not_answered"
+        "inbox.not_answered",
+        "inbox.chat_stopped"
       ]
     },
     {
@@ -263,7 +267,8 @@
           "issue": "BaudeInternal#289",
           "comment": "7224233722"
         }
-      ]
+      ],
+      "superseded": "2026-11-27"
     },
     {
       "said": "Pressing any button notifies the task, with the form's values; no separate Submit.",
@@ -320,12 +325,26 @@
           "comment": "7224670481"
         }
       ]
+    },
+    {
+      "said": "A model should be able to ask the user stuff in a formatted task like manners without a task to begin with i.e. direct access to the human ask machinery and the artefact builder",
+      "rule": "A chat's model asks the person directly, no task needed: its chat's tools (every chat's: Claude Code, pi and Codex, Bots too) raise an ask (ask_user: title, Markdown body, pictures it made given as files on its host or as data, styled and picture buttons, a form), put a new version (revise_ask), withdraw it (withdraw_ask) and read its state and answer (read_ask, waiting a while if asked). Every app shows it in the Inbox as a task's ask is shown, from the chat (\"from <chat> on <host>\"); a press sends the button and the form's values back into that chat as a message from the Inbox, its next turn; the box writes to that chat; Route to… and Meta work the same; who may see and press it is who may manage the chat. It keeps waiting across the host's restarts and stops once the chat is archived or deleted. Supersedes the decision that asks come from tasks only, for now.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+          "message": "75fb87b9-c080-453a-b592-ecb49dea4fb6"
+        }
+      ]
     }
   ],
   "scenes": [
     "inbox-ask",
     "inbox-ask-route",
     "inbox-ask-proposal",
-    "inbox-ask-stopped"
+    "inbox-ask-stopped",
+    "inbox-chat-ask",
+    "inbox-chat-stopped",
+    "inbox-chat-answered"
   ]
 }

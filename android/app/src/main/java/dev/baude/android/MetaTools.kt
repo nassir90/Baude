@@ -578,6 +578,11 @@ object MetaTools {
                 val (h, id) = Inbox.shown ?: return no("No ask has been opened in the Inbox.")
                 val a = Inbox.find(h, id) ?: return no(Wording.Inbox.notWaiting)
                 val about = Inbox.described(h, a)
+                if (Inbox.chats(a)) {  // (a chat's own ask: the asking chat, no run)
+                    val chat = Mesh.session(h, a.session.orEmpty()) ?: return ok("$about\n(the asking chat isn't listed here)")
+                    readChat(h, chat) { said, error -> ok("$about\n" + (said ?: "(the asking chat couldn't be read: $error)")) }
+                    return
+                }
                 Mesh.ask(h, Msg.TaskRunGet(session = a.session.orEmpty(), run = a.run.orEmpty()).json()) { r ->
                     val log = if (r.optString("op") != Op.TASK_RUN) "(its run's log couldn't be read: ${Msg.Error.from(r).said.orEmpty()})"
                         else Msg.TaskRunReply.from(r).log.orEmpty().takeLast(200).joinToString("\n") { it.text.orEmpty() }.ifEmpty { "(empty)" }

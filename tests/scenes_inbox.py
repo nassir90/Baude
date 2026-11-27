@@ -1,10 +1,14 @@
 """The Inbox's scenes (schema/ui/Inbox.page.json, InboxAsk.page.json): lab-mac's Bots' tasks' asks of a person, put on
 its host's Inbox as a task's script raises them (baudelib/inbox.py: the pictures kept, every head told), drawn in the
 row over Search sessions, the Inbox's tab, and an ask's tab: opened, Route to… open, a model's answer to confirm,
-History, and one whose task went away. Fixture pictures only (tests/inbox_fixture.py)."""
+History, and one whose task went away; and a chat's own ask, raised by its model with its chat's tool (the fake claude's
+CHAT TOOL ask_user), opened, stopped, and answered back into that chat. Fixture pictures only (tests/inbox_fixture.py)."""
 import base64
+import json
 import os
+import shutil
 import time
+import uuid
 
 import test_baude as T  # noqa: E402
 from scenelib import SIDEBAR, scene  # noqa: E402
@@ -283,3 +287,106 @@ def _(app):
 @scene("inbox-ask-logo-viewer-next", "The large view stepped on to the ask's next picture", size=SIZE)
 def _(app):
     return viewed(app, "logo", 1)
+
+
+CHAT = "Speed up the tokenizer's hot loop"  # (lab-mac's chat, not a Bot, whose model asks with its own tools)
+CHAT_ASK = {
+    "title": "Tokenizer: keep the merge rewrite?",
+    "body": """### The hot loop is 2.4× faster
+
+I rewrote byte-pair merging to work on one flat array instead of a list of strings, and split on whitespace with a
+lookup table. Every test passes; this is 1 GB of the docs corpus, before and after:
+
+![seconds per stage](timings.png)
+
+| Stage | Before | After |
+|---|---|---|
+| split on whitespace | 3.6 s | **1.1 s** |
+| merge byte pairs | 6.8 s | **2.4 s** |
+| map to ids | 1.7 s | **0.6 s** |
+""",
+    "buttons": [{"label": "Keep it and open a pull request", "style": "green"},
+                {"label": "Try a SIMD split too", "style": "blue"}, {"label": "Revert", "style": "red"}],
+    "form": [{"name": "branch", "type": "text", "label": "Branch", "default": "tokenizer-flat-merge"},
+             {"name": "bench", "type": "bool", "label": "Run the full benchmark first", "default": True}],
+    "pictures": [{"name": "timings.png", "path": "bench/timings.png"}]}
+
+
+def chat_ask(win):
+    """The tokenizer chat's model asks the person with its chat's tool (the fake claude's CHAT TOOL ask_user: its
+    pictures files it made in its folder); the ask taken off again as the window goes. Its id."""
+    server, r = P.NET["lab"]
+    sid, folder = P.NET["ids"][CHAT], P.NET["folders"][0]
+    os.makedirs(os.path.join(folder, "bench"), exist_ok=True)
+    shutil.copy(os.path.join(fix(), "timings.png"), os.path.join(folder, "bench", "timings.png"))
+    have = set(r.inbox)
+    with server.lock:
+        server.take_input(None, server.sessions[sid], {"type": "user", "uuid": str(uuid.uuid4()), "message": {
+            "role": "user", "content": "CHAT TOOL ask_user " + json.dumps(CHAT_ASK)}})
+    new = lambda: next((a for a in r.inbox if a not in have and not r.inbox[a].get("run")), None)  # noqa: E731
+    T.wait_for(new, "the chat's ask heard", 30)
+    aid = new()
+    T.wait_for(lambda: server.sessions[sid].state() == "idle", "its turn over", 30)
+
+    def gone(*_):
+        ib = server.inbox
+        with ib.lock:
+            ask = ib.asks.pop(aid, None)
+        if ask is not None:
+            ib.tell(ask, removed=True)
+    win.connect("unrealize", gone)
+    T.pump(0.5)
+    return aid
+
+
+@scene("inbox-chat-list", "The Inbox with an ask a chat's model raised with its own tool, no task: from the chat",
+       size=SIZE)
+def _(app):
+    win = base(app)
+    chat_ask(win)
+    page = win.open_inbox()
+    pictures(win)
+    tall(win, page, page.col)
+    return win
+
+
+def chat_opened(app, stop=False):
+    win = base(app, keys=())
+    aid = chat_ask(win)
+    if stop:
+        P.NET["lab"][0].inbox.chat_gone(P.NET["ids"][CHAT])
+        T.wait_for(lambda: P.NET["lab"][1].inbox[aid]["status"] == "stopped", "the ask stopped")
+    win.open_inbox()
+    page = win.open_ask(P.NET["lab"][1].key, aid)
+    pictures(win)
+    tall(win, page.scroll, page.view)
+    return win, aid
+
+
+@scene("inbox-chat-ask", "A chat's own ask opened: from the chat, its pictures, form and buttons; the box writes to "
+                         "that chat", size=SIZE)
+def _(app):
+    return chat_opened(app)[0]
+
+
+@scene("inbox-chat-stopped", "A chat's own ask whose chat was archived: struck through, its buttons off", size=SIZE)
+def _(app):
+    return chat_opened(app, stop=True)[0]
+
+
+@scene("inbox-chat-answered", "A chat's own ask answered: the button and the form's values come into that chat as a "
+                              "message from the Inbox, its next turn", size=SIZE)
+def _(app):
+    win = base(app, keys=())
+    aid = chat_ask(win)
+    server, r = P.NET["lab"]
+    sid = P.NET["ids"][CHAT]
+    r.request({"op": "inbox_press", "ask": aid, "button": 0, "values": {"branch": "tokenizer-flat-merge",
+                                                                        "bench": True}})
+    T.wait_for(lambda: server.inbox.asks.get(aid, {}).get("status") == "answered" and
+               not server.inbox.asks[aid].get("_tell"), "the answer sent the chat", 30)
+    T.wait_for(lambda: server.sessions[sid].state() == "idle", "its turn over", 30)
+    win.sidebar.on_activate(win.sidebar.list, P.session_row(win, sid))
+    T.wait_for(lambda: win.session_id == sid, "the chat open")
+    T.pump(2)
+    return win

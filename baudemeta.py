@@ -357,6 +357,8 @@ class BaudeMeta(metachat.MetaChat):
         text = inboxview.ask_text(ask, view)
         chat = self.find_chat(ask["session"])
         bot = self.chat_text(chat)[-4000:] if chat is not None else "(its Bot's chat isn't here)"
+        if not ask.get("run"):  # (a chat's own ask: the asking chat, no run)
+            return {"text": f'{text}\n\n<asking_chat name="{meta.attr(inboxview.asker(ask))}">\n{bot}\n</asking_chat>'}
         return metaagent.Later(lambda: {"text": f"{text}\n\n<run_log>\n{inboxview.run_log(ask)}\n</run_log>\n\n"
                                                 f'<bot_chat name="{meta.attr(ask.get("bot") or "")}">\n{bot}\n</bot_chat>'})
 

@@ -180,6 +180,19 @@ def main():
     print(f"  read_ask: {got}", flush=True)
     assert got["status"] == "answered" and got["answer"]["label"] == "Line", got
 
+    bot = head.ask({"op": "start", "prompt": "", "cwd": FOLDER, "draft": True})["session"]["id"]
+    assert head.ask({"op": "bot", "session": bot, "bot": {"name": "Fern"}})["op"] != "error"
+    got = tool(head, alpha, sid, "ask_user", {"body": "Which day?", "buttons": ["Monday", "Friday"]})
+    routed = got["ask"]
+    assert head.ask({"op": "inbox_route", "ask": routed, "bot": bot})["op"] == "inbox_done"
+    print(f"  routed: sent to {next(a for a in asks(head) if a['id'] == routed)['sent_to_name']}", flush=True)
+    mark = len(log())
+    assert head.ask({"op": "inbox_press", "ask": routed, "button": 1, "as": bot})["op"] == "inbox_done"
+    line = wait(lambda: next((ln for ln in log()[mark:] if routed in ln and 'baude-sender name=\\"Inbox' in ln), None),
+                "the Bot's answer sent into the chat")
+    print(f"  the Bot's answer in the chat: {json.loads(line)['message']['content'].split(chr(10), 2)[2]!r}", flush=True)
+    idle(alpha, sid)
+
     got = tool(head, alpha, sid, "ask_user", {"body": "Send the report now?", "buttons": ["Send", "Not yet"]})
     gone = got["ask"]
     got = tool(head, alpha, sid, "withdraw_ask", {"ask": gone})

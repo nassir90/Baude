@@ -334,6 +334,27 @@ def week_chart(path):
     s.write_to_png(path)
 
 
+# ---------------------------------------------------------------- a chat's own chart: a hot loop's time, by stage
+def timings(path):
+    W, H = 1200, 330
+    s, c = canvas(W, H)
+    text(c, 40, 48, "Tokenizer on 1 GB of text, seconds per stage", 22, "#1f2933", True)
+    box(c, W - 330, 32, 16, 16, "#d9472b", 3)
+    text(c, W - 306, 46, "before: 13.0 s", 17, "#52606d")
+    box(c, W - 170, 32, 16, 16, "#1f9d63", 3)
+    text(c, W - 146, 46, "after: 5.0 s", 17, "#52606d")
+    stages = [("read", 0.9, 0.9), ("split on whitespace", 3.6, 1.1), ("merge byte pairs", 6.8, 2.4),
+              ("map to ids", 1.7, 0.6)]
+    top, scale = 84, 120
+    for i, (name, before, now) in enumerate(stages):
+        y = top + i * 60
+        text(c, 40, y + 30, name, 18, "#3e4c59")
+        for j, (v, col) in enumerate(((before, "#d9472b"), (now, "#1f9d63"))):
+            box(c, 240, y + 6 + j * 22, v * scale, 18, col, 4)
+            text(c, 250 + v * scale, y + 21 + j * 22, f"{v:.1f}", 14, "#52606d")
+    s.write_to_png(path)
+
+
 def make(OUT):  # noqa: N803
     """Every picture, written in OUT (made if it isn't there): OUT."""
     os.makedirs(OUT, exist_ok=True)
@@ -351,4 +372,5 @@ def make(OUT):  # noqa: N803
     meter(f"{OUT}/meter-work.png", 1.0, "#d9472b")
     meter(f"{OUT}/meter-home.png", 0.41, "#4b7bec")
     meter(f"{OUT}/meter-team.png", 0.17, "#1f9d63")
+    timings(f"{OUT}/timings.png")
     return OUT

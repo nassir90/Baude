@@ -1100,6 +1100,9 @@ def main():
                 task_answer(turns, text)
             elif "CHAT TOOL " in text:
                 chat_tool_turn(turns, text)
+            elif '<baude-sender name="Inbox"' in text:  # (an ask's answer, from the Inbox: taken up, no tools)
+                say("On it: going with that.", f"inbox{turns}")
+                result("inbox answer")
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)
             elif "EXPIRED" in text:

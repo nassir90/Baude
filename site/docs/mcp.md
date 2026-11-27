@@ -503,12 +503,14 @@ A container's or a Compose project's log, followed (logs): one a connection, the
 
 #### `draft_save` (DraftSave)
 
-A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.
+A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending (sent). One written before the draft's last send is refused (stale_draft), its draft as kept now with it.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `text` | string | yes | What's written in its box now (empty: nothing, as once it's sent). |
+| `epoch` | integer | yes | The draft's epoch its text was written in (ChatDraft's epoch, as this head last had it): one less than its host's now (a send's emptied it since), and it's refused (stale_draft), so what was sent isn't written back. |
+| `sent` | string/null |  | A send's id, of the head's own pick (one each Enter): the box emptied by sending what was in it. The draft emptied, and its epoch one more. |
 | `head` | string/null |  | The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save. |
 
 #### `edit_adopt` (EditAdopt)
@@ -1784,13 +1786,14 @@ Anything wrong, with the request's req. A request whose op the host doesn't take
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `error` | string | yes | What's wrong. |
-| `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
+| `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` \| `stale_draft` |  | One of the schema's own refusals; stale_draft: a draft_save written before the draft's last send (its epoch less than its host's), not kept. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
 | `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `docker_read` \| `docker_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
-| `session` | string |  | memory's refusal: the session. |
+| `draft` | ChatDraft |  | stale_draft's: the draft as its host keeps it. |
+| `session` | string |  | memory's refusal, and stale_draft's: the session. |
 | `text` | string |  | memory's refusal: the memory as the Bot left it. |
 | `seen` | string/null |  | memory's refusal: what the user's accepted of it. |
 | `mtime` | number/null |  | memory's refusal: its mtime (ns; a phone's, seconds). |
@@ -2787,6 +2790,8 @@ A chat's draft, as its host keeps it: the text written in its box and not sent, 
 | `text` | string | yes | What's written (empty once it's sent). |
 | `rev` | integer | yes | Its revision: one more with every save, never less (a head drops one it's seen a later revision than). |
 | `head` | string/null |  | The box that wrote it (draft_save's head): what that box knows as its own save, coming back. |
+| `epoch` | integer |  | How many times it's been emptied by a send (none: 0): one more with every send, never less. A save written before the last send (its epoch less) is refused, and a head drops a draft of an epoch less than one it's seen, so what was sent never comes back. |
+| `sent` | string/null |  | The send that last emptied it (draft_save's sent): the same send's save, made again, empties it once. |
 | `at` | number/null |  | When it was written, epoch seconds. |
 
 #### ChatLogin
@@ -4368,6 +4373,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `48` | The wire's version, as a host's hello says it. |
+| `VERSION` | `49` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

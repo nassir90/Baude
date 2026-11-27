@@ -467,6 +467,7 @@ class WindowProc:
             self.allowed_in(self.session_id).update(self.host_allowed[self.session_id])  # allows it: another head's
             # too; not sent it again as this attaches again)
             self.apply_read_only()  # (one its host lets this head only read: no text box)
+            self.reattached_draft()  # (what's typed while it was away, or what its host's had since)
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -1396,6 +1397,7 @@ class WindowProc:
         """The composer's text changed: the sidebar lists the open chat once it's begun, and not while it's blank."""
         if getattr(self, "swapping_draft", False):  # (a chat's draft put away or back: the switch fills the sidebar)
             return
+        self.draft_typed()  # (a host's chat's: saved to its host)
         if getattr(self, "sidebar", None) is not None and (begun := self.chat_begun()) != self.listed_begun:
             self.listed_begun = begun
             self.sidebar.fill()

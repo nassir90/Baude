@@ -179,6 +179,24 @@ def available(value=None):
     return model_program(value) == "claude" or model_entry(value, models(live=True)) is not None
 
 
+def subscription_off(value=None):
+    """What's said over Meta's box where the subscription a model (Meta's, if none's given) runs on here is disabled
+    (Claude's or Codex's: this machine's host's pick for its provider), or None."""
+    import sqlite3
+    from baudelib import accounts
+    program = model_program(model() if value is None else value)
+    if program not in accounts.PROVIDERS:
+        return None
+    try:
+        profile = accounts.selected(program)
+        if not accounts.disabled(accounts.usage_key(program, profile)):
+            return None
+        name = (accounts.account(profile) or {}).get("name")
+    except (OSError, sqlite3.Error):
+        return None
+    return wording.say("subscriptions.disabled_chat", name=name or wording.say("subscriptions.cli_default"))
+
+
 def local_name(value):
     """A model's name where it's one this Mac runs besides Claude's (Apple's, MLX's, Ollama's, an endpoint's), else
     value."""

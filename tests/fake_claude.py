@@ -182,13 +182,15 @@ OUT_LOCK = threading.Lock()  # background tasks write from timer threads
 
 def rate_limit_event():
     """What claude says of its account's limits as a request's answer's headers say them (once per turn here, before
-    its result): utilization a fraction, resetsAt in seconds since 1970."""
+    its result): utilization a fraction, resetsAt in seconds since 1970; FAKE_CLAUDE_FIVE_HOUR, the five-hour
+    window's (1 or more: used up, extra usage billed)."""
     now = int(time.time())
+    used = float(os.environ.get("FAKE_CLAUDE_FIVE_HOUR") or 0.42)
     return {"type": "rate_limit_event", "rate_limit_info": {
-        "status": "allowed", "resetsAt": now + 3 * 3600, "rateLimitType": "five_hour", "utilization": 0.42,
-        "unifiedWindows": {"five_hour": {"utilization": 0.42, "resetsAt": now + 3 * 3600, "status": "allowed"},
+        "status": "allowed", "resetsAt": now + 3 * 3600, "rateLimitType": "five_hour", "utilization": used,
+        "unifiedWindows": {"five_hour": {"utilization": used, "resetsAt": now + 3 * 3600, "status": "allowed"},
                            "seven_day": {"utilization": 0.17, "resetsAt": now + 4 * 86400, "status": "allowed"}},
-        "overageStatus": "rejected", "isUsingOverage": False}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
+        "overageStatus": "allowed" if used >= 1 else "rejected", "isUsingOverage": used >= 1}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
 
 
 def out(obj, delay=0.005):

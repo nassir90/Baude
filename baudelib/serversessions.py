@@ -225,6 +225,8 @@ class ServerSessions:
             self.drop_routes(s)
         if s.proc is not None:
             return s.proc
+        if s.subscription_off():  # (its subscription's disabled: nothing started on it)
+            raise accounts.Disabled(self.disabled_said(s))
         if not os.path.isdir(s.meta["cwd"]):  # (gone, and not made again before this: restore_folder's)
             raise worktree.missing(s.meta["cwd"])
         resumed = s.transcript() is not None
@@ -317,6 +319,7 @@ class ServerSessions:
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.proc.limits_folder = self.state_dir  # (its usage as its turns say it, kept with this host's state)
+        s.proc.on_disabled = self.subscription_disabled  # (auto-disabled as it's exhausted: its chats stopped)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
         # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
@@ -418,6 +421,8 @@ class ServerSessions:
         it) taken once: the last TAKEN kept in its meta. Those attached live but conn are told it as it's given its agent
         and kept (tell_said)."""
         kind = msg.get("type")
+        if kind == "user" and s.subscription_off():  # (its subscription's disabled: refused)
+            raise accounts.Disabled(self.disabled_said(s))
         if kind == "user":
             desktopchats.refuse_or_resync(s)  # (a Desktop chat someone else is writing: Elsewhere, said)
             if wire.is_id(msg.get("uuid") or ""):
@@ -476,7 +481,7 @@ class ServerSessions:
         if sub == "get_context_usage" and models.model_program(s.meta.get("model")) == "codex":
             return answer(s.meta.get("context_usage") or {"showWithoutLimit": True})
         if sub == "initialize":
-            if s.proc is None and not os.path.isdir(s.meta["cwd"]):  # (its folder gone: nothing started for this, a
+            if s.proc is None and (not os.path.isdir(s.meta["cwd"]) or s.subscription_off()):  # (its folder gone, or its subscription disabled: nothing started for this, a
                 return answer(self.init({**(s.meta.get("init") or {}),  # message makes it again: restore_folder)
                                          "current_permission_mode": s.meta.get("mode") or "default"}))
             if s.meta.get("init") is not None and (s.proc is None or s.proc.init_rid is None):
@@ -1136,6 +1141,41 @@ class ServerSessions:
                 return
             s.account_to = profile
         self.switch_account(s)
+
+    def disabled_said(self, s):
+        """(lock held) What's said of a message refused as a chat's subscription is disabled: its name."""
+        a = s.account()
+        return wording.say("subscriptions.disabled_chat",
+                           name=a["name"] if a else wording.say("subscriptions.cli_default"))
+
+    def subscription_disabled(self, key):
+        """A subscription (usage key) disabled: every chat here on it turned off, its agent stopped (a turn going
+        on cut short), and listed so (account_disabled). A message sent at that turn and not yet taken in (queued) is held
+        for the chat (held), sent by its user once the subscription is back."""
+        with self.lock:
+            for s in list(self.sessions.values()):
+                if s.subscription() != key:
+                    continue
+                for message, said, _by in s.queued:
+                    content = message.get("content")
+                    text = content if isinstance(content, str) else "".join(
+                        b.get("text", "") for b in content or () if isinstance(b, dict) and b.get("type") == "text")
+                    s.meta["held"] = (s.meta.get("held") or []) + [{"id": said if isinstance(said, str) else str(uuid.uuid4()),
+                                                                     "text": text, "shown": None, "sender": None,
+                                                                     "at": time.time()}]
+                if s.queued:
+                    s.queued = []
+                    self.save(s)
+                if s.proc is not None and not getattr(s.proc, "stopping", False):
+                    s.proc.stopping, s.proc.restarting = True, False
+                    s.proc.kill()
+                    self.log(f"{s.id}: its subscription's disabled: its agent stopped")
+            self.changed()
+
+    def subscription_switched(self):
+        """A subscription's switches changed (enabled again, auto-disable turned on or off): listed so."""
+        with self.lock:
+            self.changed()
 
     def switch_account(self, s):
         """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor

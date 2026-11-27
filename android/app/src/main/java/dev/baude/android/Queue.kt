@@ -388,12 +388,14 @@ fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     }
 }
 
-/** A held message's ↑: refused, and why, as a toast, while a turn runs or its host isn't there. */
+/** A held message's ↑: refused, and why, as a toast, while a turn runs, its host isn't there or its subscription's
+ * disabled. */
 private fun heldSend(ctx: Context, chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val why = when {
         working -> Wording.HeldSend.afterTurn
         Mesh.conn(chat.hostId) == null -> Wording.HeldSend.whileNoHost
         Mesh.conn(chat.hostId)?.state != "up" -> Wording.HeldSend.whileDown
+        subscriptionOff(chat) -> Wording.HeldSend.whileDisabled
         else -> null
     }
     if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show() else Mesh.held(chat, h.id.orEmpty(), true)

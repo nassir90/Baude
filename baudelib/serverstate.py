@@ -408,6 +408,17 @@ class Session:
             return ""
         return self.account_to if self.account_to is not None else (self.meta.get("profiles") or {}).get(program, "")
 
+    def subscription(self):
+        """Its subscription's usage key (accounts.usage_key: the account its agent runs under, as profile says), or
+        None: a model that isn't Claude's or Codex's."""
+        program = models.model_program(self.meta.get("model"))
+        return accounts.usage_key(program, self.profile()) if program in accounts.PROVIDERS else None
+
+    def subscription_off(self):
+        """Whether the subscription it runs on is disabled on its host (nothing sent to its agent, nor started)."""
+        key = self.subscription()
+        return key is not None and accounts.disabled(key)
+
     def listing(self):
         info = self.info or {}
         size, mtime = self.stat or (0, None)
@@ -435,6 +446,7 @@ class Session:
                 "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
                 "start_key": self.meta.get("start_key"), "account": self.account(),
                 "account_gone": bool(self.profile()) and self.account() is None,
+                "account_disabled": self.subscription_off(),
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,

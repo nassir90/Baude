@@ -64,6 +64,11 @@
     "no_account_here": "This chat's model runs on no subscription",
     "account_tip": "Subscription this chat runs on",
     "account_note": "Subscription → {$name}",
-    "removed_account": "Removed subscription"
+    "removed_account": "Removed subscription",
+    "disable": "Disable",
+    "enable": "Enable",
+    "auto_disable": "Auto Disable on Exhaustion",
+    "disabled": "Disabled",
+    "disabled_chat": "Subscription {$name} is disabled"
   }
 }

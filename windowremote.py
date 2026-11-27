@@ -1129,6 +1129,9 @@ class WindowRemote:
                 "Looking for daemon…" if self.remote.mine else wording.say("hosts.looking", host=name)
         elif kind == "live":
             text = wording.say("chat_banner.active_elsewhere")
+        elif kind == "disabled":
+            text = wording.say("subscriptions.disabled_chat", name=(self.chat_account_info() or {}).get("name") or
+                               wording.say("subscriptions.cli_default"))
         elif kind == "missing":  # (its host there, but with no such session: session_missing)
             name = "Daemon" if self.remote.mine else remote_name(self.remote)
             text = wording.say("chat_banner.missing_because", name=name, reason=self.missing_reason) \
@@ -1158,7 +1161,8 @@ class WindowRemote:
         """What's in the way of this chat from outside it, said in the banner till it's gone. Another program (not Baude:
         live_elsewhere) has the session: no text box (show_composer), as two writers would interleave two
         conversations in one transcript. Its host isn't there, or its connection's dropped (drop): its send button off
-        (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
+        (Composer.gate), as there's no one to send to. The subscription it runs on disabled on its host: its send
+        button off too, till it's enabled or another's picked. claude's retrying the model's API (show_retry). Those waited out
         here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
         gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
@@ -1166,8 +1170,9 @@ class WindowRemote:
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
         apart = self.host_apart_said()  # (this Mac's host process on other code: said when nothing of the chat's is)
+        off = self.subscription_off()
         kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
-            "retry" if self.retrying is not None else "apart" if apart is not None else None
+            "disabled" if off else "retry" if self.retrying is not None else "apart" if apart is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
@@ -1179,6 +1184,7 @@ class WindowRemote:
         if hasattr(self, "composer_box"):
             self.composer_box.gate("network", dropped)
             self.composer_box.gate("host", gone or missing)
+            self.composer_box.gate("disabled", off)
         self.show_composer()
 
     def tail_lines(self, lines):

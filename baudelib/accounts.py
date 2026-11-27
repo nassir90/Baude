@@ -62,6 +62,7 @@ def database():
                        "credential TEXT, kind TEXT, UNIQUE(provider, name))")
             db.execute("CREATE TABLE IF NOT EXISTS defaults (provider TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, profile TEXT)")
+            db.execute("CREATE TABLE IF NOT EXISTS switches (key TEXT PRIMARY KEY, disabled INTEGER, auto INTEGER)")
             yield db
     finally:
         db.close()
@@ -78,10 +79,87 @@ def _known():
         with database() as db:
             rows = list(db.execute("SELECT id,provider,name,kind,credential FROM profiles"))
             sessions = dict(db.execute("SELECT session,profile FROM sessions"))
-        _cache.update(mtime=mtime, sessions=sessions,
+            switches = {k: {"disabled": bool(d), "auto_disable": bool(a)}
+                        for k, d, a in db.execute("SELECT key,disabled,auto FROM switches")}
+        _cache.update(mtime=mtime, sessions=sessions, switches=switches,
                       accounts={i: {"id": i, "provider": p, "name": n, "kind": k} for i, p, n, k, _c in rows},
                       folders={i: c for i, _p, _n, k, c in rows if k == "folder"})
     return _cache["accounts"], _cache["sessions"], _cache["folders"]
+
+
+class Disabled(OSError):
+    """A message for a chat refused: the subscription it runs on is disabled on its host."""
+
+
+def switches():
+    """Each subscription's switches, by usage key (usage_key: an account's id, "" Claude's CLI's own sign-in,
+    CODEX_CLI Codex's): {disabled, auto_disable}, for those with either on."""
+    _known()
+    return {k: v for k, v in _cache.get("switches", {}).items() if v["disabled"] or v["auto_disable"]}
+
+
+def disabled(key):
+    """Whether a subscription (its usage key) is disabled: its chats' agents stopped, and nothing sent to them."""
+    return switches().get(key, {}).get("disabled", False)
+
+
+def check_key(key):
+    """A usage key that names a subscription here: the CLI's own sign-in's ("" or CODEX_CLI), or an account's id;
+    ValueError for one that doesn't."""
+    if key in ("", CODEX_CLI) or account(key) is not None:
+        return key
+    raise ValueError(wording.say("subscriptions.gone"))
+
+
+def set_switch(key, disabled=None, auto_disable=None):
+    """A subscription's (usage key's) disabled or auto-disable switch turned on or off (None: as it is)."""
+    check_key(key)
+    was = switches().get(key, {"disabled": False, "auto_disable": False})
+    now = (was["disabled"] if disabled is None else bool(disabled),
+           was["auto_disable"] if auto_disable is None else bool(auto_disable))
+    with database() as db:
+        if any(now):
+            db.execute("INSERT OR REPLACE INTO switches VALUES (?,?,?)", (key, int(now[0]), int(now[1])))
+        else:
+            db.execute("DELETE FROM switches WHERE key=?", (key,))
+
+
+def exhausted(key):
+    """A subscription (usage key) seen exhausted (its limit used up, or extra usage being billed): disabled, if
+    its auto-disable switch is on and it isn't already. Whether it was disabled now."""
+    if not _path().exists():
+        return False
+    mine = switches().get(key)
+    if not mine or not mine["auto_disable"] or mine["disabled"]:
+        return False
+    set_switch(key, disabled=True)
+    return True
+
+
+WHOLE_WINDOWS = ("five_hour", "seven_day")  # (Claude's limits that are the whole subscription's: the others are a model's or an app's)
+
+
+def limits_exhausted(limits, provider="claude"):
+    """Whether a subscription's limits ([(key, percent, resets)]) say one that stops it is used up: Claude's whole
+    subscription's (WHOLE_WINDOWS), not a model's; any of Codex's own windows."""
+    return any(isinstance(p, (int, float)) and p >= 100 and "overage" not in str(k) and
+               (provider != "claude" or k in WHOLE_WINDOWS) for k, p, *_ in limits or ())
+
+
+def codex_exhausted(snapshot):
+    """Whether a Codex rate-limit snapshot (its App Server's) says the subscription's used up: its default bucket (not
+    another limit's, as a model's own) at 100%, or its rateLimitReachedType, or its spend control, said."""
+    if not isinstance(snapshot, dict) or snapshot.get("limitId") not in (None, "codex"):
+        return False
+    credits = snapshot.get("credits")
+    return bool(snapshot.get("rateLimitReachedType")) or snapshot.get("spendControlReached") is True or \
+        isinstance(credits, dict) and credits.get("spendControlReached") is True or \
+        limits_exhausted(codex_limits(snapshot), "codex")
+
+
+def key_provider(key):
+    """The provider a usage key's subscription is of."""
+    return "codex" if key == CODEX_CLI else (account(key) or {}).get("provider", "claude")
 
 
 def listing():
@@ -238,6 +316,7 @@ def remove(profile, exe=None):
             raise ValueError(wording.say("subscriptions.gone"))
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
+        db.execute("DELETE FROM switches WHERE key=?", (profile,))
     _drop_usage(profile, gone=True)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():
@@ -479,10 +558,15 @@ _seen_guard = threading.Lock()
 def note_limits(folder, key, info):
     """A claude chat's rate_limit_event (its rate_limit_info: the limits its last request's answer said, utilization a
     fraction and resetsAt in seconds since 1970) kept for usage key key in folder (the host's state folder), each
-    window's (five_hour, seven_day…) latest with when it was seen, for seen_limits. Overage isn't kept."""
+    window's (five_hour, seven_day…) latest with when it was seen, for seen_limits. Overage isn't kept. Whether it
+    says the subscription's exhausted: the request refused as a whole (status rejected, but not at a model's own limit), or
+    extra usage billed (overage). A window's own status or utilization doesn't say it."""
     import json
     if not isinstance(info, dict):
-        return
+        return False
+    kind = info.get("rateLimitType")
+    spent = info.get("status") == "rejected" and not (isinstance(kind, str) and kind.startswith("seven_day_")) or \
+        info.get("isUsingOverage") is True or info.get("overageInUse") is True
     found = {}
     windows = info.get("unifiedWindows")
     for name, window in [*(windows.items() if isinstance(windows, dict) else ()),
@@ -494,7 +578,7 @@ def note_limits(folder, key, info):
             found.setdefault(name, {"percent": round(float(used) * 100, 1),
                                     **({"resets": _reset_time(resets)} if _reset_time(resets) is not None else {})})
     if not found:
-        return
+        return spent
     path = os.path.join(folder, SEEN_FILE)
     with _seen_guard:
         try:
@@ -513,6 +597,7 @@ def note_limits(folder, key, info):
         with open(part, "w", encoding="utf-8") as f:
             json.dump(kept, f)
         os.replace(part, path)
+    return spent
 
 
 def seen_limits(folder, key):
@@ -617,6 +702,11 @@ def _codex_usage(profile):
         raise OSError(str(e)) from None
     if snapshot is None:
         return None
+    return codex_limits(snapshot) or None
+
+
+def codex_limits(snapshot):
+    """A Codex rate-limit snapshot's windows (its App Server's: primary, secondary), [(key, percent, resets)]."""
     found = []
     for which in ("primary", "secondary"):
         window = snapshot.get(which)
@@ -624,7 +714,7 @@ def _codex_usage(profile):
                 not isinstance(window.get("usedPercent"), bool):
             found.append((_codex_window_key(window.get("windowDurationMins"), which), window["usedPercent"],
                           _reset_time(window.get("resetsAt"))))
-    return found or None
+    return found
 
 
 def claude_session_profile(session):

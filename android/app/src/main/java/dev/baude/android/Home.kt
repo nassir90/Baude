@@ -359,7 +359,7 @@ fun sections(query: String): List<Section> {
     return out
 }
 
-/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the Inbox, the sessions of every
+/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), the Inbox, search, the sessions of every
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by day and pick
  * groups. */
 @Composable
@@ -402,7 +402,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
         })
         note()
         if (Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = { adding = true })
-        // the top: New session and the host it's on, Open folder…, then the search and ⋮ (Baude's sidebar's top box)
+        // the top: New session and the host it's on, Open folder…, the Inbox, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) { newSession() }
@@ -413,12 +413,12 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val said = hostState(h)
                 if (said != null) toast(said) else choosing = h
             }
+            InboxRow(inbox) // (right over the search: what's waiting on you, Inbox.kt)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 SearchField(query, { query = it }, Wording.Sidebar.search, Modifier.weight(1f))
                 ViewMenu(snack)
             }
-            InboxRow(inbox) // (right under the search: what's waiting on you, Inbox.kt)
         }
         val said = hostState(picked())
         val away = picked()?.let { !off(it) && Mesh.reach(it) == "away" } == true && said != null

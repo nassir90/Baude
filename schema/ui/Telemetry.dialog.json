@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, and line profiling of its processes.",
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, and line profiling of its processes (a switch, and their top lines).",
   "apps": [
     "baude",
     "record",
@@ -245,7 +245,11 @@
           "said": "Processes telemetry needs a Total row at the bottom (paraphrased)",
           "rule": "Every app ends the Processes list with a bold Total row (no logo) that adds up the processes' CPU and memory above it, in the same form, and leaves it at the bottom",
           "decided": "2026-11-26",
-          "source": [{"issue": "BaudeInternal#274"}]
+          "source": [
+            {
+              "issue": "BaudeInternal#274"
+            }
+          ]
         },
         {
           "said": "icons are not what I wanted, they should be monochrome",
@@ -262,11 +266,9 @@
     },
     {
       "name": "Line Profiling",
-      "shows": "A boxed list: a switch row \"Line Profiling\" (on while the process picked profiles something; off and greyed out while telemetry is off), \"Process\" with a picker (Host Process, Baude, Record), \"Functions\" (an entry: dotted names of functions and modules, comma-separated), and, where a name isn't found, its error in one dim row. Then \"Top Lines\": the picked process's 10 lines that took longest in the last hour (read again every 30 seconds while a process profiles, as its profiles are taken), the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
+      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is Baude's developers' pick, shipped with the code (lineprofile.DEFAULTS), unless telemetry_set from any member of the mesh names others for it on that host (python3 -m baudelib.telemetry profile); nothing on the page names or edits them. Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
       "copy": [
         "telemetry.line_profiling",
-        "telemetry.process",
-        "telemetry.functions",
         "telemetry.top_lines",
         "telemetry.hits_seconds",
         "telemetry.not_found",
@@ -275,18 +277,14 @@
       ],
       "actions": [
         {
-          "by": "apply (the entry's ✓, Enter)",
-          "does": "The process picked profiles those functions from now (telemetry_set app, functions)"
-        },
-        {
           "by": "click (the switch)",
-          "does": "Off: it profiles nothing (what it timed is kept); on: it profiles what the entry names"
+          "does": "Line profiling on or off on that host (telemetry_set line_profiling): on, the host process, Baude and Record there each profile their functions; off, nothing (what was timed is kept)"
         }
       ],
       "decisions": [
         {
           "said": "Yes build in line_profiler",
-          "rule": "line_profiler is an optional dependency (schema/deps/line_profiler.json); the host process, Baude and Record each profile the functions and modules the host is told for them, switched at run time, saving what they timed every 30 seconds with its times; with nothing named, nothing of it runs",
+          "rule": "line_profiler is an optional dependency (schema/deps/line_profiler.json); the host process, Baude and Record each profile their functions, switched at run time, saving what they timed every 30 seconds with its times; while it's off, nothing of it runs",
           "decided": "2026-11-26",
           "source": [
             {
@@ -296,8 +294,18 @@
           ]
         },
         {
+          "said": "Which functions are profiled is the developers' call, shipped as a default set that can be overridden over the mesh; asking the user to pick a process and type function names doesn't make sense (paraphrased)",
+          "rule": "Every app's Line Profiling is a switch and the top lines: what each process profiles is the default set shipped with the code (lineprofile.DEFAULTS), or what telemetry_set names for it from any member of the mesh; no app names, picks or edits functions on the page",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#285"
+            }
+          ]
+        },
+        {
           "said": "Editing a Telemetry text field near the foot of Settings scrolls the page up to its start (paraphrased)",
-          "rule": "Every app keeps Functions (and every text row on a Settings page) where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
+          "rule": "Every app keeps every text row on a Settings page where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
           "decided": "2026-11-27",
           "source": [{"issue": "BaudeInternal#286"}]
         }
@@ -339,6 +347,21 @@
       "source": [
         {
           "issue": "BaudeInternal#261"
+        }
+      ]
+    },
+    {
+      "name": "Line Profiling's Process picker and Functions entry",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner: which functions are profiled is the developers' call, a default set shipped with the code and overridden over the mesh, not something typed on the page (paraphrased)",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#285"
         }
       ]
     }

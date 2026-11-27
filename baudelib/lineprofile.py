@@ -1,6 +1,8 @@
 """lineprofile — line_profiler (schema/deps/line_profiler.json, optional) switched on and off at run time for the
 functions and modules named, in whichever process this runs in: the host process (baudelib.telemetry's), Baude's and
-Record's (telemetryview's). While nothing's named nothing of line_profiler is loaded or running, so off costs nothing.
+Record's (telemetryview's). What each profiles is Baude's developers' pick (DEFAULTS), unless telemetry_set from any
+member of the mesh names others for it on a host. While nothing's named nothing of line_profiler is loaded or running,
+so off costs nothing.
 What it timed is taken every so often (snapshot) as the wire's TelemetryProfile, the time since the last one's.
 No GTK."""
 import atexit
@@ -15,6 +17,11 @@ import time
 from baudelib import deps, wording
 
 LINES_MAX = 200  # (a snapshot's lines, the most time first)
+DEFAULTS = {  # (what each process profiles while line profiling's on: the developers' pick, shipped with the code)
+    "host": ["baudelib.serverrun.ServerRunning.handle", "baudelib.telemetry.Telemetry.sample"],
+    "baude": ["windowview.WindowView.load_history", "markdownview.markdown_parse"],
+    "record": ["recordstore.Store.take", "markdownview.markdown_parse"],
+}
 CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
 

@@ -624,8 +624,9 @@ abstract class Screens(private val theme: String) {
             if (m.optString("op") != "telemetry_read") return@up null
             val now = System.currentTimeMillis() / 1000.0
             val rng = java.util.Random(7)
-            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("profiling", org.json.JSONArray(listOf(
-                org.json.JSONObject().put("app", "host").put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
+            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("line_profiling", true)
+                .put("profiling", org.json.JSONArray(listOf(org.json.JSONObject().put("app", "host").put("default", true)
+                    .put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
             val out = org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req")).put("host", Mesh.hosts.first().id)
                 .put("state", state)
             when (m.optJSONArray("what")?.optString(0)) {
@@ -662,7 +663,10 @@ abstract class Screens(private val theme: String) {
                             .put("code", "stats = proc_stats(sorted(pids))").put("hits", 120).put("seconds", 0.912),
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "_mac_memory")
                             .put("code", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:")
-                            .put("hits", 120).put("seconds", 0.402)))))))
+                            .put("hits", 120).put("seconds", 0.402)))),
+                    org.json.JSONObject().put("at", now - 30).put("from", now - 60).put("app", "record").put("lines", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("file", "recordstore.py").put("line", 498).put("function", "take")
+                            .put("code", "self.merged_page(mine, theirs, was)").put("hits", 41).put("seconds", 0.164)))))))
             }
             out
         }

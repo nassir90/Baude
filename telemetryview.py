@@ -3,9 +3,9 @@ phone's Telemetry.kt the same), and Settings → Telemetry, which shows what a h
 that host's telemetry is on (its Info's telemetry, followed as it changes), each chat opened, coming in front or
 leaving it, each turn sent and each turn's end (how long it took, its model and effort, its tokens), by its host's id
 and its session's id, told at once with its own time; and line profiles of what the host says this app profiles
-(lineprofile), every PROFILE_S. While it's off nothing is looked at or sent. Nothing is sent anywhere but this
-machine's host. watch(win, app, network) is the one hook a window needs; look, turn_sent and turn_ended are the
-chat's."""
+(lineprofile), every PROFILE_S, while its line profiling is on too. While it's off nothing is looked at or sent.
+Nothing is sent anywhere but this machine's host. watch(win, app, network) is the one hook a window needs; look,
+turn_sent and turn_ended are the chat's."""
 import datetime
 import os
 import time
@@ -130,7 +130,8 @@ class Recorder:
                 for win in list(self.windows):
                     self.look(win)
         self.host_pid = pid
-        functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name), [])
+        functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name),
+                         []) if on and t.get("line_profiling") else []
         if functions != self.profiler.functions:
             self.profile(functions)
 
@@ -432,9 +433,9 @@ def proc_rows(procs):
     return rows
 
 
-def row(title, *values, sensitive=True, mono=False, bold=False):
+def row(title, *values, sensitive=True, mono=False, bold=False, visible=True):
     esc = GLib.markup_escape_text(title)
-    r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive)
+    r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive, visible=visible)
     if mono:
         r.add_css_class("monospace")
     for v in values:
@@ -446,8 +447,9 @@ def row(title, *values, sensitive=True, mono=False, bold=False):
 class Page(Adw.PreferencesPage):
     """Settings → Telemetry: the host picked beside New session (as Dependencies has it), Collect Telemetry, then what
     that host keeps: its tokens by day over a year with the most used model and effort and each model's, its machine
-    now, its processes now (each with its app's logo, its CPU and memory), and line profiling (which process, what's
-    profiled, its top lines)."""
+    now, its processes now (each with its app's logo, its CPU and memory), and line profiling (switched on or off; what
+    each process profiles is Baude's own pick, lineprofile.DEFAULTS, or what telemetry_set named for it) with every
+    process's top lines."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("telemetry.title"), icon_name="document-open-recent-symbolic")
@@ -471,8 +473,7 @@ class Page(Adw.PreferencesPage):
             # so a row being typed in keeps its place, and the page where it's scrolled to)
             self.made[key] = Adw.PreferencesGroup(visible=False)
             self.add(self.made[key])
-        self.state, self.taking, self.groups, self.shown_app = None, False, {}, "host"
-        self.profiling_rows, self.profiling_text = None, None
+        self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
@@ -485,8 +486,7 @@ class Page(Adw.PreferencesPage):
             self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
                       self.took_metrics)
             self.ticks += 1
-            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and any(
-                    p.get("functions") for p in self.state.get("profiling") or []):
+            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and self.state.get("line_profiling"):
                 self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
 
@@ -636,86 +636,57 @@ class Page(Adw.PreferencesPage):
                 depsview.ask(self.where, self.took_deps)
             return
         self.deps_for, self.missing_shown = (self.where.get("host"), True), None
-        on = bool(self.state.get("on"))
-        if self.profiling_rows is not None and self.rows.get("profiling") == self.profiling_rows and getattr(
-                self, "profiling_shown", None) == (self.shown_app, repr(self.state.get("profiling")), on):
-            return self.show_lines()
-        self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")), on)
         if self.profiling_rows is None:
             self.make_profiling()
-        switch, process, entry, error = self.profiling_rows
-        mine = self.mine()
+        switch, errors = self.profiling_rows[0], dict(zip(PROFILED, self.profiling_rows[1:]))
+        on = bool(self.state.get("on"))
         self.taking = True
-        process.set_selected(PROFILED.index(self.shown_app))
-        if self.profiling_text != (self.shown_app, mine["functions"]):  # (the host's list, as it's told again or
-            # another process is picked; not what's being typed, as anything else is told)
-            self.profiling_text = (self.shown_app, mine["functions"])
-            if entry.get_text() != ", ".join(mine["functions"]):  # (as typed and applied: the caret where it is)
-                entry.set_text(", ".join(mine["functions"]))
-        switch.set_active(on and bool(mine["functions"]))
+        switch.set_active(on and bool(self.state.get("line_profiling")))
         self.taking = False
-        self.profiling_sensitive()
-        error.set_title(GLib.markup_escape_text(mine.get("error") or ""))
-        error.set_visible(bool(mine.get("error")))
+        switch.set_sensitive(on)
+        for p in self.state.get("profiling") or []:
+            if (error := errors.get(p.get("app"))) is not None:
+                error.set_title(GLib.markup_escape_text(p.get("error") or ""))
+                error.set_visible(bool(p.get("error")))
         if self.rows.get("profiling") != self.profiling_rows:
             self.group("profiling", None, self.profiling_rows)
         self.show_lines()
 
-    def mine(self):
-        """What the host profiles of the process picked."""
-        return next((p for p in (self.state or {}).get("profiling") or [] if p["app"] == self.shown_app),
-                    {"functions": []})
-
     def make_profiling(self):
-        """Line Profiling, the process profiled and its functions: made once, then told what the host says."""
-        process = Adw.ComboRow(title=wording.say("telemetry.process"), model=Gtk.StringList.new(
-            [wording.say(APP_NAMES[a]) for a in PROFILED]), selected=PROFILED.index(self.shown_app))
-        process.connect("notify::selected", lambda r, _p: self.taking or self.picked(PROFILED[r.get_selected()]))
-        entry = Adw.EntryRow(title=wording.say("telemetry.functions"), show_apply_button=True)
-        entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": self.typed()}))
-        entry.connect("changed", lambda e: self.profiling_sensitive())
+        """Line Profiling and each process's error (shown while it has one): made once, then told what the host
+        says."""
         switch = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"))
-        switch.connect("notify::active", lambda r, _p: self.taking or r.get_active() == bool(
-            self.mine()["functions"]) or self.set({"app": self.shown_app,
-                                                   "functions": self.typed() if r.get_active() else []}))
-        error = row("", sensitive=False)
-        self.profiling_rows = [switch, process, entry, error]
-
-    def typed(self):
-        return [f.strip() for f in self.profiling_rows[2].get_text().split(",") if f.strip()]
-
-    def profiling_sensitive(self):
-        """Line Profiling can be switched on while telemetry's collected and there's something to profile."""
-        switch, _process, entry, _error = self.profiling_rows
-        switch.set_sensitive(bool(self.state and self.state.get("on")) and bool(
-            self.mine()["functions"] or entry.get_text().strip()))
-
-    def picked(self, app):
-        self.shown_app = app
-        GLib.idle_add(lambda: self.show_profiling() and False)
+        switch.connect("notify::active", lambda r, _p: self.taking or self.set({"line_profiling": r.get_active()}))
+        errors = []
+        for app in PROFILED:
+            error = row("", sensitive=False, visible=False)
+            error.add_prefix(logo(app))
+            errors.append(error)
+        self.profiling_rows = [switch, *errors]
 
     def show_lines(self):
-        """The process picked's lines profiled in the last hour, added up, the most time first."""
+        """Every process's lines profiled in the last hour, added up, the most time first, each with its app's logo."""
         lines = {}
         for p in getattr(self, "profiles", []):
-            if p.get("app") != self.shown_app:
+            if p.get("app") not in PROFILED:
                 continue
             for x in p.get("lines") or []:
-                k = (x["file"], x["line"])
-                got = lines.setdefault(k, {**x, "hits": 0, "seconds": 0.0})
+                k = (p["app"], x["file"], x["line"])
+                got = lines.setdefault(k, {**x, "app": p["app"], "hits": 0, "seconds": 0.0})
                 got["hits"] += x["hits"]
                 got["seconds"] += x["seconds"]
         top = sorted(lines.values(), key=lambda x: -x["seconds"])[:LINES_SHOWN]
-        if "lines" in self.groups and self.lines_shown == (self.shown_app, repr(top)):
+        if "lines" in self.groups and self.lines_shown == repr(top):
             return
-        self.lines_shown = (self.shown_app, repr(top))
+        self.lines_shown = repr(top)
         rows = []
         for x in top:
             r = row(f"{os.path.basename(x['file'])}:{x['line']}  {x.get('code') or x['function']}",
                     wording.say("telemetry.hits_seconds", hits=f"{x['hits']:,}", seconds=f"{x['seconds']:.3f}"),
                     mono=True)
+            r.add_prefix(logo(x["app"]))
             r.set_title_lines(1)
-            r.set_tooltip_text(f"{x['file']}:{x['line']} ({x['function']})")
+            r.set_tooltip_text(f"{wording.say(APP_NAMES[x['app']])}: {x['file']}:{x['line']} ({x['function']})")
             rows.append(r)
         self.group("lines", wording.say("telemetry.top_lines") if top else None, rows)
 

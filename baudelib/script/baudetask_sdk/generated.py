@@ -2362,7 +2362,8 @@ class Rotated(Obj):
     """rotate's answer.
 
         session (Session): The Bot, as it's listed now: in its new conversation.
-        thread (Session): Its past thread, as it's listed now: archived.
+        thread (Session or None): Its past thread, as it's listed now: archived; null if it was only moved onto
+            another model, nothing said yet.
     """
     _refs = {"session": "Session", "thread": "Session"}
 
@@ -4078,14 +4079,18 @@ class Ops(Area):
         """
         return self._call("restart", {"do": do}, host, Obj)
 
-    def rotate(self, *, session=None, host=None):
+    def rotate(self, *, session=None, model=None, effort=None, host=None):
         """rotate (Rotate): A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-
-        only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks,
-        browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+        only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its
+        id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its
+        tasks is asking it.
 
             session (string): The Bot's session id.
+            model (string or None): The model the Bot carries on on, of whatever program (null: its own). Given,
+                a Bot with nothing said yet is moved onto it without a past thread.
+            effort (string or None): Its effort on model, if model's program has one (null: the Bot's own).
         """
-        return self._call("rotate", {"session": session}, host, Obj)
+        return self._call("rotate", {"session": session, "model": model, "effort": effort}, host, Obj)
 
     def run_task(self, *, session=None, id=None, inputs=None, waited=None, host=None):
         """run_task (RunTask): One of a Bot's tasks run now, by hand.

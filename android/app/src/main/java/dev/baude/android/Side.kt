@@ -110,7 +110,10 @@ fun AgentStatus(status: String) {
 }
 
 /** A count of tokens as chatparts.fmt_tokens says it: 950, 12.3k, 1M. */
-fun fmtTokens(n: Int): String {
+fun fmtTokens(n: Int): String = fmtTokens(n.toLong())
+
+/** A count of tokens as chatparts.fmt_tokens says it, past an Int's (a year's). */
+fun fmtTokens(n: Long): String {
     fun one(x: Double) = String.format(java.util.Locale.ROOT, "%.1f", x).removeSuffix(".0")
     return if (n >= 1_000_000) Wording.Tokens.millions(n = one(n / 1_000_000.0))
         else if (n >= 1000) Wording.Tokens.thousands(n = one(n / 1000.0)) else "$n"

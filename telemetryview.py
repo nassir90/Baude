@@ -368,7 +368,7 @@ KINDS = {"input": "meta.input", "cache_write": "telemetry.cache_write", "cache_r
 def said_tokens(t):
     """A day's or a model's tokens, each kind apart ("1.2M In · 30M Cache Reads · 50k Out"): those it has; an older
     turn's input, cache among it, as that."""
-    return " · ".join(wording.say(f"telemetry.day_{k}", tokens=tokens(t[k]))
+    return " · ".join(wording.say(f"telemetry.day_{k}", tokens=tokens(t.get(k) or 0))
                       for k in ("input_with_cache", "input", "cache_write", "cache_read", "output")
                       if t.get(k) or k == "output")
 

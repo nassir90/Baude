@@ -694,15 +694,27 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         # (one that's listed already, archived or not, is listed there only)
         sid = self.win.session_id
-        if mine and not q and self.win.chat_begun() and (self.win.remote is None or self.win.remote.mine) and \
-                (picked is None or self.open_group(assigned) in picked) and sid not in archived and \
-                not any(sid in (i["id"], i.get("cli_id"))
+        agent = getattr(self.win, "agent_draft", None)  # (a Bot's new session, not made yet: under the Bot, in its folder)
+        if (mine or agent is not None) and not q and self.win.chat_begun() and \
+                (self.win.remote is None or self.win.remote.mine) and \
+                (picked is None or agent is not None or self.open_group(assigned) in picked) and sid not in archived and \
+                not any(sid is not None and sid in (i["id"], i.get("cli_id"))
                         for i in [*gone, *(i for g in groups.values() for i in g[2])]):
-            key, label = session_group(self.win.cwd)
-            groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
+            there = agent["host"] if agent is not None and self.win.chat_host() != HERE_HOST else None
+            if there is not None:
+                folder = self.win.agent_folder()
+                key = f"remote:{there.key}:{folder}"
+                label = wording.say("sidebar.folder_on_host", folder=remote_path(folder, there), host=remote_name(there))
+                self.remote_keys[key] = there
+            else:
+                folder = self.win.cwd
+                key, label = session_group(folder)
+            groups.setdefault(key, [label, folder, []])[2].insert(0, {
                 "id": sid, "title": getattr(self.win, "session_title", None) or wording.say("sidebar.new_session"),
-                "cwd": self.win.run_cwd, "folder": self.win.cwd, "worktree": main_folder(self.win.run_cwd)[1],
-                "mtime": now, "prompts": 0, "unsaved": True})
+                "cwd": folder if there is not None else self.win.run_cwd, "folder": folder,
+                "worktree": None if there is not None else main_folder(self.win.run_cwd)[1],
+                "mtime": now, "prompts": 0, "unsaved": True,
+                **({"spawned_by": agent["parent"]} if agent is not None else {})})
         # (forks are found within a folder, by day too: a fork is in its session's folder. A folder with a server's
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
         # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)

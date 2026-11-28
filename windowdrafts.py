@@ -1292,11 +1292,21 @@ class WindowDrafts:
     # it runs: its provider and host are the provider picker's to say
     PROVIDERS_WAIT = 0.5  # (s a chat waits for this machine's providers the first time: the rest come as they're found)
 
+    def chat_remote(self):
+        """The host object this chat lives on: its own, or the one a Bot's new session is going to be made on."""
+        return self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
+
+    def agent_folder(self):
+        """A Bot's new session's folder on its host: the Bot's, else the one last used there, else its home."""
+        agent = getattr(self, "agent_draft", None) or {}
+        host = agent.get("host")
+        return agent.get("cwd") or (load_settings().get("remote_folders") or {}).get(agent.get("host_key")) or \
+            ((host.info or {}).get("home") if host is not None else None) or "~"
+
     def chat_host(self):
         """The host this chat lives on, its files and its agent's tools, as New session's hosts key it: this machine (its
         own claude, or its host process), or the server's."""
-        agent = getattr(self, "agent_draft", None)
-        host = self.remote or ((agent or {}).get("host"))
+        host = self.chat_remote()
         return HERE_HOST if host is None or baudelib.client.is_here(host.info) else host.key
 
     def provider_choices(self):

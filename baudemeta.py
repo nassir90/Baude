@@ -211,7 +211,7 @@ class MetaNames(lookup.SearchSpace):
         win = self.win
         if win.chat_host() != HERE_HOST:
             folder = win.remote_folder()
-            source = HostFolder.on(win.remote, folder) if folder else None
+            source = HostFolder.on(win.chat_remote(), folder) if folder else None
             make = HostSpace
         else:
             source, make = win.catalogue_signal(), SearchSpace

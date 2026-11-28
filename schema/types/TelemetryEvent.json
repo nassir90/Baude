@@ -24,7 +24,7 @@
         "turn_sent",
         "turn_ended"
       ],
-      "description": "What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it); it stopped being in front; a turn sent in it; a turn of it ended."
+      "description": "What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it, with someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in it; a turn of it ended."
     },
     "host": {
       "type": "string",
@@ -62,19 +62,54 @@
       ],
       "description": "A turn_ended's: the effort it ran at."
     },
-    "tokens_in": {
+    "tokens_input": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "A turn_ended's: the tokens it read (input, cache reads and writes)."
+      "description": "A turn_ended's: the input tokens it sent that weren't read from a cache or written to one."
+    },
+    "tokens_cache_write": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the input tokens it wrote to a cache."
+    },
+    "tokens_cache_read": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the input tokens it read from a cache (each call of the turn's, counted each time it's read)."
     },
     "tokens_out": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "A turn_ended's: the tokens it wrote."
+      "description": "A turn_ended's: the tokens it wrote (thinking among them)."
+    },
+    "tokens_in": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the app that saw it runs (its first 12 characters), as it started."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the app that saw it speaks."
     }
   },
   "required": [

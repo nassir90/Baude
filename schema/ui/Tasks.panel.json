@@ -1,0 +1,699 @@
+{
+  "description": "A Bot's tasks, a page of the right-hand side panel: scripts the Bot's host keeps and runs (Python, shell, or a prompt the Bot is given as a turn), by hand or as a trigger fires (a schedule, a git push to a branch of a repo on the host), each run given its inputs filled by hand or by the trigger's event, the Bot asked mid-run when the script can't decide and handed a failed run. A task's script is the Bot's to write (its set_task tool); no app shows or edits it, and a person changes it by asking the Bot. The page goes from the list of tasks to a task's page to a run's log, each with a back button. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. docs/tasks-design.md has the model and the wire.",
+  "apps": [
+    "baude",
+    "phone"
+  ],
+  "opens": [
+    "the 'Tasks' tab (alarm-clock icon) in the side panel's switcher, visible only while the open chat is a Bot"
+  ],
+  "code": [
+    "taskspage.py:TasksPage",
+    "taskspage.py:TasksPage.draw_list",
+    "taskspage.py:TasksPage.open_task",
+    "taskspage.py:TasksPage.open_run",
+    "taskspage.py:TasksPage.change",
+    "taskspage.py:TasksPage.run_form",
+    "taskspage.py:TasksPage.add_trigger",
+    "taskspage.py:TasksPage.edit_form",
+    "baudelib/tasks.py",
+    "sidepanel.py:SidePanel.bot_changed",
+    "taskspage.py:TasksPage.bind",
+    "baudelib/taskvars.py",
+    "baudelib/script/_baudetask_vars.py"
+  ],
+  "copy": [
+    "tasks",
+    "common",
+    "signal_card",
+    "new_session",
+    "kube",
+    "databases",
+    "meta_settings"
+  ],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Switcher tab with an alarm-clock icon and the label 'Tasks'; present only for a Bot chat.",
+      "copy": [
+        "tasks.title"
+      ]
+    },
+    {
+      "name": "list",
+      "shows": "The first view: a boxed list of the Bot's tasks in the order its host keeps them, scrolling, no selection. Empty: the centred dim text 'No tasks yet'. No app makes a task here: the Bot makes its tasks (set_task), as a person asks it to. Read when the chat is opened, when a turn of the Bot ends, every 30 seconds while the page is shown (5 while a run is going), and after each change here.",
+      "copy": [
+        "tasks.no_tasks"
+      ],
+      "parts": [
+        {
+          "name": "task row",
+          "shows": "Before the title, its last run's state icon (a tick done, a stop sign failed, a spinner running, an hourglass in the warning colour waiting for input (asking: an ask of its Bot not answered yet), a square stopped, an arrow skipped; nothing if it has never run; its state's word as the tooltip). Title: the task's name. At the end: a warning icon in the warning colour if a variable of it is bound to what isn't there now (its tooltip one line per variable, '<variable>: <why>'), a switch (on = its triggers fire; tooltip 'Turn off to pause') and a Run button (play icon). No subtitle. Row text is escaped, never markup.",
+          "copy": [
+            "tasks.turn_off",
+            "tasks.run",
+            "tasks.status",
+            "tasks.variable_warning"
+          ],
+          "actions": [
+            {
+              "by": "click the row",
+              "does": "opens the task's page"
+            },
+            {
+              "by": "toggle the switch",
+              "does": "pauses or resumes its triggers on the host at once (a schedule resumed is worked out afresh from now)"
+            },
+            {
+              "by": "click Run",
+              "does": "runs it now; a task with inputs opens the run form first"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "task page",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of two switch rows, 'Notify on failure' and 'Notify on graceful exit' (none for a task given its Bot as a turn), then the groups each with its heading: 'Triggers', 'Inputs', 'Variables' (only for a task that declares any), 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "copy": [
+        "tasks.title",
+        "tasks.run",
+        "tasks.change",
+        "common.delete",
+        "tasks.delete_heading",
+        "common.cancel",
+        "tasks.notify_failure",
+        "tasks.notify_exit",
+        "tasks.triggers",
+        "signal_card.inputs",
+        "tasks.runs",
+        "tasks.variables"
+      ],
+      "actions": [
+        {
+          "by": "click back",
+          "does": "back to the list"
+        },
+        {
+          "by": "click Run",
+          "does": "as the row's Run"
+        },
+        {
+          "by": "click Change",
+          "does": "opens the Change Task dialog"
+        },
+        {
+          "by": "click Delete",
+          "does": "asks 'Delete <task>?' (Cancel, Delete in red, Cancel the default); Delete deletes the task on the host, with its runs and the scripts only it ran, and goes back to the list"
+        }
+      ],
+      "parts": [
+        {
+          "name": "notify switches",
+          "shows": "Above the groups, its own small boxed list of two switch rows (no subtitles, titles not markup). 'Notify on failure' is on while a failed run is sent to the Bot (on for a new task). 'Notify on graceful exit' is on while a run that finishes with exit 0, not stopped, is told to the Bot, for its information, once the Bot's idle: the Bot isn't asked to act, and no more than one such notice per task waits (a newer run's replaces it); a run the Bot itself started with run_task and waited for isn't told (off for a new task). A task kept before there were two has its one switch's value as 'Notify on failure', and 'Notify on graceful exit' off.",
+          "copy": [
+            "tasks.notify_failure",
+            "tasks.notify_exit"
+          ],
+          "actions": [
+            {
+              "by": "toggle the switch",
+              "does": "saves the task at once on the host with its two switches as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Hand failures to the bot toggle should be on the main task page not in some pen field.",
+              "rule": "Every app puts the 'Notify on failure' and 'Notify on graceful exit' switches on the task's page, saved the moment one is flipped, and not in the Change Task dialog",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#259"
+                }
+              ]
+            },
+            {
+              "said": "\"Hand failures to the Bot\" -> \"Notify on failure\" + \"Notify on graceful exit\"",
+              "rule": "Every app has two switches on a task's page, 'Notify on failure' (the old 'Hand failures to the Bot', its value kept for a task made before) and 'Notify on graceful exit' (off unless set). A run that finishes with exit 0 and isn't stopped, of a task with the second on, sends its Bot a message in a failure's shape, 'An instance of the '<task>' task finished', the same table, and the last thing the run said (else the end of its output, if it printed any); the Bot isn't asked to act. The Bot's set_task takes both.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "ac39f1b5-2d5e-43fe-800a-2fff32a7fc8c"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "triggers",
+          "shows": "Heading 'Triggers' with a flat + at its right (tooltip 'Add trigger'). One compact row per trigger: an icon (alarm clock for a schedule, branch for a git push), the title saying what fires it ('weekdays at 09:00', 'every 2 hours', 'push to main in ~/site'), a warning icon with the trigger's last error as its tooltip if it has one, and a remove button (minus; tooltip 'Remove trigger'). No triggers: the dim line 'By hand' (every task can be run by hand).",
+          "copy": [
+            "tasks.add_trigger",
+            "tasks.remove_trigger",
+            "tasks.by_hand",
+            "tasks.push_to",
+            "tasks.every_hour",
+            "tasks.every_hours",
+            "tasks.every_minutes",
+            "tasks.weekdays",
+            "tasks.weekends",
+            "tasks.every_day",
+            "tasks.days_at",
+            "tasks.mon",
+            "tasks.tue",
+            "tasks.wed",
+            "tasks.thu",
+            "tasks.fri",
+            "tasks.sat",
+            "tasks.sun"
+          ],
+          "actions": [
+            {
+              "by": "click +",
+              "does": "opens the Add Trigger dialog"
+            },
+            {
+              "by": "click remove",
+              "does": "removes the trigger on the host at once"
+            }
+          ]
+        },
+        {
+          "name": "inputs",
+          "shows": "Heading 'Inputs' with a flat pencil at its right (tooltip 'Change'). One compact row per input: title its label (or name), at the end its type in dim text (Text, Number, Yes or no, Choice). No inputs: the dim line 'No inputs'.",
+          "copy": [
+            "signal_card.inputs",
+            "signal_card.no_inputs",
+            "tasks.text",
+            "tasks.number",
+            "tasks.yes_no",
+            "tasks.choice"
+          ],
+          "actions": [
+            {
+              "by": "click the pencil",
+              "does": "opens the Change Inputs dialog"
+            }
+          ]
+        },
+        {
+          "name": "variables",
+          "shows": "Heading 'Variables', no button (the Bot declares a task's variables with set_task; a person binds them). One compact row per variable, in the order the Bot declared them: title its name (the Bot's description, if any, as its tooltip), at the end what it's bound to in dim text (its label, a model's name or a host's, else its value; a model's effort after it, 'Sonnet 5.5 · low'; the value as the tooltip when a label is shown), or 'Not bound'; before that, a warning icon in the warning colour if what it's bound to isn't there now (a model not served on the host, a decider that didn't answer when last looked at, a host not in the mesh or out of reach, a context gone, a pod or container not running, a database gone), its tooltip why. The host looks at every bound variable every minute, at once as one's bound, and as a run starts. Shown only when the task declares variables.",
+          "copy": [
+            "tasks.variables",
+            "tasks.not_bound",
+            "tasks.model_missing",
+            "tasks.unreachable",
+            "tasks.no_host",
+            "tasks.out_of_reach",
+            "tasks.not_running",
+            "tasks.no_context",
+            "tasks.no_database"
+          ],
+          "actions": [
+            {
+              "by": "click a row",
+              "does": "opens the Bind dialog for it"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Tasks should be able to define model-variables such as they might define \"Translation Model\" which the Bot could bind to \"Haiku 5.5 Low\". \"Worker Agent Model\" which the Bot could assign to \"GPT OSS\" \"Low Effort\" \"Mac Provider\". Other entities probably could be variabless too, Browser Host, Terminal Host, Pod, Container .etc (I'm realising that we can get pretty strongly typed when it comes to inputs, especially with the command+k logic). That said we would want that to mostly help with auto filling, I can imagine some times some entities are flaky and you would still want to fill them in.",
+              "rule": "Every app shows a task's variables (declared by its Bot, each a name, a type and an optional description; types model, decider, host, browser_host, terminal_host, kube_context, pod, container, database, text) on its page with what each is bound to, bound once per task, apart from the per-run Inputs. Its Bot binds them with set_task; a person binds one from its row. Binding offers what the task's host has of that type (the lists ⌘K lists, through task_choices), and always takes any text typed instead, for a flaky entity. A script reads them as baudetask.vars, typed, None when unbound, and a model one goes straight to agent(model=) (its effort too).",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+                }
+              ]
+            },
+            {
+              "said": "If the model is unavailable, and also bound as a variable, the user gets a warning in advacce. Let the code itself handle the fallback.",
+              "rule": "Every app warns of a variable bound to what isn't there now on its row and on its task's row, before any run. A run, by hand or by a trigger, notes each such warning first in its log and starts all the same: nothing is put in its place, and its script reads each variable's warning and decides what to do.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "0cc3a949-77b2-47c9-a6e0-14ccf4a20a17"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "runs",
+          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (alarm clock schedule, branch git push; none for a run by hand, whose run page says 'By hand') and the version, monospace, dim. No row has a play or re-run button. None: the dim line 'No runs yet'.",
+          "copy": [
+            "tasks.no_runs"
+          ],
+          "actions": [
+            {
+              "by": "click a run",
+              "does": "opens the run's log"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run page",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Wrap toggle (text-wrap icon, tooltip 'Wrap long lines', drawn pressed while on), and a Stop button (stop icon) while it's running or waiting for input. Then one line: its state's icon (as the task row's: the hourglass while it waits for input) and its state's word ('waiting for input' while it waits) (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: first, each variable of the task bound to what wasn't there as the run started, a line with a warning icon in the warning colour, '<variable>: <why>'; then the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together; their long lines wrapped at the page's width while Wrap is on, else scrolled sideways), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as a turn ended (each stopped or failed turn, then its first that finished) as a card headed '<chat> finished' (or '<chat> stopped', '<chat> failed'), a line if its Bot can't be told yet, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "copy": [
+        "tasks.status",
+        "tasks.asked_bot",
+        "tasks.handed_bot",
+        "tasks.bot_answered",
+        "common.stop",
+        "tasks.schedule",
+        "tasks.git_push",
+        "tasks.by_hand",
+        "tasks.started_chats",
+        "tasks.agent_done",
+        "tasks.agent_failed",
+        "tasks.agent_stopped",
+        "tasks.agent_waiting",
+        "tasks.agent_not_told",
+        "tasks.a_chat",
+        "code_view.wrap",
+        "tasks.variable_warning"
+      ],
+      "actions": [
+        {
+          "by": "click back",
+          "does": "back to the task's page"
+        },
+        {
+          "by": "click Stop",
+          "does": "stops the run on the host"
+        },
+        {
+          "by": "click a Started row",
+          "does": "opens that chat"
+        },
+        {
+          "by": "click Wrap",
+          "does": "wraps the output and error blocks' long lines at the page's width, or scrolls them sideways again; remembered across sessions (setting task_log_wrap, on until turned off)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "A task run's terminal-style logs need a word-wrap mode (paraphrased)",
+          "rule": "Every app's run page has a Wrap toggle for its output and error blocks, as the Kubernetes logs have one: on, long lines wrap at the page's width; off, they scroll sideways. It's on until turned off, and remembered (task_log_wrap)",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#265"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "message line",
+      "shows": "A dim wrapping line at the bottom of the page (10 px margins), hidden unless something failed: \"Couldn't load the tasks.\", \"Couldn't run the task.\", \"Couldn't save the task.\", \"Couldn't delete the task.\", \"Couldn't stop the run.\"; the host's reason is in its tooltip. It goes away after the next successful answer.",
+      "copy": [
+        "tasks.couldnt"
+      ]
+    },
+    {
+      "name": "task dialog",
+      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether it notifies the Bot (switches on the task's page): those are the Bot's to change or have a place of their own.",
+      "copy": [
+        "tasks.change_heading",
+        "common.name",
+        "common.cancel",
+        "common.save"
+      ],
+      "actions": [
+        {
+          "by": "click Save",
+          "does": "saves its name on the host, its script, runtime, inputs, triggers and notify switches as they are"
+        },
+        {
+          "by": "click Cancel / key Esc",
+          "does": "closes without saving"
+        }
+      ]
+    },
+    {
+      "name": "run form",
+      "shows": "An alert dialog headed 'Run <task>', as the app's settings dialogs are (Change Task, a chat's Access): its inputs as one boxed list of setting rows, each titled with its label (its name if none), wrapped, with no subtitle, filled with its default: a yes/no input a switch row, a text or number input an entry row (a number's in the error colour, and Run off, while it isn't one), a choice a drop-down row of its choices. Then the buttons Cancel and Run (suggested). The phone draws the same: its boxed list, switch, entry and choice rows, Cancel and Run at the end.",
+      "copy": [
+        "tasks.run_heading",
+        "common.cancel",
+        "tasks.run"
+      ],
+      "actions": [
+        {
+          "by": "click Run",
+          "does": "runs it with its inputs as filled"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The run form looked ugly and unlike any of the app's other settings (paraphrased: the form shown when running a task with inputs)",
+          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel, and no other button; a number is red from the start while its text isn't a finite number (not nan, inf, 1e999 or 1_000), an empty optional number is fine and sends nothing (the host's default stands), Enter in an entry runs the form when it's fit",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#258"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "trigger dialog",
+      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 to 44640 minutes, 1 to 744 hours: what the host takes); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has inputs, 'Fills' and one drop-down per input, '<input> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the input's own name if there is one.",
+      "copy": [
+        "tasks.trigger_heading",
+        "tasks.schedule",
+        "tasks.git_push",
+        "tasks.every",
+        "tasks.at_a_time",
+        "tasks.minutes",
+        "tasks.hours",
+        "tasks.times_in",
+        "tasks.host_clock",
+        "tasks.repo",
+        "lookup.branch",
+        "tasks.fills",
+        "tasks.fills_field",
+        "tasks.nothing",
+        "common.cancel",
+        "common.save"
+      ],
+      "text": [
+        "HH:MM",
+        "09:00",
+        "main"
+      ]
+    },
+    {
+      "name": "inputs dialog",
+      "shows": "An alert dialog headed 'Change Inputs', Cancel and Save. One row per input: a 'Name' field, a type drop-down (Text, Number, Yes or no, Choice), a 'Choices, comma-separated' field shown for a choice, a 'Default' field, and a remove button (tooltip 'Remove input'); under them an 'Add input' button.",
+      "copy": [
+        "tasks.inputs_heading",
+        "common.name",
+        "tasks.text",
+        "tasks.number",
+        "tasks.yes_no",
+        "tasks.choice",
+        "tasks.choices",
+        "tasks.remove_input",
+        "tasks.add_input",
+        "common.cancel",
+        "common.save",
+        "meta_settings.effort_default"
+      ]
+    },
+    {
+      "name": "bind dialog",
+      "shows": "An alert dialog headed 'Bind <variable>', Cancel, Clear (only while it's bound) and Save (suggested). A text field, filled with what it's bound to, its placeholder the variable's type ('Model', 'Decider', 'Host', 'Browser host', 'Terminal host', 'Kubernetes context', 'Pod', 'Container', 'Database', 'Text'). Under it, a boxed list (260 px tall at most, scrolling) of what the task's host has of that type, as ⌘K lists it: its models (as its model pickers name them), the mesh's hosts (this one first; one out of reach says so), its kubeconfig's contexts, the workloads running in its local clusters (pods first), its Docker containers, the databases running on it, the deciders it and the mesh's members know (one that didn't answer says so); each row its name and, at its end in dim text, where it is (a pod's kind, context and namespace; a model's host and provider); what it's bound to now has a tick. Typing narrows the list to rows with every word typed in their name or where they are. A model's dialog has an 'Effort' row with a drop-down: 'Default' and the picked model's efforts. A Text variable has no list. Clusters' choices need Kubernetes read, Docker's Docker read, databases' Databases, as ⌘K's do.",
+      "copy": [
+        "tasks.bind_heading",
+        "common.model",
+        "tasks.decider",
+        "new_session.host",
+        "tasks.browser_host",
+        "tasks.terminal_host",
+        "tasks.kube_context",
+        "tasks.pod",
+        "kube.container",
+        "databases.database",
+        "tasks.text",
+        "tasks.this_host",
+        "tasks.out_of_reach",
+        "meta_settings.effort",
+        "meta_settings.effort_default",
+        "common.cancel",
+        "common.clear",
+        "common.save"
+      ],
+      "actions": [
+        {
+          "by": "click a row",
+          "does": "picks it: the field shows its name, and Save binds the variable to it (with what else its type has: a model's host, a pod's context and namespace, a database's container)"
+        },
+        {
+          "by": "type in the field",
+          "does": "narrows the list; Save (or Enter) binds the variable to the row whose name or value is exactly the text typed (case aside), else to the text typed"
+        },
+        {
+          "by": "click Save",
+          "does": "binds it on the host (task_bind) and shows its row again, a warning on it if what it's bound to isn't there"
+        },
+        {
+          "by": "click Clear",
+          "does": "unbinds it"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "empty",
+      "shows": "'No tasks yet'"
+    },
+    {
+      "name": "paused task",
+      "shows": "Switch off"
+    },
+    {
+      "name": "running",
+      "shows": "A spinner before the task's name and run; the run page's Stop button"
+    },
+    {
+      "name": "asking",
+      "shows": "Waiting for input: the hourglass in the warning colour, not the spinner, on the task's row, its run's row and its run page, its state's word 'waiting for input'; the run page's Stop; the run's log ends with the ask's card. It waits up to 7 days for the answer, its timeout not counting the time it waits"
+    },
+    {
+      "name": "failed",
+      "shows": "Stop-sign icon; the run's log ends with the error, and a 'Handed to <Bot>' card with the Bot's answer if it was handed over"
+    },
+    {
+      "name": "error",
+      "shows": "Message line at the bottom"
+    },
+    {
+      "name": "variable not there",
+      "shows": "A warning icon on the variable's row and on its task's row; the next run's log starts with the warning, and the run goes on"
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Routines are rewritten as Tasks: tasks are scripts, run on a schedule or by hand at any time",
+      "rule": "Every app shows a Bot's tasks where its routines were, each runnable by hand, with its triggers (a schedule among them)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Triggers generalise schedules; a task can be started by external events, a git push first",
+      "rule": "Every app lists a task's triggers (schedule, git push) and adds or removes them on the task's page",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "A task's script can call its Bot as a fallback on errors and to handle non-deterministic steps",
+      "rule": "Every app shows a run's asks of its Bot and the Bot's answers in the run's log, a failure handed over marked so",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Input forms that triggers populate, and that the Bot can fill",
+      "rule": "Every app shows a task's inputs, fills them before a run by hand, and lets a trigger map its payload onto them",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Telemetry includes when triggers happen, how long scripts take, failures and version hashes",
+      "rule": "Every app lists a task's runs with when, what started it, how it ended and the version it ran, and a run's page says how long it took",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "For tasks UI, users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.",
+      "rule": "No app shows a task's script or lets a person edit it, nor its runtime: the Bot writes and changes scripts (set_task), and a person asks the Bot to. A task's version stays on its runs and its run page; a run's log (tracebacks too) shows as it is",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "Form should be \"Inputs\" really",
+      "rule": "Every app calls a task's fields its Inputs: the task page's group, its dialog (Change Inputs), its rows and buttons (Add input, Remove input). The wire keeps the field's name, form",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "Form row height should ne narrower as should triggrs and runs",
+      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists, but not thinner than its navigation lists' rows: Baude's 36 px (libadwaita's navigation-sidebar row, as the Fixes page and Record's notebooks have), the phone's 38 dp (as its Fixes list); not the 26 px sessions-list row, nor a full list row",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "* We probably want some kind of environment variable given to tasks that causes baude oneshot agents spawned to nest themselves underneath the bot.\n* We also probably want oneshot agents laucnhed by the task to be associated with that task, if a task triggers a oneshot agent, there's a sense in which it's still running. Not sure wht the ideal situation is here. As somtimes if you have some complex chain of tasks, yes, indeed the first phase is not running. We don't have this yet so it should be fine.",
+      "rule": "A one-shot agent a task's run starts (baude-oneshot, the mesh tools, the script library's agent) nests under the run's Bot in every app's sessions list, is kept with the run (Started on its page) and links back to it (its first message's from line). A run is over when its script ends: the chats it started go on, their live states shown under Started",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "e6cb3bcd-242c-4214-9d3f-c795ec30466b"
+        }
+      ]
+    },
+    {
+      "said": "* Philosophy: I have a deployment tak that fallsback to a oneshot agent when teh deploy fails. But the oneshot agent spawned outside of the bot which is not ideal, and did not keep in touch with the bot either.",
+      "rule": "As a chat a task's run started ends its first turn (or stops, or fails), its Bot is sent what it said, as a message from that chat whose from line links to it, and the run's log says it too",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ded3957e-f255-4438-b4b3-ff7e69adeb1d"
+        }
+      ]
+    },
+    {
+      "said": "Dont really like how the oneshot messages mix. agent text and template text",
+      "rule": "A chat a task's run started reports each turn that's stopped or fails, and its first that finishes, to its Bot as a message of only its own words; the run's log has the same as a card headed \"<chat> finished\" (or stopped, failed), and the run's page stops looking for them once each chat it started has finished a turn, or an hour after the run's over. A run opened from a from line opens its task's page under it, so Back goes to that task",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "31423098-8f2b-428f-aa29-cd83b2005272"
+        }
+      ]
+    },
+    {
+      "said": "The rows in Tasks are too thin; make them a little taller (paraphrased)",
+      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists, but not thinner than its navigation lists' rows: Baude's 36 px (libadwaita's navigation-sidebar row, as the Fixes page and Record's notebooks have), the phone's 38 dp (as its Fixes list); not the 26 px sessions-list row, nor a full list row",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#267"
+        }
+      ]
+    },
+    {
+      "said": "Make task timeouts for things like asks much longer; just make it clear when a task is waiting on input (paraphrased)",
+      "rule": "Every app shows a task's run that waits for input (an ask of its Bot: ask, fallback, a form to fill) as its own state, 'waiting for input', with an hourglass in the warning colour where a running run has the spinner: on the task's row in the list, its run's row, and its run page. The host waits up to 7 days for the answer, and the run's timeout doesn't count the time it waits",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#277"
+        }
+      ]
+    },
+    {
+      "said": "Anything accessible to a Bot, or Meta, should be accessible via an SDK. For example, scripts should be able to manage Emission tabs, Multiplex virtual terminals, Manipulate kube objects, manipulate Docker objects, manipulate and view databases in addition to their existing ability to ask models and spawn agents.",
+      "rule": "baudetask's SDK (emission, terminal, kube, docker, db, chats, subagents, ops, hosts, models) is generated from schema/types and the Bot's tools' definitions (baudelib/tasksdk.py); every call takes host= and is judged as the run's Bot (hello's task), never more",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+        }
+      ]
+    },
+    {
+      "said": "scripts should be able to enumerate objects and dynamically select them! Just like a Bot can spawn a subagent on any host with any compatible model!",
+      "rule": "The SDK's lists answer typed objects that carry their host and context, so a script filters them and passes one back (kube.logs(pod), docker.restart(container), subagents.start(model=...))",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "The play icon at the end of a run's row (a run started by hand)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "It looked like a button to run that run again. The owner: \"I'm never going to re-run older runs. Drop the play button from the rows.\" A run's row has no play or re-run control; the task's own Run (its list row and its page) starts a new run. The host keeps run_task, which that Run uses",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#275"
+        }
+      ]
+    },
+    {
+      "name": "Script group on a task's page, and the script and runtime in the task dialog",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner: \"users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.\" Scripts are the Bot's to write (set_task)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "name": "New task button (+) on the tasks list, and the New Task dialog",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "A consequence of no scripts in the UI: the host takes no task without a script; scripts are the Bot's to write. A person asks the Bot for a new task",
+      "decided": "2026-11-26"
+    },
+    {
+      "name": "Run with dummy answers (the run form's button, a run's ' · dry' tag and 'dummy answers' fact, run_task's dry)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner called Run with dummy answers a terrible feature and asked for it to go (paraphrased). Every app runs a task only for real: no button, tag or wire flag for a run whose asks a dummy agent answers",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#266"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's queue changed (a change to the chat: Agent Management's write): messages added at its end, dropped by id, or the one up to which it's sent as the turn ends named. Told every other head attached to it (queue_changed). Sent on the chat's own connection, so it's in order with the interrupt send-now asks for.",
+  "properties": {
+    "op": {
+      "const": "queue",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "add": {
+      "type": ["array", "null"],
+      "items": {
+        "$ref": "QueuedMessage.json"
+      },
+      "description": "Messages queued, at its end (one whose id it has already: left as it is)."
+    },
+    "drop": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string"
+      },
+      "description": "The ids of messages taken out of it (sent by the head, edited, deleted)."
+    },
+    "upto": {
+      "type": ["string", "null"],
+      "description": "The id of the one whose send-now stops the turn: it and those before it sent as the turn ends (at once if none's going)."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

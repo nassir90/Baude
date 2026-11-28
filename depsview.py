@@ -1,7 +1,7 @@
 """What Baude and Record show of a dependency (baudelib.deps, schema/deps): Missing, the state a feature shows in its
-place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Database Schemas
+place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Databases
 without Docker, the Git page without git; the phone's MissingDep the same), and Settings → Dependencies (Page: the host
-picked beside New session's, as its deps op says them, under what needs them)."""
+picked beside New session's, as its deps op says them, under what needs them, then its deciders: decidersview)."""
 import threading
 
 from gi.repository import Adw, GLib, Gtk, Pango
@@ -97,22 +97,22 @@ def ask(where, done, msg=None):
     threading.Thread(target=run, daemon=True, name=msg["op"]).start()
 
 
-def copy_fix(widget, dep):
-    """Copy's: the command on the clipboard, and a toast saying what to do next (Restart for the app's own, else Try Again)."""
+def copy_fix(widget, dep, settings=None):
+    """Copy's: the command on the clipboard, and a toast saying what to do next (Restart for the app's own; Try Again on a feature's page; in Settings, which has none, only to run it; settings: the Settings dialog a row in a dialog over it toasts on)."""
     from widgets import toast
     widget.get_clipboard().set(dep["fix"])
-    text = wording.say("deps.copied_restart") if dep.get("where") == "app" else wording.say("kube.copied_try_again")
-    dialog = widget.get_ancestor(Adw.PreferencesDialog)  # (Settings: its toast is over its own page)
+    dialog = settings or widget.get_ancestor(Adw.PreferencesDialog)  # (Settings: its toast is over its own page)
+    text = wording.say("deps.copied_restart" if dep.get("where") == "app" else "deps.copied" if dialog else "kube.copied_try_again")
     if dialog is not None:
         dialog.add_toast(Adw.Toast(title=text, timeout=2))
     else:
         toast(widget, text)
 
 
-def row(dep):
-    """A dependency's row: its name, then what's said of it while it's there (Installed, Signed in, Running, 3 models),
+def row(dep, title=None, settings=None):
+    """A dependency's row: its name (or title: "Codex CLI isn't installed", where a feature's page lists it), then what's said of it while it's there (Installed, Signed in, Running, 3 models),
     or the command that installs or readies it with Copy (else its install page; a check with no command, its status only)."""
-    out = Adw.ActionRow(title=GLib.markup_escape_text(dep["name"]))
+    out = Adw.ActionRow(title=GLib.markup_escape_text(title or dep["name"]))
     if dep.get("present"):
         out.add_suffix(Gtk.Label(label=dep.get("ready") or wording.say("deps.installed"), css_classes=["dim-label"]))
     elif dep.get("fix"):
@@ -120,7 +120,7 @@ def row(dep):
         out.add_suffix(fix)
         copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"),
                           valign=Gtk.Align.CENTER, css_classes=["flat"])
-        copy.connect("clicked", lambda b: copy_fix(b, dep))
+        copy.connect("clicked", lambda b: copy_fix(b, dep, settings))
         out.add_suffix(copy)
     elif dep.get("ready"):
         out.add_suffix(Gtk.Label(label=dep["ready"], css_classes=["dim-label"]))
@@ -156,6 +156,9 @@ class Page(Adw.PreferencesPage):
         top.add(name)
         self.add(top)
         self.groups = []  # (the groups shown, once the host's answered)
+        import decidersview
+        self.deciders = decidersview.Group(where)  # (last, under the groups)
+        self.add(self.deciders)
         ask(where, self.took)
 
     def took(self, reply):
@@ -171,6 +174,7 @@ class Page(Adw.PreferencesPage):
             for dep in listed:
                 group.add(row(dep))
             self.groups.append(group)
-        for group in self.groups:
-            self.add(group)
+        for group in self.groups:  # (over Deciders, which stays where it is: what's being typed in it keeps its
+            # place, and the page where it's scrolled to)
+            group.insert_before(self.deciders.get_parent(), self.deciders)
         return False

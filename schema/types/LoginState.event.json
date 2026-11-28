@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's sign-in changed on its host (a turn failed for want of it, a sign-in for it started, finished, failed or was cancelled): told every head attached to it, as attach's answer tells one attaching.",
+  "properties": {
+    "op": {
+      "const": "login_state",
+      "description": "What it is."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "login": {
+      "anyOf": [
+        {
+          "$ref": "ChatLogin.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its sign-in now; null once a turn's gone through, or a sign-in for it with nothing to sign in for before was cancelled."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

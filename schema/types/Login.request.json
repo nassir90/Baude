@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "claude auth login run on the host (a chat's claude signed in again there): one a connection, its answers login_said as it says each line, then login_end; the connection's going stops it.",
+  "description": "claude auth login run on the host (a chat's claude signed in again there): one a connection, its answers login_said as it says each line, then login_end; the connection's going stops it. session: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes and tells every head attached to it (login_state).",
   "properties": {
     "op": {
       "const": "login",
@@ -20,6 +20,13 @@
         "type": "string"
       },
       "description": "claude auth login's arguments (--console, --sso, --email <address>)."
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The chat it signs in for, if any: ignored (the sign-in runs, for no chat) if the asker may not read it (Agent Management's read)."
     }
   },
   "required": [

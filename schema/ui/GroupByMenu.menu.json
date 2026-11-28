@@ -38,7 +38,7 @@
     },
     {
       "name": "Groups",
-      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check over them all, worded \"Groups\" and drawn as a section heading (as \"Group by\"), checked while every group is listed; a separator, then a check per group (Baude's own groups): \"Desktop\" first while there are Claude Desktop chats here or on a host, then the rest alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
+      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check over them all, worded \"Groups\" and drawn as a section heading (as \"Group by\"), checked while every group is listed (and so checked); a separator, then a check per group (Baude's own groups): \"Desktop\" first while there are Claude Desktop chats here or on a host, then the rest alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
       "copy": [
         "sidebar.groups",
         "sidebar.no_group",
@@ -48,15 +48,15 @@
       "parts": [
         {
           "name": "Group checks",
-          "shows": "\"Groups\", as a heading with a check: checked while every group is listed (none picked). Then one square check per group with its name, checked while it's picked. Everything is listed until some are picked. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
+          "shows": "\"Groups\", as a heading with a check: checked while every group is listed. Then one square check per group with its name, checked while it's listed: every one checked while every group is listed, as at first. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
           "actions": [
             {
               "by": "click Groups",
-              "does": "Lists every group (no group picked); it can't be unchecked."
+              "does": "While every group is listed: unchecks every group, so none is listed. Otherwise: checks every group, so every one is listed (groups made later too)."
             },
             {
               "by": "click a group's check",
-              "does": "Picks that group too, or takes it out; with none left picked, every group is listed again (Groups checked)."
+              "does": "Lists that group, or stops listing it; the others stay as they are. Unchecking one while every group is listed lists all the rest. Checking the last unchecked one is every group listed (Groups checked); unchecking the last checked one lists none."
             },
             {
               "by": "right-click a group",
@@ -126,15 +126,19 @@
   "states": [
     {
       "name": "all groups listed",
-      "shows": "\"Groups\" checked, every group unchecked."
+      "shows": "\"Groups\" checked, every group checked."
     },
     {
       "name": "some listed",
       "shows": "\"Groups\" unchecked, those groups checked."
     },
     {
+      "name": "none listed",
+      "shows": "\"Groups\" unchecked, every group unchecked; the list has no group's chats."
+    },
+    {
       "name": "no groups at all",
-      "shows": "\"Groups\" checked, and just \"No group\" under it."
+      "shows": "\"Groups\" checked, and just \"No group\" under it, checked."
     }
   ],
   "decisions": [
@@ -160,6 +164,16 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "faad4492-824f-4a81-96a6-6396ffb795e1"
+        }
+      ]
+    },
+    {
+      "said": "With every group selected, every group's checkbox should be ticked; clicking Groups while all are selected should select none (paraphrased)",
+      "rule": "On every app a check over a list of checks (⋮ → Groups, Kubernetes' Namespaces) is a select-all: every item checked while every one is shown, the one over them checked only then; clicking it while it's checked unchecks every item (none shown), otherwise checks every item; clicking an item toggles that item alone. Never \"every item shown\" drawn as every item unchecked.",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#232"
         }
       ]
     },

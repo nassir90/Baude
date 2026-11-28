@@ -1,0 +1,4 @@
+{
+  "description": "A chat's draft, as draft_save sends it, at most, in characters: a longer one is refused, and stays the head's own.",
+  "const": 200000
+}

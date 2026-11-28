@@ -12,7 +12,6 @@
     "view": "view",
     "materialized_view": "materialized view",
     "foreign_table": "foreign table",
-    "title": "Database schema",
     "server_tip": "Server (container)",
     "schema_tip": "Schema",
     "definition": "Definition",
@@ -37,6 +36,10 @@
     "null": "NULL",
     "reading_rows": "reading…",
     "first_rows": "first {$n} rows (read-only; secret-looking columns hidden)",
-    "viewer_tip": "Databases: the running ones' tables, as a diagram"
+    "viewer_tip": "Databases: the running ones' tables, as a diagram",
+    "query_postgres": "Queries are run on Postgres servers only",
+    "query_empty": "There's no query to run",
+    "query_one": "A query is one statement, with no ; in it",
+    "query_refused": "Queries can't call {$name}"
   }
 }

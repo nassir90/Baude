@@ -76,9 +76,11 @@ class OwnRevert(val can: () -> Boolean, val commit: (Reverting, String) -> Unit)
 
 private val CLAUDE_TOOLS = listOf("Read", "Grep", "Glob", "Bash", "Edit", "Write", "WebFetch", "WebSearch")
 
-/** A call's name as its card says it (meta.tool_title): Claude Code's as they are, Meta's own and the mesh's in words. */
+/** A call's name as its card says it (meta.tool_title): Claude Code's as they are, Meta's own in words, another MCP
+ * server's as every chat's cards say it (Mesh / Start subagent). */
 fun metaToolTitle(name: String): String {
-    val n = name.removePrefix("mcp__meta__").removePrefix("mcp__mesh__")
+    val n = name.removePrefix("mcp__meta__")
+    if (n.startsWith("mcp__")) return toolTitle(n)
     return if (n in CLAUDE_TOOLS) n else if (n.isNotEmpty()) n.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)
     else Wording.Meta.toolChanges
 }
@@ -136,7 +138,7 @@ fun markedName(name: String, how: String?, live: Boolean): AnnotatedString {
 @Composable
 fun BatchButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).semantics { contentDescription = label },
+    Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick.tapping(label)).semantics { contentDescription = label },
         contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = c.fg, modifier = Modifier.size(16.dp.icon))
     }
@@ -180,7 +182,7 @@ fun MetaCallLine(key: String) {
             when {
                 call.state != "error" && base == "set_setting" && spec != null && MetaSet.ALL.containsKey(spec.optString("setting")) -> {
                     held = spec
-                    MetaSettingBox(MetaSet.ALL.getValue(spec.optString("setting")), batch)
+                    MetaSettingBox(MetaSet.ALL.getValue(spec.optString("setting")), batch, spec)
                 }
                 base == "show" || base == "open_form" || base == "fill_form" -> {}
                 batch.any { it.marks.isNotEmpty() } -> ChangeBox(batch)
@@ -278,13 +280,15 @@ fun ChangeBox(batch: List<Action>) {
 /** A setting Meta changed (setting_box): the setting's own row, in Meta's look, saying what it was, with its batch's
  * controls; changed there, Meta's told with the next message. */
 @Composable
-fun MetaSettingBox(s: MetaSetting, batch: List<Action>) {
+fun MetaSettingBox(s: MetaSetting, batch: List<Action>, spec: JSONObject? = null) {
     val a = batch.firstOrNull()
     val fallback = a?.let {
         if (!it.undone.value) Wording.MetaActions.was(value = saidValue(it.data.opt("from")))
         else Wording.MetaActions.setUndone(value = saidValue(it.data.opt("to")))
     }
     MetaBoxed(listOf(Unit), if (a != null) Modifier.tip(Wording.MetaActions.byMeta(action = a.said)) else Modifier) {
-        s.row(fallback, if (batch.isEmpty()) null else ({ BatchControls(batch) }))
+        val only = spec?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.ifEmpty { null }
+        if (only != null && s.hostRows != null) s.hostRows.invoke(only)
+        else s.row(fallback, if (batch.isEmpty()) null else ({ BatchControls(batch) }))
     }
 }

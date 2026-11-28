@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's draft, as its host keeps it: the text written in its box and not sent, the same on every head that opens the chat, on any machine. Only the text: what's attached is a file on the head's own machine, kept there.",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "What's written (empty once it's sent)."
+    },
+    "rev": {
+      "type": "integer",
+      "description": "Its revision: one more with every save, never less (a head drops one it's seen a later revision than)."
+    },
+    "head": {
+      "type": ["string", "null"],
+      "description": "The box that wrote it (draft_save's head): what that box knows as its own save, coming back."
+    },
+    "epoch": {
+      "type": "integer",
+      "description": "How many times it's been emptied by a send (none: 0): one more with every send, never less. A save written before the last send (its epoch less) is refused, and a head drops a draft of an epoch less than one it's seen, so what was sent never comes back."
+    },
+    "sent": {
+      "type": ["string", "null"],
+      "description": "The send that last emptied it (draft_save's sent): the same send's save, made again, empties it once."
+    },
+    "at": {
+      "type": ["number", "null"],
+      "description": "When it was written, epoch seconds."
+    }
+  },
+  "required": ["text", "rev"],
+  "additionalProperties": false
+}

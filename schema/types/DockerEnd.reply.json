@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "docker_follow's last answer: docker ended.",
+  "properties": {
+    "op": {
+      "const": "docker_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "code": {
+      "type": "integer",
+      "description": "Its exit code."
+    },
+    "said": {
+      "type": "string",
+      "description": "What it wrote, for a failure."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

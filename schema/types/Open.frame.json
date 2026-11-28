@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A tunnel to member to: passed on to the next host on the way (ttl hosts at most), and at to a connection to its host process, served as if a head had connected to its socket.",
+  "description": "A tunnel to member to: passed on to the next host on the way (ttl hosts at most), as it came, and at to a connection to its host process, served as if a head had connected to its socket, from the member that signed it; closed there if it has no from, or isn't signed as from's key, now and once.",
   "properties": {
     "op": {
       "const": "open",
@@ -26,6 +26,14 @@
     "sender": {
       "$ref": "Sender.json",
       "description": "Who what's sent through it is from (relay's as)."
+    },
+    "signed": {
+      "type": "string",
+      "description": "JSON of {to, from, time (in seconds), nonce, sender}, as the member that opened it signed it: what's taken of who it's from where it's opened to."
+    },
+    "sig": {
+      "type": "string",
+      "description": "signed's Ed25519 signature, by from's key, in base64."
     }
   },
   "required": ["op"],

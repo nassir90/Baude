@@ -1,15 +1,24 @@
 package dev.baude.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -18,29 +27,95 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
+import androidx.compose.ui.layout.LayoutModifier
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /** The accounts a host keeps, as its accounts answer last said them (hostaccounts):
  * Compose state. */
 class HostAccounts(val hostId: String) {
     val accounts = mutableStateOf<List<Msg.Account>>(emptyList())
-    val defaults = mutableStateOf<Map<String, String>>(emptyMap())
+    val defaults = mutableStateOf<Map<String, String>>(emptyMap()) // (the account a new chat takes, by provider: accounts.selected)
     val error = mutableStateOf<String?>(null)
     val loaded = mutableStateOf(false)
-    val usage = mutableStateOf<String?>(null)
+    val usage = mutableStateMapOf<String, Usage>() // (each subscription's, by usage key: an account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's)
+    val last = mutableStateOf<Map<String, List<Limit>>>(emptyMap()) // (what the host last read of each, shown greyed till usage has it)
+    val codexUsage = mutableStateOf(false) // (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
+    val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
+    val disabled = mutableStateOf<Set<String>>(emptySet()) // (subscriptions disabled on the host, by usage key)
+    val auto = mutableStateOf<Set<String>>(emptySet()) // (those disabled as they're exhausted, by usage key)
+    val resumes = mutableStateOf<Set<String>>(emptySet()) // (those resuming their chats a usage limit stopped, by usage key)
+    private val reading = HashSet<String>()
+
+    /** A subscription's usage as last read: its limits (name, percent), or what to say instead; asOf, where they're as
+     * its chats' turns last said them (a setup token's): when (seconds since 1970). */
+    class Usage(val limits: List<Limit>?, val said: String?, val asOf: Long? = null)
+
+    /** One limit: its key (five_hour…), name, percent used, and when it resets (seconds since 1970), if said. */
+    class Limit(val key: String, val name: String, val percent: Double, val resets: Double?)
+
+    /** The subscriptions whose usage is read, by usage key: Claude's CLI's own sign-in (where the host has claude),
+     * each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account. */
+    fun usageIds(): List<String> =
+        (if (claudeCli.value) listOf("") else emptyList()) + accounts.value.filter { it.provider == "claude" }.map { it.id.orEmpty() } +
+            (if (cliCard("codex")) listOf(CODEX_CLI) else emptyList()) +
+            accounts.value.filter { it.provider == "codex" && codexUsage.value }.map { it.id.orEmpty() }
+
+    /** Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage). */
+    fun cliCard(provider: String) = if (provider == "claude") claudeCli.value else provider !in missing.value && codexUsage.value
+
+    /** (on the main thread) Each subscription's (id's) usage asked of the host, one ask at a time each. */
+    fun readUsage(ids: List<String>) {
+        for (id in ids) {
+            if (!reading.add(id)) continue
+            Mesh.ask(hostId, (if (id == CODEX_CLI) Msg.Accounts(what = "usage", provider = "codex", id = "")
+                else Msg.Accounts(what = "usage", id = id)).json()) { r ->
+                reading.remove(id)
+                val error = took(r)
+                val reply = Msg.AccountsReply.from(r)
+                val limits = reply.usage?.takeIf { it.isNotEmpty() }
+                usage[id] = when {
+                    error != null -> Usage(null, error)
+                    limits != null -> Usage(limits(limits), null, reply.asOf?.toLong())
+                    reply.apiKey == true -> Usage(null, Wording.Subscriptions.noLimits)
+                    reply.afterTurn == true -> Usage(null, Wording.Subscriptions.afterTurn)
+                    else -> Usage(null, Wording.Subscriptions.usageUnavailable)
+                }
+            }
+        }
+    }
 
     /** An accounts request (what, and its fields): the page filled again from what it answers; then(error or null). */
     fun ask(msg: Msg.Accounts, then: (String?) -> Unit = { e -> if (e != null) toast(e) }) {
@@ -54,20 +129,38 @@ class HostAccounts(val hostId: String) {
         g.accounts?.let { accounts.value = it }
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
         g.claudeCli?.let { claudeCli.value = it }
+        codexUsage.value = g.codexUsage == true
+        missing.value = g.missing.orEmpty()
+        disabled.value = g.disabled.orEmpty().toSet()
+        auto.value = g.autoDisable.orEmpty().toSet()
+        resumes.value = g.autoResume.orEmpty().toSet()
+        g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
     }
 
+    /** A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable). */
+    fun switch(what: String, provider: String, key: String, on: Boolean) =
+        ask(if (key == CODEX_CLI) Msg.Accounts(what = what, provider = "codex", id = "", on = on)
+            else Msg.Accounts(what = what, provider = provider, id = key, on = on))
+
+    private fun limits(u: List<Msg.UsageLimit>) =
+        u.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }
+
     companion object {
+        const val USAGE_S = 30 // (how often a shown page reads its subscriptions' usage again)
+        const val CODEX_CLI = "codex" // (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
         val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
     }
 }
 
 /** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
- * host picked beside New session, changed there: its name; each
- * provider's Account picker (the default a new chat takes), its accounts each with ⋮ (Rename…, Sign In Again… or
- * Replace Token…, Remove…), Subscription usage (Claude) and Add account. */
+ * host picked beside New session, changed there: its name; for each provider, its heading, then a card for each subscription (CLI default first, where the host has the
+ * provider's program), each with Disabled where it is and ⋮ (an account's Rename…, Sign In Again… or Replace Token…, Remove…; every
+ * card's Disable or Enable, Auto Disable on Exhaustion, Auto Resume on Reset), and each card's usage as a
+ * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
+ * (where the host lacks the provider's program, its Dependencies row instead: DepRow). */
 @Composable
 fun SubscriptionsPage() {
     val c = LocalBaude.current
@@ -78,6 +171,17 @@ fun SubscriptionsPage() {
         val h = host ?: return@LaunchedEffect
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
+    val ids = host?.usageIds().orEmpty()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(hostId, ids, lifecycle) {
+        val h = host ?: return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { // (the app in front: read at once, then every USAGE_S)
+            while (true) {
+                h.readUsage(ids)
+                delay(HostAccounts.USAGE_S * 1000L)
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             BoxedList(listOf(Unit), "") {
@@ -86,33 +190,33 @@ fun SubscriptionsPage() {
                 })
             }
             if (host != null) for ((provider, title) in HostAccounts.PROVIDERS) {
-                Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                val error = host.error.value
+                val mine = host.accounts.value.filter { it.provider == provider }
+                Row(Modifier.padding(start = 14.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     modelLogo(if (provider == "claude") "claude" else "gpt", title)?.let {
                         Icon(it, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     }
-                    Text(title, style = Type.bold, color = c.fg)
+                    Text(title, style = Type.bold, color = c.fg, modifier = Modifier.weight(1f))
                 }
-                val error = host.error.value
-                val mine = host.accounts.value.filter { it.provider == provider }
-                val rows: List<Any> = if (error != null) listOf("error") else
-                    listOf("account") + mine + listOfNotNull("usage".takeIf { provider == "claude" }) + "add"
-                BoxedList(rows, "") { row ->
-                    when (row) {
-                        "error" -> ActionRow(error.orEmpty(), null)
-                        "account" -> {
-                            val ids = listOf("") + mine.map { it.id.orEmpty() }
-                            val names = mapOf("" to Wording.Subscriptions.cliDefault) + mine.associate { it.id.orEmpty() to it.name.orEmpty() }
-                            Choice(Wording.Subscriptions.account, ids, host.defaults.value[provider]?.takeIf { it in ids } ?: "",
-                                { names[it].orEmpty() }, enabled = host.loaded.value) { id ->
-                                host.usage.value = null
-                                host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
-                            }
-                        }
-                        "usage" -> UsageRow(host)
-                        "add" -> ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider }
-                        is Msg.Account -> AccountRow(row) { kind -> dialog = kind to row }
-                    }
+                if (error != null) {
+                    BoxedList(listOf(Unit), "") { ActionRow(error, null) }
+                    continue
+                }
+                val cli = if (provider == "claude") "" else HostAccounts.CODEX_CLI
+                if (host.cliCard(provider))
+                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true,
+                        cli in host.disabled.value, cli in host.auto.value, cli in host.resumes.value) { kind ->
+                        host.switchPicked(kind, provider, cli) }
+                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
+                    provider == "claude" || host.codexUsage.value, a.id.orEmpty() in host.disabled.value,
+                    a.id.orEmpty() in host.auto.value, a.id.orEmpty() in host.resumes.value) { kind ->
+                    if (kind in listOf("disable", "auto", "resume")) host.switchPicked(kind, provider, a.id.orEmpty())
+                    else dialog = kind to a }
+                val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
+                BoxedList(listOf(Unit), "") {
+                    if (lacks != null) DepRow(lacks, depTitle(lacks, title))
+                    else ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider }
                 }
             }
         }
@@ -127,58 +231,243 @@ fun SubscriptionsPage() {
         kind == "rename" -> RenameAccount(host, a, close)
         kind == "again" && a.kind == "token" -> ReplaceToken(host, a, close)
         kind == "again" && a.provider == "claude" -> ClaudeSignIn(host, a.id.orEmpty(), close)
+        kind == "again" && a.provider == "codex" && host.missing.value["codex"] != null ->
+            host.missing.value.getValue("codex").let { SignInLacks(it, depTitle(it, Wording.Programs.codex), a, close) }
         kind == "again" -> CodexSignIn(host, a.id.orEmpty(), null, close)
         kind == "remove" -> RemoveAccount(host, a, close)
     }
 }
 
-/** An account's row: its name, and ⋮ with what can be done to it (pick: "rename", "again" or "remove"). */
+/** ⋮'s Disable (Enable), Auto Disable on Exhaustion or Auto Resume on Reset picked (kind: "disable", "auto", "resume")
+ * on a subscription's card (key). */
+private fun HostAccounts.switchPicked(kind: String, provider: String, key: String) = when (kind) {
+    "disable" -> switch("disable", provider, key, key !in disabled.value)
+    "resume" -> switch("auto_resume", provider, key, key !in resumes.value)
+    else -> switch("auto_disable", provider, key, key !in auto.value)
+}
+
+/** A subscription's card: its name, Disabled where it is, and ⋮ with what can be done to it (pick: an account's
+ * "rename", "again" or "remove"; every card's "disable", "auto", "resume"); its usage: a bar for each limit with its name and percentage over it, else what was
+ * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
-private fun AccountRow(a: Msg.Account, pick: (String) -> Unit) {
+private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
+                             shown: Boolean, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
+        .border(1.dp, c.rule, shape).padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (off) Text(Wording.Subscriptions.disabled, style = Type.body, color = c.dim, maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp))
+            AccountMenu(a, off, auto, resume, pick)
+        }
+        if (shown) UsageBars(usage, last, Modifier.padding(end = 6.dp))
+    }
+}
+
+/** A subscription's usage (a Subscriptions card's, and ⋮'s usage row's): a line for each limit, its name and percentage,
+ * its bar under it, and where they're as its chats' turns last said them, Last update <how long ago> dim under them;
+ * else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where it has none). */
+@Composable
+private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier) {
+    val c = LocalBaude.current
+    val stale = usage == null && last != null
+    Column(modifier.alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val limits = if (stale) last else usage?.limits
+        if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
+        else for (l in limits) {
+            val percent = l.percent
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+                if (l.name.isNotBlank()) Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
+                    .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim) // (blank: ⋮'s placeholder, its height only)
+            }
+            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
+                Box(Modifier.fillMaxWidth((percent / 100).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
+                    .background(c.accentBg))
+            }
+        }
+        val asOf = if (stale) null else usage?.asOf
+        if (limits != null && asOf != null) Text(Wording.Subscriptions.lastUpdate(ago = ago(asOf)), style = Type.body, color = c.dim)
+    }
+}
+
+/** Whose usage ⋮'s usage row shows (subscriptionpage.usage_account): (host, provider, account id, "" for the CLI's own
+ * sign-in; null for the one a new chat there takes): the chat's (host, sid), on a Claude or Codex model, the account
+ * it actually runs under, its model's provider's, on its host; else, with no such chat, the account a new chat on the
+ * default model (Claude's) takes on the host picked beside New session; null with no computer host. */
+fun usageAccount(chat: Pair<String, String>?): Triple<String, String, String?>? {
+    if (chat != null && chat.first != "phone") {
+        val (hostId, sid) = chat
+        val s = if (sid.isEmpty()) null else Mesh.session(hostId, sid)
+        val prog = program(s?.model?.ifBlank { null } ?: defaultModel(hostId))
+        if (prog == "claude" || prog == "codex") return Triple(hostId, prog, s?.let { it.account?.id.orEmpty() })
+    }
+    val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id ?: return null
+    return Triple(hostId, "claude", null)
+}
+
+/** ⋮'s usage row (subscriptionpage.MenuUsage): the subscription the chat (host, sid) runs under (usageAccount), its
+ * name, then its limits as its Subscriptions card has them, read as ⋮ opens (again once USAGE_S has passed, after an
+ * answer or an error); the host's last reading greyed till then; till the host's first answer, Checking… over two
+ * empty limits. Always as wide to the menu as the longest limit line a host can say needs at the phone's clock and
+ * text size (menuUsageWidth; a longer name cut with …), so ⋮ opens at its final width and keeps it; where the screen's
+ * narrower than that, ⋮ is as wide as it can be and a limit's line wraps.
+ * Nothing where the host has no such subscription, its rule above it (the menu's, between sections) left out with
+ * it: decided as ⋮ opens where the host's said so before; found while it's open, an empty line as wide, so ⋮ keeps its
+ * width. Tapped, go: Settings → Subscriptions. */
+@Composable
+fun MenuUsage(chat: Pair<String, String>?, go: () -> Unit) {
+    val c = LocalBaude.current
+    Mesh.tick.value
+    val (hostId, provider, want) = usageAccount(chat) ?: return
+    val host = MenuUsageHosts.of(hostId)
+    LaunchedEffect(hostId, provider, want) {
+        val now = System.currentTimeMillis()
+        if (host.error.value != null && now - (MenuUsageHosts.listedAt[hostId] ?: 0L) < HostAccounts.USAGE_S * 1000L) return@LaunchedEffect
+        MenuUsageHosts.listedAt[hostId] = now
+        Mesh.ask(hostId, Msg.Accounts(what = "list").json()) { r ->
+            host.took(r)?.let { e -> host.error.value = e }
+            val id = MenuUsageHosts.profile(host, provider, want) ?: return@ask
+            if (System.currentTimeMillis() - (MenuUsageHosts.readAt["$hostId/$id"] ?: 0L) >= HostAccounts.USAGE_S * 1000L) {
+                MenuUsageHosts.readAt["$hostId/$id"] = System.currentTimeMillis()
+                host.usage.remove(id)
+                host.readUsage(listOf(id))
+            }
+        }
+    }
+    val width = menuUsageWidth()
+    val loading = !host.loaded.value && host.error.value == null
+    val id = if (loading) null else MenuUsageHosts.profile(host, provider, want)
+    var drawn by remember { mutableStateOf(false) } // (shown in this opening of ⋮)
+    if (!loading && host.error.value == null && id == null) {
+        if (drawn) Box(Modifier.fillMaxWidth().widthAsked(width))
+        return
+    }
+    drawn = true
+    val name = when {
+        loading -> Wording.Subscriptions.checking
+        else -> host.accounts.value.firstOrNull { it.provider == provider && it.id.orEmpty() == id }?.name ?: Wording.Subscriptions.cliDefault
+    }
+    MenuDivider()
+    Column(Modifier.fillMaxWidth().widthAsked(width).clickable(onClick = go)
+        .padding(start = menuTextStart(), end = Popups.inset, top = 8.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val error = host.error.value
+        if (error != null) Text(error, style = Type.body, color = c.dim)
+        else {
+            Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (loading) UsageBars(null, List(2) { HostAccounts.Limit("", " ", 0.0, null) })
+            else UsageBars(host.usage[id], host.last.value[id])
+        }
+    }
+}
+
+/** ⋮'s usage row's width: room for the longest limit line a host can say at the phone's clock and text size, Weekly
+ * Limit (Resets <the longest day's name> <the widest time>) and 100%, beside the row's insets; menu-usage-width (in
+ * Baude's px, at the text size) at least. */
+@Composable
+private fun menuUsageWidth(): Dp {
+    val measure = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val h24 = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+    val start = menuTextStart()
+    return remember(measure, density, h24, start, Settings.textScale.value) {
+        val clock = java.time.format.DateTimeFormatter.ofPattern(if (h24) "HH:mm" else "h:mm a")
+        val days = java.time.DayOfWeek.values().map { it.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()) }
+        val times = listOf(0, 10, 12, 20, 22, 23).map { java.time.LocalTime.of(it, 59).format(clock) }
+        fun w(text: String) = measure.measure(text, Type.body).size.width
+        val line = days.maxOf { d -> times.maxOf { t -> w(Wording.Subscriptions.weeklyLimit(day = d, time = t)) } } +
+            w(Wording.Subscriptions.usagePercent(percent = "100"))
+        val need = with(density) { line.toDp() } + 8.dp + start + Popups.inset
+        maxOf(Tokens.Subscriptions.menuUsageWidth.value.toFloat().dp.text, need)
+    }
+}
+
+/** As wide as width to a menu working out its width (its intrinsic width), whatever is in it; laid out as it's given. */
+private fun Modifier.widthAsked(width: Dp): Modifier = this.then(object : LayoutModifier {
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val placeable = measurable.measure(constraints)
+        return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurable: IntrinsicMeasurable, height: Int) = width.roundToPx()
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurable: IntrinsicMeasurable, height: Int) = width.roundToPx()
+})
+
+/** ⋮'s usage row's hosts' accounts, kept between its openings (as the desktop's row keeps its reading), and when each
+ * subscription was last read (by "host/usage key"). */
+object MenuUsageHosts {
+    private val hosts = HashMap<String, HostAccounts>()
+    val readAt = HashMap<String, Long>()
+    val listedAt = HashMap<String, Long>() // (when each host's list was last asked: after an error, not again till USAGE_S)
+    fun of(id: String) = hosts.getOrPut(id) { HostAccounts(id) }
+
+    /** The usage key (HostAccounts.usage's) of provider's subscription want (null: the one a new chat takes): an
+     * account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's; null where the host has none. */
+    fun profile(h: HostAccounts, provider: String, want: String?): String? {
+        val id = want ?: h.defaults.value[provider].orEmpty()
+        val account = id != "" && h.accounts.value.any { it.provider == provider && it.id.orEmpty() == id }
+        return if (account) id else if (!h.cliCard(provider)) null else if (provider == "claude") "" else HostAccounts.CODEX_CLI
+    }
+}
+
+/** A limit's name over its bar, with when it resets in the viewer's local time and clock: Five Hour Limit (Resets 3:00 PM),
+ * Weekly Limit (Resets Friday 3:00 PM), or just the time where it resets today. */
+@Composable
+private fun limitLabel(l: HostAccounts.Limit): String {
+    val resets = l.resets ?: return l.name
+    val ctx = LocalContext.current
+    val at = java.time.Instant.ofEpochSecond(resets.toLong()).atZone(java.time.ZoneId.systemDefault())
+    val clock = if (android.text.format.DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm a"
+    val time = at.format(java.time.format.DateTimeFormatter.ofPattern(clock))
+    val day = at.format(java.time.format.DateTimeFormatter.ofPattern("EEEE"))
+    val today = at.toLocalDate() == java.time.LocalDate.now()
+    return when {
+        l.key == "five_hour" -> Wording.Subscriptions.fiveHourLimit(time = time)
+        l.key == "seven_day" && today -> Wording.Subscriptions.weeklyLimitToday(time = time)
+        l.key == "seven_day" -> Wording.Subscriptions.weeklyLimit(day = day, time = time)
+        today -> Wording.Subscriptions.otherLimitToday(name = l.name, time = time)
+        else -> Wording.Subscriptions.otherLimit(name = l.name, day = day, time = time)
+    }
+}
+
+/** A subscription's ⋮ with what can be done to it (pick): an account's (a) "rename" and "again"; every one's
+ * "disable" (Enable, where it's disabled: off), "auto" (Auto Disable on Exhaustion) and "resume" (Auto Resume on
+ * Reset), each ticked where it's on; an
+ * account's "remove". */
+@Composable
+private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    ActionRow(a.name.orEmpty(), null, suffix = {
-        Box {
-            IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
-            Popover(open, { open = false }) {
+    Box {
+        IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
+        Popover(open, { open = false }, ticks = Ticks.START) {
+            if (a != null) {
                 MenuChoice(Wording.Common.renameEllipsis, false) { open = false; pick("rename") }
                 MenuChoice(if (a.kind == "token") Wording.Subscriptions.replaceToken else Wording.Subscriptions.signInAgain, false) {
                     open = false
                     pick("again")
                 }
+                MenuDivider()
+            }
+            MenuChoice(if (off) Wording.Subscriptions.enable else Wording.Subscriptions.disable, false) { open = false; pick("disable") }
+            MenuChoice(Wording.Subscriptions.autoDisable, auto) { open = false; pick("auto") }
+            MenuChoice(Wording.Subscriptions.autoResume, resume) { open = false; pick("resume") }
+            if (a != null) {
+                MenuDivider()
                 MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
             }
         }
-    })
+    }
 }
 
-/** Subscription usage: read from the host as it's tapped, what it says after its name. */
+/** A dialog's form that stays till what it sends is done: its fields, why it wasn't, and its button (submit; none
+ * while a card in it says what can be done). */
 @Composable
-private fun UsageRow(host: HostAccounts) {
-    val c = LocalBaude.current
-    var checking by remember { mutableStateOf(false) }
-    ActionRow(Wording.Subscriptions.usage, null, onClick = if (checking) null else ({
-        checking = true
-        host.usage.value = Wording.Subscriptions.checking
-        Mesh.ask(host.hostId, Msg.Accounts(what = "usage", id = host.defaults.value["claude"].orEmpty()).json()) { r ->
-            checking = false
-            val error = host.took(r)
-            val limits = Msg.AccountsReply.from(r).usage
-            host.usage.value = error ?: limits?.takeIf { it.isNotEmpty() }?.joinToString(" · ") {
-                Wording.Subscriptions.usageLimit(name = it.name.orEmpty(), percent = "%.4g".format(it.percent?.toDouble() ?: 0.0)
-                    .trimEnd('0').trimEnd('.'))
-            } ?: Wording.Subscriptions.usageUnavailable
-        }
-    }), suffix = {
-        // (at most half the row: the row's name stays whole, the limits wrap under each other)
-        host.usage.value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 3, modifier = Modifier.widthIn(max = 110.dp)) }
-        Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
-    })
-}
-
-/** A dialog's form that stays till what it sends is done: its fields, why it wasn't, and its button. */
-@Composable
-private fun Form(heading: String, submit: String, done: () -> Unit, said: String?, busy: Boolean, go: () -> Unit,
-                 fields: @Composable () -> Unit) {
+private fun Form(heading: String, submit: String?, done: () -> Unit, said: String?, busy: Boolean, go: () -> Unit,
+                 ready: Boolean = true, fields: @Composable () -> Unit) {
     val c = LocalBaude.current
     AlertDialog(
         onDismissRequest = done,
@@ -189,8 +478,22 @@ private fun Form(heading: String, submit: String, done: () -> Unit, said: String
                 said?.let { SelectionContainer { Text(it, style = Type.body, color = c.fg) } }
             }
         },
-        confirmButton = { Button(submit, suggested = true, enabled = !busy, onClick = go) },
+        confirmButton = { if (submit != null) Button(submit, suggested = true, enabled = !busy && ready, onClick = go) },
         dismissButton = { Button(Wording.Common.close, onClick = done) },
+        containerColor = c.dialog,
+    )
+}
+
+/** An account's Sign In Again… where its provider's program isn't on the host: the heading and, in place of the sign-in
+ * button, the Dependencies row (dep, titled title). */
+@Composable
+private fun SignInLacks(dep: Msg.Dep, title: String, a: Msg.Account, done: () -> Unit) {
+    val c = LocalBaude.current
+    AlertDialog(
+        onDismissRequest = done,
+        title = { Text(Wording.Subscriptions.signInHeading(name = a.name.orEmpty())) },
+        text = { BoxedList(listOf(Unit), "") { DepRow(dep, title) } },
+        confirmButton = { Button(Wording.Common.close, onClick = done) },
         containerColor = c.dialog,
     )
 }
@@ -213,10 +516,10 @@ private fun AddAccount(host: HostAccounts, provider: String, done: () -> Unit) {
     var said by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val go = {
-        if (name.isNotBlank()) send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(), token = token.trim()),
-            { busy = it }, { said = it }, done)
+        if (name.isNotBlank() && token.isNotBlank()) send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(),
+            token = token.trim()), { busy = it }, { said = it }, done)
     }
-    Form(Wording.Subscriptions.addClaude, Wording.Subscriptions.saveAccount, done, said, busy, go) {
+    Form(Wording.Subscriptions.addClaude, Wording.Subscriptions.addAccount, done, said, busy, go, ready = token.isNotBlank()) {
         NameField(name, { name = it }, Wording.Subscriptions.nameHint, go)
         SecretField(token, { token = it }, Wording.Subscriptions.tokenHint, go)
     }
@@ -264,86 +567,252 @@ private fun RemoveAccount(host: HostAccounts, a: Msg.Account, done: () -> Unit) 
     )
 }
 
-/** Add account (Codex) and Sign In Again… (a Codex account, id): an existing signed-in CODEX_HOME on the host (a new
- * account's only), or Codex's device-code sign-in run there, on a connection of its own, what it writes (the code and
- * where to enter it) said as it's written; Close lets go of it, which stops it there. name: a new account's ("" to
- * start), null for one signed in to again. */
-@Composable
-private fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: () -> Unit) {
-    var label by remember { mutableStateOf(name.orEmpty()) }
-    var home by remember { mutableStateOf("") }
-    var said by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val conn = remember { mutableStateOf<Connection?>(null) }
-    DisposableEffect(Unit) { onDispose { conn.value?.stop() } }
-    val fresh = id == null
-    fun signIn() {
-        val lines = ArrayList<String>()
-        busy = true
-        said = Wording.Subscriptions.requestingCode
-        conn.value?.stop()
-        conn.value = Mesh.watch(host.hostId, { w, m ->
+/** Codex's sign-in run on a host (codex login, by hostaccounts' sign_in), on a connection of its own: a new account's
+ * (id null: named name, added once it's signed in) or an account's (id); the browser's (method browser, the default)
+ * or the device code's (device). Its state as the host says it (login, a ChatLogin: signing in, with the page to open,
+ * and the device code's code to enter there, once codex has said them; signed in, as who; failed, with why); null till
+ * one's started, and once it's cancelled. The browser's page sends the browser back to the host's own 127.0.0.1, which
+ * the phone's isn't: the address it ends on is pasted (address) and passed to the host (paste: callback), and what
+ * became of it said (note). stop() lets go of the connection, which stops it there. Compose state, changed on the main
+ * thread. */
+class CodexLogin(val host: HostAccounts, val id: String?) {
+    val name = mutableStateOf("")
+    val home = mutableStateOf("")
+    val existing = mutableStateOf(false) // (Folder picked over Login)
+    val keyed = mutableStateOf(false) // (Token picked over Login)
+    val token = mutableStateOf("")
+    val login = mutableStateOf<Msg.ChatLogin?>(null)
+    val said = mutableStateOf<String?>(null) // (a signed-in CODEX_HOME's add: why it wasn't)
+    val busy = mutableStateOf(false)
+    val copied = mutableStateOf(false)
+    val address = mutableStateOf("")
+    val note = mutableStateOf<String?>(null)
+    private var conn: Connection? = null
+
+    fun start(method: String = "browser") {
+        conn?.stop()
+        said.value = null
+        copied.value = false
+        address.value = ""
+        note.value = null
+        login.value = Msg.ChatLogin(state = "signing_in", method = method)
+        val fresh = id == null
+        conn = Mesh.watch(host.hostId, { w, m ->
             if (m.optInt("req", -1) != REQ) return@watch
             Mesh.post {
-                if (w !== conn.value) return@post
+                if (w !== conn) return@post
                 val g = Msg.AccountsReply.from(m)
-                if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) {
-                    lines.add(g.line)
-                    said = lines.takeLast(14).joinToString("\n")
+                if (m.optString("op") == Op.ACCOUNTS && g.what == "callback") { // (a pasted address: codex's end follows, else why not)
+                    val page = g.page
+                    note.value = g.error ?: page?.body?.takeIf { (page.status?.toInt() ?: 0) >= 400 && page.type.orEmpty().startsWith("text/plain") }
+                    if (note.value == null) address.value = ""
                     return@post
                 }
-                conn.value = null
+                if (m.optString("op") == Op.ACCOUNTS && g.login != null && g.accounts == null) {
+                    login.value = g.login
+                    return@post
+                }
+                if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) return@post // (an older host's lines: not an end)
+                conn = null
                 w.stop()
-                busy = false
                 val e = host.took(m)
-                if (e != null) said = e else done()
+                login.value = g.login ?: if (e == null) Msg.ChatLogin(state = "signed_in", who = g.who)
+                    else Msg.ChatLogin(state = "failed", reason = e, method = method)
             }
         }) { w ->
-            if (w !== conn.value) return@watch
-            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = label.trim().takeIf { fresh }).json())
-            else if (w.state == "down") { busy = false; said = Wording.HostStatus.connectionDropped }
+            if (w !== conn) return@watch
+            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = name.value.trim().takeIf { fresh },
+                method = method).json())
+            else if (w.state == "down") end(Wording.HostStatus.connectionDropped)
         }
-        if (conn.value == null) { busy = false; said = Wording.HostStatus.hostAbsent }
+        if (conn == null) end(Wording.HostStatus.hostAbsent)
     }
+
+    private fun end(why: String) {
+        conn = null
+        login.value = Msg.ChatLogin(state = "failed", reason = why)
+    }
+
+    fun paste() {
+        val w = conn ?: return
+        if (note.value == Wording.Subscriptions.checkingAddress) return // (one address checked at a time)
+        if (address.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "callback", url = address.value.trim()).json()))
+            note.value = Wording.Subscriptions.checkingAddress
+    }
+
+    fun cancel() {
+        stop()
+        login.value = null
+    }
+
+    fun stop() {
+        conn?.stop()
+        conn = null
+    }
+}
+
+/** Add account (Codex) and Sign In Again… (a Codex account, id): an OpenAI API key pasted or an existing signed-in
+ * CODEX_HOME on the host (a new account's only), or Codex's device-code sign-in run there (CodexLogin), as a card (CodexCard); Close lets go of it,
+ * which stops it there. name: a new account's ("" to start), null for one signed in to again. */
+@Composable
+internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: () -> Unit,
+                         login: CodexLogin = remember { CodexLogin(host, id).apply { this.name.value = name.orEmpty() } }) {
+    DisposableEffect(login) { onDispose { login.stop() } }
+    val fresh = id == null
+    var label by login.name
+    var home by login.home
+    var existing by login.existing
+    var keyed by login.keyed
+    var token by login.token
+    var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
+    val account = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty()
+    val state = login.login.value
     val go = {
         when {
             fresh && label.isBlank() -> Unit
-            fresh && home.isNotBlank() -> send(host, Msg.Accounts(what = "add", provider = "codex", name = label.trim(),
-                home = home.trim()), { busy = it }, { said = it }, done)
-            else -> signIn()
+            fresh && keyed -> if (token.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
+                name = label.trim(), token = token.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
+            fresh && existing && home.isBlank() -> { empty += 1 }
+            fresh && existing -> if (home.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
+                name = label.trim(), home = home.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
+            else -> login.start()
         }
     }
-    val heading = if (fresh) Wording.Subscriptions.addCodex
-        else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
-    Form(heading, if (fresh && home.isNotBlank()) Wording.Subscriptions.useProfile else Wording.Subscriptions.deviceCode,
-        { conn.value?.stop(); done() }, said, busy, go) {
+    val heading = if (fresh) Wording.Subscriptions.addCodex else Wording.Subscriptions.signInHeading(name = account)
+    Form(heading, if (state != null) null else if (fresh && keyed) Wording.Subscriptions.addAccount
+        else if (fresh && existing) Wording.Subscriptions.useProfile else Wording.SignIn.signIn, { login.stop(); done() },
+        login.said.value, login.busy.value, go, ready = !(fresh && keyed) || token.isNotBlank()) {
         if (fresh) {
-            NameField(label, { label = it }, Wording.Subscriptions.nameHint, go)
-            NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, focus = false)
+            val open = state == null || state.state == "failed"
+            NameField(label, { label = it }, Wording.Subscriptions.nameHint, go, enabled = open)
+            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open) {
+                keyed = it == 1
+                existing = it == 2
+                if (state?.state == "failed") login.cancel() // (the dialog's own button back in place of Try Again)
+            }
+            if (keyed) SecretField(token, { token = it }, Wording.Subscriptions.openaiKeyHint, go)
+            if (existing) key(empty) { NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, enabled = open) }
+        }
+        if (state != null) CodexCard(login, if (fresh) label.trim() else account, go)
+    }
+}
+
+/** An Add account dialog's choice of how the account signs in, as three segments: Login (first), Token (a token or API
+ * key's box under it, the button Add account, usable once something's typed) and Folder (an existing signed-in folder
+ * on the host: its box under it) (subscriptionpage._Source). tab: 0, 1 or 2. */
+@Composable
+private fun SignInTabs(tab: Int, enabled: Boolean, pick: (Int) -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))) {
+        for ((on, label) in listOf(Wording.Subscriptions.newLogin, Wording.Subscriptions.tokenTab, Wording.Common.folder).withIndex())
+            Box(Modifier.weight(1f).background(if (tab == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+                .focusProperties { canFocus = false } // (Tab: the account name straight to the box under it; picked by touch)
+                .clickable(enabled = enabled) { pick(on) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(label, style = Type.bold, color = c.fg)
+            }
+    }
+}
+
+/** A Codex sign-in as a card, the way a chat's Sign in card is (LoginCard's look: the warning-bordered box, its title
+ * bold, then a line, then what can be done now): signing in, then its page's link (opened here: the host's browser
+ * isn't the phone's); the browser's with a box for the address the browser ends on (Send), and "Use a device code
+ * instead"; the device code's with the code to enter there, large, with Copy; and Cancel. Signed in, as who (else the
+ * account's name); failed, why, and Try Again (again; and the device code's way, where the browser's failed). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
+    val c = LocalBaude.current
+    val l = login.login.value ?: return
+    val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
+    val clip = LocalClipboardManager.current
+    val browser = l.method != "device"
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val title = when (l.state) {
+            "signed_in" -> Wording.Subscriptions.codexSignedIn
+            "failed" -> Wording.SignIn.failed
+            else -> Wording.Subscriptions.codexSigningIn
+        }
+        SelectionContainer { Text(title, style = Type.bold, color = c.fg) }
+        val url = l.url
+        val code = l.code
+        when {
+            l.state == "signing_in" && url == null ->
+                Text(if (browser) Wording.SignIn.starting else Wording.Subscriptions.requestingCode, style = Type.body, color = dim)
+            l.state == "signing_in" && url != null -> {
+                Text(buildAnnotatedString {
+                    val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
+                        it[0] to it.getOrElse(1) { "" }
+                    }
+                    append(before)
+                    withLink(LinkAnnotation.Url(url, TextLinkStyles(SpanStyle(color = c.accent,
+                        textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
+                    append(after)
+                }, style = Type.body, color = c.fg)
+                if (browser) {
+                    var address by login.address
+                    NameField(address, { address = it }, Wording.Subscriptions.addressHint, login::paste, focus = false)
+                    Button(Wording.Common.`continue`, suggested = true,
+                        enabled = address.isNotBlank() && login.note.value != Wording.Subscriptions.checkingAddress, onClick = login::paste)
+                    login.note.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
+                }
+                // (the code a line of its own, its buttons under it: beside them, a phone's width breaks it)
+                else if (code != null) SelectionContainer { Text(code, style = Type.deviceCode, color = c.fg, softWrap = false) }
+            }
+            l.state == "signed_in" -> SelectionContainer {
+                Text(l.who?.let { Wording.SignIn.asWho(who = it) } ?: name, style = Type.body, color = c.fg)
+            }
+            else -> SelectionContainer { Text(l.reason ?: Wording.Subscriptions.codexFailed, style = Type.body, color = dim) }
+        }
+        // (a phone's width wraps "Use a device code instead" onto a line of its own)
+        when (l.state) {
+            "signing_in" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                l.code?.takeIf { l.url != null && !browser }?.let { code ->
+                    Button(if (login.copied.value) Wording.Subscriptions.codeCopied else Wording.Common.copy, suggested = true) {
+                        clip.setText(AnnotatedString(code))
+                        login.copied.value = true
+                    }
+                }
+                if (browser) Button(Wording.Subscriptions.deviceInstead) { login.start("device") }
+                Button(Wording.Common.cancel) { login.cancel() }
+            }
+            "failed" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(Wording.Common.tryAgain, suggested = true, onClick = again)
+                if (browser) Button(Wording.Subscriptions.deviceInstead) { login.start("device") }
+            }
         }
     }
 }
 
 /** claude auth login run on a host with a Claude account's own folder (hostaccounts' sign_in), on a connection of its
- * own: a new account's (id null: named name, added once it's signed in) or an account's (id). The page to open (url)
- * as the host passes it on, a code that page shows sent to it on the same connection (paste), what to say (said);
- * stop() lets go of the connection, which stops it there. Compose state, changed on the main thread. */
+ * own: a new account's (id null: named name, added once it's signed in) or an account's (id). Signing in (active): the
+ * page to open (url) as the host passes it on, a code that page shows sent to it on the same connection (paste), and
+ * what claude says of it (note); its end: done, else why not (failed). stop() lets go of the connection, which stops it
+ * there. Compose state, changed on the main thread. */
 class ClaudeLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val folder = mutableStateOf("")
+    val existing = mutableStateOf(false) // (Folder picked over Login)
+    val keyed = mutableStateOf(false) // (Token picked over Login)
+    val token = mutableStateOf("")
     val code = mutableStateOf("")
     val url = mutableStateOf<String?>(null)
-    val said = mutableStateOf<String?>(null)
+    val active = mutableStateOf(false)
+    val failed = mutableStateOf<String?>(null)
+    val note = mutableStateOf<String?>(null)
+    val said = mutableStateOf<String?>(null) // (a signed-in folder's add: why it wasn't)
     val busy = mutableStateOf(false)
     private var conn: Connection? = null
     private var checking = false
 
     fun start(done: () -> Unit) {
-        val lines = ArrayList<String>()
         checking = false
-        busy.value = true
+        active.value = true
+        failed.value = null
+        note.value = null
+        said.value = null
+        code.value = ""
         url.value = null
-        said.value = Wording.SignIn.starting
         conn?.stop()
         val fresh = id == null
         conn = Mesh.watch(host.hostId, { w, m ->
@@ -353,24 +822,17 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
                 val g = Msg.AccountsReply.from(m)
                 if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) {
                     val found = Regex("https://\\S+").find(g.line)
-                    if (found != null) {
-                        url.value = found.value.trimEnd('.', ',', ')')
-                        said.value = null
-                    } else if (!g.line.startsWith("Opening browser")) {
-                        lines.add(g.line)
-                        if (checking) { // (what claude says of a pasted code: "Invalid code…", and it asks again)
-                            checking = false
-                            said.value = g.line
-                        }
+                    if (found != null) url.value = found.value.trimEnd('.', ',', ')')
+                    else if (!g.line.startsWith("Opening browser") && checking) {
+                        checking = false // (what claude says of a pasted code: "Invalid code…", and it asks again)
+                        note.value = g.line
                     }
                     return@post
                 }
                 conn = null
                 w.stop()
-                busy.value = false
-                url.value = null
                 val e = host.took(m)
-                if (e != null) said.value = e else done()
+                if (e != null) end(e) else { active.value = false; done() }
             }
         }) { w ->
             if (w !== conn) return@watch
@@ -382,9 +844,11 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     }
 
     private fun end(why: String) {
-        busy.value = false
+        conn = null
+        active.value = false
         url.value = null
-        said.value = why
+        note.value = null
+        failed.value = why
     }
 
     fun paste() {
@@ -392,8 +856,16 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
         if (code.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "code", code = code.value.trim()).json())) {
             code.value = ""
             checking = true
-            said.value = Wording.SignIn.checkingCode
+            note.value = Wording.SignIn.checkingCode
         }
+    }
+
+    fun cancel() {
+        stop()
+        active.value = false
+        failed.value = null
+        url.value = null
+        note.value = null
     }
 
     fun stop() {
@@ -402,46 +874,84 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     }
 }
 
-/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): an existing signed-in Claude
- * folder on the host (a new account's only), or claude auth login run there with the account's own folder
- * (ClaudeLogin): the page to open shown as a link, a box for the code that page may show; Close stops it. */
+/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): Login (claude auth login
+ * run there with the account's own folder: ClaudeLogin, as a card, ClaudeCard) or, a new account's only, Token (a setup
+ * token or API key pasted) or Folder (a signed-in Claude folder on the host); Close stops it. */
 @Composable
 internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, login: ClaudeLogin = remember { ClaudeLogin(host, id) }) {
-    val c = LocalBaude.current
     DisposableEffect(login) { onDispose { login.stop() } }
     val fresh = id == null
     var name by login.name
     var folder by login.folder
-    var code by login.code
+    var existing by login.existing
+    var keyed by login.keyed
+    var token by login.token
+    var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
+    val carded = login.active.value || login.failed.value != null
     val go = {
         when {
             fresh && name.isBlank() -> Unit
-            fresh && folder.isNotBlank() -> send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(),
-                folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done)
+            fresh && keyed -> if (token.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
+                name = name.trim(), token = token.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
+            fresh && existing && folder.isBlank() -> { empty += 1 }
+            fresh && existing -> if (folder.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
+                name = name.trim(), folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             else -> login.start(done)
         }
     }
     val heading = if (fresh) Wording.Subscriptions.addClaude
         else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
-    Form(heading, if (fresh && folder.isNotBlank()) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
-        { login.stop(); done() }, login.said.value, login.busy.value, go) {
+    Form(heading, if (carded) null else if (fresh && keyed) Wording.Subscriptions.addAccount
+        else if (fresh && existing) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
+        { login.stop(); done() }, login.said.value, login.busy.value, go, ready = !(fresh && keyed) || token.isNotBlank()) {
         if (fresh) {
-            NameField(name, { name = it }, Wording.Subscriptions.nameHint, go)
-            NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, focus = false)
+            val open = !login.active.value
+            NameField(name, { name = it }, Wording.Subscriptions.nameHint, go, enabled = open)
+            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open) {
+                keyed = it == 1
+                existing = it == 2
+                if (login.failed.value != null) login.cancel() // (the dialog's own button back in place of Try Again)
+            }
+            if (keyed) SecretField(token, { token = it }, Wording.Subscriptions.tokenHint, go)
+            if (existing) key(empty) { NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, enabled = open) }
         }
-        login.url.value?.let { link ->
-            Text(buildAnnotatedString {
-                val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
-                    it[0] to it.getOrElse(1) { "" }
-                }
-                append(before)
-                withLink(LinkAnnotation.Url(link, TextLinkStyles(SpanStyle(color = c.accent,
-                    textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
-                append(after)
-            }, style = Type.body, color = c.fg)
-            NameField(code, { code = it }, Wording.SignIn.codeHint, login::paste, focus = false)
-            Button(Wording.Common.send, onClick = login::paste)
+        if (carded) ClaudeCard(login, go)
+    }
+}
+
+/** A Claude sign-in as a card, the way Codex's is (CodexCard): signing in, starting; then the page's link and the box
+ * for the code it may show with Continue, the one button that moves it on, and what claude said of it; Cancel. Failed:
+ * why, and Try Again (again). */
+@Composable
+private fun ClaudeCard(login: ClaudeLogin, again: () -> Unit) {
+    val c = LocalBaude.current
+    val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
+    val failed = login.failed.value
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SelectionContainer { Text(if (failed != null) Wording.SignIn.failed else Wording.SignIn.signingIn, style = Type.bold, color = c.fg) }
+        val link = login.url.value
+        when {
+            failed != null -> SelectionContainer { Text(failed, style = Type.body, color = dim) }
+            link == null -> Text(Wording.SignIn.starting, style = Type.body, color = dim)
+            else -> {
+                Text(buildAnnotatedString {
+                    val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
+                        it[0] to it.getOrElse(1) { "" }
+                    }
+                    append(before)
+                    withLink(LinkAnnotation.Url(link, TextLinkStyles(SpanStyle(color = c.accent,
+                        textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
+                    append(after)
+                }, style = Type.body, color = c.fg)
+                var code by login.code
+                NameField(code, { code = it }, Wording.SignIn.codeHint, login::paste, focus = false)
+                Button(Wording.Common.`continue`, suggested = true, enabled = code.isNotBlank(), onClick = login::paste)
+                login.note.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
+            }
         }
+        if (failed != null) Button(Wording.Common.tryAgain, suggested = true, onClick = again)
+        else Button(Wording.Common.cancel) { login.cancel() }
     }
 }
 

@@ -1,8 +1,11 @@
 {
-  "description": "The Update button at the foot of a sidebar while a new version waits to be restarted onto, and its tooltip.",
+  "description": "The Update button at the foot of a sidebar while a new version is there to be restarted onto, and its tooltip; when a newer version can't be, why, in its place.",
   "messages": {
     "update": "Update",
     "waiting_for": "Waiting for:\n{$waits}",
-    "ready": "A new version is ready"
+    "ready": "A new version is ready",
+    "why_dirty": "Local changes in the checkout",
+    "why_diverged": "Can't fast-forward",
+    "why_broken": "The new version didn't start"
   }
 }

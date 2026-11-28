@@ -22,6 +22,7 @@ import chatparts  # noqa: E402
 import panels  # noqa: E402
 import chatfind  # noqa: E402
 import pickers  # noqa: E402
+import menufamily  # noqa: E402
 import theming  # noqa: E402
 import meshui  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
@@ -72,7 +73,7 @@ class Settings(Adw.PreferencesDialog):
     takes at once (Code Font from the next start) and is kept."""
 
     def __init__(self, win):
-        super().__init__(title=wording.say("window.settings_title"))
+        super().__init__(title=wording.say("window.settings_title"), content_width=820)  # (its five pages named in full)
         page = widgets.settings_page()
         page.add(meta.settings_group(win.chat))  # (Baude's too, and the same settings)
         group = Adw.PreferencesGroup()
@@ -138,6 +139,8 @@ class Settings(Adw.PreferencesDialog):
         self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
+        import accessview
+        self.add(accessview.Page(win))
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()
         self.connect("closed", lambda *_: stop.set())  # (nothing to say them to: no more reading large chats)
         threading.Thread(target=Settings._work_out_sizes, args=([self], copies, stop), daemon=True).start()
@@ -243,9 +246,12 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                                          reveal_child=not self.store.books_folded)
         books.append(self.books_reveal)
         side.set_content(books)
-        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting)
+        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting; each
+        # host's pending daemon restart, toasted: show_restart)
         self.update_bar = chatparts.UpdateBar(self.update_now)
         side.add_bottom_bar(self.update_bar)
+        self.restart_toasts = meshui.RestartToasts(self, self.show_restart_blockers)
+        GLib.idle_add(lambda: (self.update_waiting(None), False)[1])  # (a version offered before)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name
         # too long ends in …. Not an Adw.Clamp: one takes the width the column asks for and centres it in that)
@@ -279,12 +285,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         view = Gio.Menu()
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
-        tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in ((wording.say("window.kubernetes"), "kube"),
-                            (wording.say("window.database_schemas"), "db")):
-            tools.append(title, f"win.viewer::{page}")
-        tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
+        tools = Gio.Menu()  # (Baude's views over the window, and Browser: menufamily.attach; Files and Git are in the
+        # right bar, code in tabs)
         menu.append_section(None, tools)
+        usage = Gio.Menu()  # (the usage of the subscription the chat runs under: subscriptionpage.attach_menu_usage)
+        menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
@@ -299,6 +304,9 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         app_menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        import subscriptionpage
+        menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Baude's too)
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the chat's subscription's usage, Baude's too)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
                          ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),
@@ -306,6 +314,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("restartdaemon", lambda: self.restart_host()),
+                         ("browser", lambda: menufamily.open_browser(self)),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
                          ("changelog", lambda: update.changelog_dialog().present(self)),
@@ -338,7 +347,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
         # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
-        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or \
+        find = lambda: find_in_focus(self) or self.kube.find() or self.docker.find() or self.schema.start_find() or \
             ((chat := chatfind.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
         widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
@@ -437,7 +446,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             if os.path.exists(chat.get("path") or ""):
                 self.open_chat(chat["path"], select=False, present=False)
         self.apply_full_width(self.store.full_width)
-        self.connect("close-request", lambda *_: self.store.save_now() and False)
+        self.connect("close-request", self._closing)
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
         self.store.sender = self.send_notes
         self.host_dd.set_choices(self.note_hosts())
@@ -451,6 +460,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         theming.warm_shaders(self)  # (after its first frame)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
+
+    def _closing(self, *_):
+        self.kube.close()
+        self.docker.close()  # (their timers and follows stop with the window)
+        return self.store.save_now() and False
 
     def _side_moving(self, on):
         """A side bar's started moving (sliding, or dragged), or it's still again. A chat read in the tab shown (Reader)
@@ -565,16 +579,22 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return why
 
     def update_waiting(self, waiting):
-        """(update.Updater's) A new version found and waiting on idle, or not: the bar at the notebooks' foot."""
-        self.update_bar.say(self.restart_blockers() if waiting else None)
+        """(update.Updater's) What Update shows changed (waiting: a new version found and waiting on idle, what it
+        waits for in the tooltip; None: as the updater has it now): the bar at the notebooks' foot, Update, only
+        offered (auto restart off), the reason it can't be, or none."""
+        u = getattr(self.get_application(), "updater", None)
+        if u is None:
+            return
+        waiting = u.waiting if waiting is None else waiting
+        self.update_bar.say(self.restart_blockers() if waiting else [] if u.pending() else None,
+                            u.why if not u.pending() else None, u.busy)
 
     def update_now(self):
         """The bar clicked: restarted onto the new version now (a question being answered stopped, said and asked)."""
         u = getattr(self.get_application(), "updater", None)
-        if u is None or not u.ready:
+        if u is None or not u.pending():
             return
-        go = lambda: self.restart({"from": u.started, "to": u.ready,  # noqa: E731
-                                   "commits": update.new_commits(u.started, u.ready, u.root)})
+        go = lambda: u.apply(self.restart)  # noqa: E731
         if self.chat.ask is None:
             return go()
         dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"),
@@ -711,7 +731,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                 self.kube: "Kubernetes", self.docker: "Docker", self.schema: "databases", self.lightbox: "image",
                  self.terminal: "terminal"}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):
@@ -854,6 +874,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             win.list_notes(win.store.host)
         if not win.is_active():
             win.store.flush()  # (gone to another window: what's typed is on the disk)
+        elif isinstance(reader := win.tabs.current(), Reader):
+            reader.acted()  # (come back to, a host's chat read in it: seen)
 
     def github_folders(self):
         """What GitHub's lists are read for (lookupgit.GitHub.look), as Baude's: the repository the chat read's folder
@@ -1258,6 +1280,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.zoom_tab(child)  # (it may have been left at another size: at this one in its first frame)
         if isinstance(child, Reader):
             child.activate()
+            child.acted()  # (switched to: a host's chat, in front of you, seen)
             if child.chat:
                 self.store.reading = child.chat
                 self.reading_changed()

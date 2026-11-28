@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "run_task's answer: the run started.",
+  "properties": {
+    "op": {
+      "const": "task_started",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "run": {
+      "$ref": "TaskRun.json",
+      "description": "The run."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "run"
+  ],
+  "additionalProperties": false
+}

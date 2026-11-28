@@ -22,6 +22,10 @@
     "fault": {
       "$ref": "KubeFault.json",
       "description": "Why, when the cluster can't be read."
+    },
+    "removed": {
+      "type": "boolean",
+      "description": "Its context went from the kubeconfig (its cluster was deleted, or made again under the same name)."
     }
   },
   "required": ["op"],

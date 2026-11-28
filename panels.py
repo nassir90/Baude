@@ -14,7 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 
 from baudelib import tokens  # noqa: E402  (the measures and colours below: schema/tokens, the Android app's too)
 from baudelib import wording  # noqa: E402
-from widgets import discard, ensure_icons, paned_rule, toast, walk  # noqa: E402
+from widgets import discard, ensure_icons, insert_actions, paned_rule, toast, walk  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 
 
@@ -104,7 +104,7 @@ class MainTabs(Gtk.Box):
                 acts.add_action(named)
                 self.view.connect("setup-menu", lambda _v, page: page is not None and named.set_enabled(
                     bool(can(tab_child(page)))))
-            self.bar.insert_action_group("tab", acts)
+            insert_actions(self.bar, "tab", acts)
 
     def _bar_shown(self):
         # (Adw.TabBar's own autohide never hides with a pinned tab: by hand)

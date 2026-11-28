@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -45,11 +46,33 @@ fun CutShortLine(chat: Chat) {
             .semantics { contentDescription = Wording.CutShort.tip(message = Wording.CutShort.message) }
             .clickable {
                 val gone = Mesh.conn(at)?.state != "up" || Stopping.line(at) != null
-                if (gone || chat.chrome.missing.value || exhausted(chat)) return@clickable // (what the box couldn't send now)
+                if (gone || chat.chrome.missing.value || exhausted(chat) || subscriptionOff(chat)) return@clickable // (what the box couldn't send now)
                 CutShort.continuing[key] = true
                 Mesh.send(chat, Wording.CutShort.message, emptyList(), keep = false) { CutShort.continuing.remove(key) }
             }.padding(horizontal = 8.dp, vertical = 1.dp)) {
-            Text(Wording.CutShort.button, style = Type.body.copy(fontSize = Tokens.Font.body * 0.9f,
+            Text(Wording.Common.`continue`, style = Type.body.copy(fontSize = Tokens.Font.body * 0.9f,
+                lineHeight = Tokens.Font.bodyLine * 0.9f), color = c.fg)
+        }
+    }
+}
+
+/** The line at a chat's end that says when its host resumes it after a usage limit (its listing's resume_at:
+ * BaudeWindow.show_resume), "Resumes at 3:20 PM", and its Cancel, which tells the host not to. */
+@Composable
+fun ResumeLine(chat: Chat) {
+    val c = LocalBaude.current
+    val at = Mesh.session(chat.hostId, chat.sid)?.resumeAt?.toLong() ?: return
+    val ctx = LocalContext.current
+    val zoned = java.time.Instant.ofEpochSecond(at).atZone(java.time.ZoneId.systemDefault())
+    val clock = if (android.text.format.DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm a"
+    val time = zoned.format(java.time.format.DateTimeFormatter.ofPattern(clock))
+    val said = if (zoned.toLocalDate() == java.time.LocalDate.now()) Wording.LimitResume.line(time = time)
+        else Wording.LimitResume.lineDay(day = zoned.format(java.time.format.DateTimeFormatter.ofPattern("EEEE")), time = time)
+    Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(said, style = Type.body, color = c.dim)
+        Box(Modifier.clip(RoundedCornerShape(6.dp)).background(c.fg.copy(alpha = 0.10f))
+            .clickable { Mesh.resumeCancel(chat) }.padding(horizontal = 8.dp, vertical = 1.dp)) {
+            Text(Wording.Common.cancel, style = Type.body.copy(fontSize = Tokens.Font.body * 0.9f,
                 lineHeight = Tokens.Font.bodyLine * 0.9f), color = c.fg)
         }
     }

@@ -1,11 +1,24 @@
 {
-  "description": "Each model's family, by what its name or value says: the first whose match finds a word of the model's name, else its value's last part (case ignored). Its icon (baude-model-<icon>-symbolic.svg here) is drawn beside the model in the model pickers, and its name heads its models there. A model that matches none is under \"Other\" (common.other), with no icon.",
+  "description": "Each model's family, by what its name or value says: the first whose match finds a word of the model's name, else its value's last part (case ignored). Its icon (baude-model-<icon>-symbolic.svg here) is drawn beside the model in the model pickers, and its name heads its models there. A model that matches none is under \"Other\" (common.other), with no icon. A family's names say how its models' ids read as names where no host lists the model (every app's model names: a listed model goes by the name its host gives it): the first whose match is the whole id (case ignored) names it as its as says, each {n} its match's group n with - and _ read as spaces and its first letter a capital (an unmatched group: nothing).",
   "families": [
-    {"icon": "claude", "name": "Claude", "match": "claude|opus|sonnet|haiku|fable|^default$"},
+    {"icon": "claude", "name": "Claude", "match": "claude|opus|sonnet|haiku|fable|^default$",
+     "names": [
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?\\[1m\\]", "as": "{1} {2}.{3} (1M context)"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}.{3}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(\\d{1,2})-(opus|sonnet|haiku)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{3} {1}.{2}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(opus|sonnet|haiku)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{2} {1}"},
+      {"match": "(opus|sonnet|haiku|fable)\\[1m\\]", "as": "{1} (1M context)"},
+      {"match": "(opus|sonnet|haiku|fable)", "as": "{1}"}
+    ]},
     {"icon": "qwen", "name": "Qwen", "match": "qwen|qwq"},
     {"icon": "gemma", "name": "Gemma", "match": "gemma"},
     {"icon": "gemini", "name": "Gemini", "match": "gemini"},
-    {"icon": "openai", "name": "GPT", "match": "gpt|openai|(^|[/:])o[134]\\b"},
+    {"icon": "openai", "name": "GPT", "match": "gpt|openai|(^|[/:])o[134]\\b",
+     "names": [
+      {"match": "(?:codex/)?gpt-(\\d.*?)(?:-\\d{4}-\\d{2}-\\d{2}|-\\d{8})?\\[1m\\]", "as": "GPT {1} (1M context)"},
+      {"match": "(?:codex/)?gpt-(\\d.*?)(?:-\\d{4}-\\d{2}-\\d{2}|-\\d{8})?", "as": "GPT {1}"}
+    ]},
     {"icon": "meta", "name": "Llama", "match": "llama"},
     {"icon": "mistral", "name": "Mistral", "match": "mistral|mixtral|stral\\b|ministral"},
     {"icon": "deepseek", "name": "DeepSeek", "match": "deepseek"},

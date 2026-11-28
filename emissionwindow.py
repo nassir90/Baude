@@ -16,10 +16,10 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
-from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
+from baudelib import emissiontools, wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (  # noqa
-    DEFAULT, add_profile, call, call_bot, data_home, forget_profile, hand_over, lock_profile, open_pages, pending_note,
-    profile_id, profiles, rename_profile, unlock_profile,
+    DEFAULT, add_profile, blocks_tracking, call, call_bot, data_home, forget_profile, hand_over, lock_profile, open_pages,
+    pending_note, profile_id, profiles, rename_profile, set_blocks_tracking, unlock_profile,
 )
 from emissioncore import AGENT_IDLE_S, HOME_PAGE, POLL_MS, ProfileSocket, STARTED, address, once  # noqa: E402
 from emissionpointer import BotPointer  # noqa: E402
@@ -75,6 +75,8 @@ class Window(Adw.ApplicationWindow):
         self.reopened = None  # (and what it's told of the pages this browser opened again: from this start alone)
         self.pointer = BotPointer()  # (what its tools do with the mouse: drawn over its pages while hosted, and told
         self.accent = None           # watchers; accent: the glow's colour there, Baude's, as rgb)
+        if hosted:
+            self.pointer.changed = lambda: [t.kick() for t in self.tabs.values()]
         if agent:  # (one a browser before it had for the Bot and never gave)
             self.note = pending_note(profile_id(profile) or "")
             self.reopened = pending_note(profile_id(profile) or "", slot="reopen")
@@ -103,8 +105,8 @@ class Window(Adw.ApplicationWindow):
         chrome.tab_bar.set_view(self.view)
         if hosted:  # (in Baude's window: its tabs' keys are Baude's own tabs')
             self.view.set_shortcuts(Adw.TabViewShortcuts.NONE)
-        if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages')
-            macos.route_events(MacWeb.take_event)
+        if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages',
+            macos.route_events(MacWeb.take_event)                  # and the keys of a page that has them)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
         self.banner = Adw.Banner(button_label=wording.say("common.show"))
@@ -282,8 +284,13 @@ class Window(Adw.ApplicationWindow):
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
+        if op == "show":  # (☰ → Browser: this window brought to the front as it is, no page opened)
+            if not self.hosted and not self.agent and pid == self.profile_id:
+                self.present()
+                return answer({"ok": True})
+            return answer({"error": "not a window of that profile's"})
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
-            return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
+            return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile, "pid": os.getpid(),
                            "tabs": len(self.tabs), "idle_s": idle_s, "commit": STARTED})
         if op == "memory":  # (tests/bench_emission.py's: what this process holds now, counted after a collection)
             return answer(self.memory())
@@ -311,7 +318,10 @@ class Window(Adw.ApplicationWindow):
         if self.Engine is None:
             return answer({"error": "Emission has no page engine on this host"})
         listed = next((p for p in profiles() if p["id"] == pid), None)
-        if listed is None or not listed.get("bot"):  # (a Bot's tools reach a Bot's own profile, nothing else)
+        own = pid == self.profile_id and not self.agent and not self.hosted and bool(msg.get("from_pane")) and \
+            op in emissiontools.PANE_OPS | {"watch"}  # (this window, watched and driven from a Browser pane elsewhere:
+        if not own and (listed is None or not listed.get("bot")):  # ☰ → Browser on another host; else a Bot's
+            # tools reach a Bot's own profile, nothing else)
             return answer({"error": "Emission takes tools' requests for a Bot's own profile only"})
         if pid != self.profile_id:
             if not self.agent:  # (someone's own window, on another profile now: not moved for a Bot)
@@ -492,8 +502,21 @@ class Window(Adw.ApplicationWindow):
             group.add_action(act)
             more.append(label, f"who.{name}")
         menu.append_section(None, more)
+        blocked = blocks_tracking(self.profile_id)
+        tracking = Gio.SimpleAction.new("tracking", None)
+        tracking.connect("activate", lambda *_a: self.block_tracking(not blocked))
+        group.add_action(tracking)
+        privacy = Gio.Menu()
+        privacy.append("Prevent Cross-Site Tracking" + ("  ✓" if blocked else ""), "who.tracking")
+        menu.append_section(None, privacy)
         self.insert_action_group("who", group)
         return menu
+
+    def block_tracking(self, on):
+        """This profile's pages blocking cross-site cookies and storage (on), as Safari does, or not: from now on."""
+        set_blocks_tracking(self.profile_id, on)
+        if self.Engine is not None:
+            self.Engine.block_tracking(self.profile_id, on)
 
     def refresh_profiles(self):
         self.who.set_menu_model(self.profile_menu())

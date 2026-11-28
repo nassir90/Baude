@@ -47,6 +47,7 @@ STALE_S = ROUND_TIMEOUT_S + 5 * 60  # (a round said to be running for longer tha
 # (all it has: nothing that runs anything or goes out. None pre-approved, as a bare rule would approve every path: edits
 # in its folder are acceptEdits', and asking for anything outside it, with nobody to ask, is refused)
 TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
+from baudelib import deps  # noqa: E402
 from baudelib.claude import HOST_SESSION_ENV, claude_exe  # noqa: E402  (what claude_env leaves out: baudelib's, and so ours)
 # (no prompt: no terminal, no password asked of a terminal or a window; as update.py's)
 GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
@@ -102,12 +103,14 @@ def gh_path():
                                        if os.access(p, os.X_OK)), None)
 
 
-def gh(*args, body=None, timeout=60):
-    """gh, given body on its stdin: (it worked, what it printed or its error)."""
+def gh(*args, body=None, timeout=60, feature="window.ongoing_feedback"):
+    """gh, given body on its stdin: (it worked, what it printed or its error; with no gh, what to install for feature, a copy key)."""
+    if gh_path() is None:
+        return False, deps.say(deps.info("gh", here=False), feature)
     try:
         r = subprocess.run([gh_path(), *args], input=body, capture_output=True, text=True, timeout=timeout,
                            env={**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})
-    except (OSError, subprocess.TimeoutExpired, TypeError) as e:  # (TypeError: no gh)
+    except (OSError, subprocess.TimeoutExpired) as e:
         return False, str(e)
     return r.returncode == 0, (r.stdout if r.returncode == 0 else r.stderr or r.stdout).strip()
 
@@ -705,6 +708,8 @@ def run_claude(src, prompt, session, number):
     """A headless claude in src given prompt, on from session if there's one: (its session, what it replied). What it
     streamed goes in the fix's events.jsonl. Raises Failure if it failed or took too long."""
     env = {k: v for k, v in os.environ.items() if k not in HOST_SESSION_ENV}
+    if (dep := deps.missing("claude")) is not None:  # (no claude here: what to install, as Dependencies says it)
+        raise Failure(deps.say(dep, "window.ongoing_feedback"))
     try:
         p = subprocess.Popen(claude_args(session), cwd=src, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True)

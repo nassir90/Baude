@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What starts a task (besides a run by hand): a schedule, or a git push to a branch of a repo on the host, seen by polling its head. Its events' payloads fill the task's form (fills).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "kind": {
+      "enum": [
+        "schedule",
+        "git_push"
+      ],
+      "description": "What it is."
+    },
+    "every": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A schedule's: minutes between runs."
+    },
+    "at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A schedule's: the host's local time it runs at, HH:MM."
+    },
+    "days": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "integer"
+      },
+      "description": "A schedule's at's days, 0 Monday to 6 Sunday."
+    },
+    "next": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "A schedule's: when it fires next."
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A git push's: the repo's folder on the host."
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A git push's: the branch watched."
+    },
+    "poll_s": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A git push's: seconds between looks at the branch."
+    },
+    "seen": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A git push's: the branch's head as last seen."
+    },
+    "fills": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A form field's name: the payload's key that fills it (a field not named takes the payload's key of its own name)."
+    },
+    "fired": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "When it last fired."
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it couldn't look or fire, last time."
+    }
+  },
+  "required": [
+    "id",
+    "kind"
+  ],
+  "additionalProperties": false
+}

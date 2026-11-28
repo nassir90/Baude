@@ -7,6 +7,10 @@
       "type": "string",
       "description": "Its name."
     },
+    "server": {
+      "type": "string",
+      "description": "Its cluster's API server (no credentials): with its name, which cluster it is. A context deleted and made again under the same name is another cluster."
+    },
     "current": {
       "type": "boolean",
       "description": "The kubeconfig's current context."

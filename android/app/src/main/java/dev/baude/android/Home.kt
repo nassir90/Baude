@@ -15,6 +15,14 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
@@ -38,6 +46,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,19 +80,28 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /** How the home screen lists (Baude's sidebar settings, kept on this phone): grouped by folder or by date, the
- * sections folded, the groups shown (none picked: every one), the host shown (none kept: picked()); the sessions
+ * sections folded, the groups shown (none picked: every one, unless noGroups: none), the host shown (none kept: picked()); the sessions
  * deleted from the list (hidden, as Baude's unhide_remote brings them back); and the groups
  * as this phone has them (Baude's group_names and chat_groups): those made here, and each chat moved to one. */
 object HomePrefs {
     val by = mutableStateOf("folder")
     val collapsed = mutableStateListOf<String>()
     val groups = mutableStateListOf<String>()
+    val noGroups = mutableStateOf(false) // (every group unchecked: none listed)
     val host = mutableStateOf("") // (the host kept: its connection id; "" or "all" from before: none)
     val hostName = mutableStateOf("") // (its name as it was last said, for when it's no longer listed)
     val hidden = androidx.compose.runtime.mutableStateMapOf<String, JSONObject>() // ("host/session": {updated, dead, at} when it was deleted)
     val made = mutableStateListOf<String>()
     val chatGroups = androidx.compose.runtime.mutableStateMapOf<String, String>() // ("host/session": its group here)
     private var ctx: Context? = null
+
+    /** The groups picked among names, none when they're every one (all shown, as Baude's picked() and filtered()). */
+    fun pickedOf(names: List<String>): List<String>? = groups.filter { it in names }.let { p -> if (p.toSet().containsAll(names)) null else p.ifEmpty { null } }
+
+    /** groups cleared if they name every group (and No group): all of them, so groups made later are shown too. */
+    fun allIfEvery() {
+        if (groups.isNotEmpty() && groups.toSet().containsAll(Groups.names() + "")) groups.clear()
+    }
 
     fun load(c: Context) {
         if (ctx != null) return
@@ -93,6 +111,7 @@ object HomePrefs {
         // before: by when they were last used)
         collapsed.addAll(p.getStringSet("collapsed", setOf("archived")).orEmpty())
         groups.addAll(p.getStringSet("groups", emptySet()).orEmpty())
+        noGroups.value = groups.isEmpty() && p.getBoolean("no_groups", false)
         host.value = p.getString("host", "") ?: ""
         hostName.value = p.getString("host_name", "") ?: ""
         val gone = JSONObject(p.getString("hidden", "{}") ?: "{}")
@@ -104,7 +123,7 @@ object HomePrefs {
 
     fun save() {
         ctx?.getSharedPreferences("home", Context.MODE_PRIVATE)?.edit()?.putString("by", by.value)
-            ?.putStringSet("collapsed", collapsed.toSet())?.putStringSet("groups", groups.toSet())
+            ?.putStringSet("collapsed", collapsed.toSet())?.putStringSet("groups", groups.toSet())?.putBoolean("no_groups", noGroups.value)
             ?.putString("host", host.value)?.putString("host_name", hostName.value)
             ?.putString("hidden", JSONObject(hidden.toMap()).toString())?.putStringSet("made", made.toSet())
             ?.putString("chat_groups", org.json.JSONObject(chatGroups.toMap()).toString())?.apply()
@@ -175,8 +194,9 @@ fun picked(): String? = HomePrefs.host.value.takeIf { it != "" && it != "all" } 
 /** The host's deactivated (Deactivate): not reached, its chats as last seen. */
 fun off(id: String): Boolean = id in Mesh.deactivated
 
-/** The host's gone: it has no connection that's up or being made (and isn't switched off). */
-fun dead(id: String): Boolean = !off(id) && Mesh.conn(id)?.state.let { it != "up" && it != "connecting" }
+/** The host's gone: it has no connection that's up or being made (and isn't switched off), and hasn't for a while
+ * (Mesh.reach: one only away a moment is listed as it was). */
+fun dead(id: String): Boolean = !off(id) && Mesh.conn(id)?.state.let { it != "up" && it != "connecting" } && Mesh.reach(id) == "gone"
 
 /** What's said over a host's chats while it isn't reached (Baude's host_state), or null while it is. */
 fun hostState(id: String?): String? {
@@ -254,7 +274,7 @@ fun sections(query: String): List<Section> {
     }
     fun agent(h: String, s: Msg.Session) = s.spawnedBy?.ifBlank { null }?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
     val far = startedElsewhere() // (only ever under the agent on another host that started it)
-    val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) && key(h, s) !in far }
+    val listedKeys = everywhere.filter { (h, s) -> h in shown && (if (groups.isEmpty()) !HomePrefs.noGroups.value else groupOf(h, s) in groups) && key(h, s) !in far }
         .map { (h, s) -> key(h, s) }.toMutableSet()
     val pulled = HashSet<String>()
     while (true) {
@@ -339,13 +359,14 @@ fun sections(query: String): List<Section> {
     return out
 }
 
-/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the sessions of every
+/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), the Inbox, search, the sessions of every
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by day and pick
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
          settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, fixes: () -> Unit = {},
-         tool: (String, String) -> Unit = { _, _ -> }, note: @Composable () -> Unit = {}) {
+         tool: (String, String) -> Unit = { _, _ -> }, subscriptions: () -> Unit = {}, inbox: () -> Unit = {},
+         note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -377,11 +398,11 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     Column(Modifier.fillMaxSize()) {
         Bar("Baude", left = true, end = {
             IconButton(Adwaita.Phone, Wording.ThisPhone.title, onClick = phone) // (its own agents: PhoneScreen)
-            HomeMenu(settings, changelog, mesh, feedback, fixes, tool)
+            HomeMenu(settings, changelog, mesh, feedback, fixes, tool, subscriptions)
         })
         note()
         if (Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = { adding = true })
-        // the top: New session and the host it's on, Open folder…, then the search and ⋮ (Baude's sidebar's top box)
+        // the top: New session and the host it's on, Open folder…, the Inbox, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) { newSession() }
@@ -392,6 +413,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val said = hostState(h)
                 if (said != null) toast(said) else choosing = h
             }
+            InboxRow(inbox) // (right over the search: what's waiting on you, Inbox.kt)
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 SearchField(query, { query = it }, Wording.Sidebar.search, Modifier.weight(1f))
@@ -399,7 +421,8 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
             }
         }
         val said = hostState(picked())
-        AnimatedVisibility(said != null, enter = expandVertically()) { HostBanner(said.orEmpty()) }
+        val away = picked()?.let { !off(it) && Mesh.reach(it) == "away" } == true && said != null
+        AnimatedVisibility(said != null, enter = expandVertically()) { if (away) Away() else HostBanner(said.orEmpty()) }
         val all = sections(query)
         val update = Update.state.value != ""
         if (all.isEmpty()) {
@@ -430,6 +453,9 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
         }
         if (update) UpdateBar()
     }
+    // (each host keeping a restart of its daemon: a snackbar, as Baude toasts it)
+    val restarts = Mesh.known().mapNotNull { (id, _, up) -> Mesh.conn(id)?.info?.restart?.takeIf { up }?.let { id to it } }
+    RestartSnackbar(restarts, Modifier.align(Alignment.BottomCenter).navigationBarsPadding(), open, tool)
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
     choosing?.let { h -> OpenFolder(h, done = { choosing = null }) { choosing = null; newSession(h, it) } }
@@ -439,7 +465,8 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
 /** Open folder… (Baude's ask_host_folder): the folder a new chat on host h starts in, a path there typed or browsed,
  * from the one last given there (else the host's home). Under it, the folders the host lists (list_dir) as it's typed:
  * those in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
- * tapped is put in the path. Open: picked. */
+ * tapped is gone into, and Back goes back out, as Android's folder picker has it. A keyboard's keys as Baude's
+ * (folderKey): Tab completes, Up and Down pick, Alt+Up goes up, Ctrl+H shows hidden folders. Open: picked. */
 @Composable
 private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     val c = LocalBaude.current
@@ -448,54 +475,94 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     val start = HomePrefs.folder(ctx, h) ?: home
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start,
         androidx.compose.ui.text.TextRange(start.length))) }
-    var listed by remember { mutableStateOf<Pair<String, List<String>>?>(null) } // (the folder listed, its folders shown)
+    var listed by remember { mutableStateOf<Listed?>(null) }
+    var hidden by remember { mutableStateOf(false) }
+    var pick by remember { mutableStateOf(-1) } // (the row picked with Up and Down; -1: none)
+    var then by remember { mutableStateOf<String?>(null) } // (a key waiting for the folders listed: "complete" or "into"; done with the listing that lands)
+    val back = remember { mutableStateListOf<String>() } // (the paths gone out of, for Back)
     fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
     fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
     val typed = full(field.text)
-    LaunchedEffect(typed) {
-        if (!typed.startsWith("/")) { listed = null; return@LaunchedEffect }
-        fun shown(folder: String, r: JSONObject, part: String) = folder to Msg.Dir.from(r).entries.orEmpty()
+    LaunchedEffect(typed, hidden) {
+        pick = -1
+        if (!typed.startsWith("/")) { listed = Listed(typed, "", null, emptyList()); return@LaunchedEffect }
+        fun shown(folder: String, r: JSONObject, part: String) = Msg.Dir.from(r).entries.orEmpty()
             .mapNotNull { e -> e.name?.takeIf { e.dir == true } }
-            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".")) }
+            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".") || hidden) }
         Mesh.ask(h, Msg.ListDir(path = typed).json()) { r ->
             if (typed != full(field.text)) return@ask // (typed on since: that one's answer's wanted)
-            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = shown(typed, r, "")
+            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = Listed(typed, typed, null, shown(typed, r, ""))
             else { // (not a folder: its parent's, that its last part begins)
                 val parent = up(typed)
                 val part = typed.trimEnd('/').substringAfterLast('/')
                 Mesh.ask(h, Msg.ListDir(path = parent).json()) { p ->
                     if (typed != full(field.text)) return@ask
-                    listed = if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part)
-                        else parent to emptyList()
+                    listed = Listed(typed, parent, part,
+                        if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part) else emptyList())
                 }
             }
         }
     }
-    fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
+    fun set(text: String) { field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)) }
+    fun put(path: String) { back.add(field.text); set(path.trimEnd('/') + "/") } // (a folder gone into: a / lists it)
+    val (folder, part, names) = listed?.let { Triple(it.folder, it.part, it.names) } ?: Triple("", null, emptyList())
+    val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
+        names.map { it to folder.trimEnd('/') + "/" + it }
+    fun into() { // (the folder picked, else the only one there)
+        val row = rows.getOrNull(pick) ?: rows.lastOrNull()?.takeIf { names.size == 1 }
+        if (row != null) put(row.second)
+    }
     fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
+    fun complete() { if (typed.startsWith("/")) folderCompletion(field.text, part, names)?.let { set(it) } }
+    fun whenListed(key: String) {
+        if (listed?.typed != typed) then = key else if (key == "complete") complete() else into()
+    }
+    LaunchedEffect(listed) { // (this composition's, so the listing that landed)
+        if (listed?.typed == typed) then?.let { then = null; if (it == "complete") complete() else into() }
+    }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(pick) { if (pick >= 0) list.animateScrollToItem(pick) }
+    val keys = FolderKeys(
+        complete = { whenListed("complete") },
+        pick = { step -> pick = when {
+            rows.isEmpty() -> -1
+            pick >= 0 -> (pick + step).coerceIn(0, rows.lastIndex)
+            step < 0 -> rows.lastIndex
+            else -> if (rows[0].first == ".." && rows.size > 1) 1 else 0
+        } },
+        picked = { pick >= 0 },
+        into = { whenListed("into") },
+        up = {
+            val at = if (part != null) up(typed) else typed
+            if (typed.startsWith("/") && at.trimEnd('/').isNotEmpty()) put(up(at))
+        },
+        home = { put(home) },
+        hidden = { hidden = !hidden },
+    )
     AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // (in the dialog's own window, so its Back is had before the dialog's dismissing)
+                androidx.activity.compose.BackHandler(back.isNotEmpty()) { set(back.removeAt(back.lastIndex)) }
                 val focusing = remember { androidx.compose.ui.focus.FocusRequester() }
                 LaunchedEffect(Unit) { focusing.requestFocus() }
                 Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
                     .padding(horizontal = 10.dp, vertical = 9.dp)) {
                     if (field.text.isEmpty()) Text("~", style = Type.body, color = c.dim)
-                    BasicTextField(field, { field = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg),
+                    BasicTextField(field, { field = it }, singleLine = true,
+                        textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { open() }),
-                        modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusing)
+                            .onPreviewKeyEvent { folderKey(it, keys) })
                 }
-                val (folder, names) = listed ?: ("" to emptyList())
-                val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
-                    names.map { it to folder.trimEnd('/') + "/" + it }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 240.dp).clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, c.rule, RoundedCornerShape(8.dp))) {
-                    items(rows, key = { it.second + "\u0000" + it.first }) { (name, path) ->
-                        Row(Modifier.fillMaxWidth().clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
+                    .border(1.dp, c.rule, RoundedCornerShape(8.dp)), state = list) {
+                    itemsIndexed(rows, key = { _, it -> it.second + "\u0000" + it.first }) { i, (name, path) ->
+                        Row(Modifier.fillMaxWidth().then(if (i == pick) Modifier.background(c.accentBg.copy(alpha = 0.3f)) else Modifier)
+                            .clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(if (name == "..") Adwaita.GoUp else Adwaita.Folder, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
@@ -509,6 +576,58 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )
+}
+
+/** What Open folder… lists for a path typed: the folder listed, the path's last part when that isn't a folder (null
+ * when it is), the folders shown. */
+private data class Listed(val typed: String, val folder: String, val part: String?, val names: List<String>)
+
+/** Tab in a folder's path (Baude's folder_completion), as GTK's file chooser and a shell complete: one folder the
+ * path's last part begins, it with a /; several, as much as all of them share; nothing more to put, null. */
+internal fun folderCompletion(typed: String, part: String?, names: List<String>): String? {
+    val begun = when {
+        part == null && !typed.endsWith("/") -> return "$typed/"
+        part == null -> ""
+        typed.endsWith("/") || !typed.endsWith(part) -> return null
+        else -> part
+    }
+    if (names.isEmpty()) return null
+    val at = typed.dropLast(begun.length)
+    if (names.size == 1) return at + names[0] + "/"
+    val low = names.map { it.lowercase() }
+    var shared = 0
+    while (low.all { it.length > shared && it[shared] == low[0][shared] }) shared++
+    return if (shared <= begun.length) null else at + names[0].take(shared)
+}
+
+/** What a folder's path field's keys do (folderKey). */
+private class FolderKeys(val complete: () -> Unit, val pick: (Int) -> Unit, val picked: () -> Boolean, val into: () -> Unit,
+                         val up: () -> Unit, val home: () -> Unit, val hidden: () -> Unit)
+
+/** A keyboard's keys in a folder's path (Baude's folder_keys), as file choosers have them: Tab completes it (GTK,
+ * shells); Up and Down pick in the list and Enter goes into the one picked (GTK's location bar, Finder's Go to
+ * Folder); Alt+Up or Meta+Up the folder above (Nautilus, Dolphin; Finder), Alt+Down or Meta+Down into the one picked
+ * or the only one; Alt+Home or Meta+Shift+H home; Ctrl+H, Alt+. or Meta+Shift+. hidden folders shown or not. */
+private fun folderKey(e: androidx.compose.ui.input.key.KeyEvent, k: FolderKeys): Boolean {
+    if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return false
+    val key = e.key
+    val mods = listOf(e.isShiftPressed, e.isCtrlPressed, e.isAltPressed, e.isMetaPressed)
+    val none = mods.none { it }
+    val alt = mods == listOf(false, false, true, false)
+    val meta = mods == listOf(false, false, false, true)
+    val metaShift = mods == listOf(true, false, false, true)
+    val doing: (() -> Unit)? = when {
+        key == Key.Tab && none -> k.complete
+        (key == Key.DirectionUp || key == Key.DirectionDown) && none -> { { k.pick(if (key == Key.DirectionUp) -1 else 1) } }
+        (key == Key.Enter || key == Key.NumPadEnter) && none && k.picked() -> k.into
+        key == Key.DirectionUp && (alt || meta) -> k.up
+        key == Key.DirectionDown && (alt || meta) -> k.into
+        key == Key.MoveHome && alt || key == Key.H && metaShift -> k.home
+        key == Key.H && mods == listOf(false, true, false, false) || key == Key.Period && (alt || metaShift) -> k.hidden
+        else -> null
+    }
+    doing?.invoke()
+    return doing != null
 }
 
 /** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's
@@ -540,6 +659,124 @@ private fun UpdateBar() {
         else Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
     }
+}
+
+/** Which hosts' pending restarts have had their snackbar (Baude's meshui.RestartToasts): each once, till it's gone;
+ * held, those a See Thread holds (said till it's dismissed, which lets go of that pause); showing, the one shown. */
+internal object RestartSnack {
+    val toasted = mutableStateListOf<String>()
+    val held = mutableStateListOf<String>()
+    var showing by mutableStateOf<String?>(null)
+}
+
+/** Each host's pending daemon restart (restarts; named when there's more than one), a snackbar at a time (Baude's
+ * toast): what it waits for, kept up as it changes, with Details: what it waits for (RestartBlockers; See Thread on
+ * one: its chat, open(host, session), or its terminal, tool("terminal", host)). Each is shown once and goes as a
+ * snackbar does (RESTART_SNACK_MS, or dismissed); the restart goes on, as it was. A See Thread holds the restart: the
+ * snackbar back, "Daemon restart paused", till it's dismissed (the pause let go of) or Details is tapped again. */
+@Composable
+private fun RestartSnackbar(restarts: List<Pair<String, Msg.RestartState>>, modifier: Modifier,
+                            open: (String, String) -> Unit, tool: (String, String) -> Unit) {
+    val c = LocalBaude.current
+    val s = RestartSnack
+    var blockers by remember { mutableStateOf<String?>(null) } // (the host whose restart's waits are shown)
+    val ids = restarts.map { it.first }
+    LaunchedEffect(ids, s.showing) { // (gone ones forgotten; none shown: a held one, else one not shown yet)
+        s.toasted.retainAll(ids)
+        s.held.retainAll(ids)
+        if (s.showing != null && s.showing !in ids) s.showing = null
+        if (s.showing == null) s.showing = s.held.firstOrNull() ?: ids.firstOrNull { it !in s.toasted }?.also { s.toasted.add(it) }
+    }
+    val id = s.showing
+    val r = restarts.firstOrNull { it.first == id }?.second
+    LaunchedEffect(id, id in s.held) {
+        if (id != null && id !in s.held) {
+            kotlinx.coroutines.delay(RESTART_SNACK_MS)
+            if (s.showing == id) s.showing = null
+        }
+    }
+    if (id != null && r != null) {
+        val said = if (r.paused == true) Wording.Hosts.restartPaused else Wording.Hosts.restartWaiting(n = r.blockers.orEmpty().size)
+        androidx.compose.material3.Snackbar(modifier.padding(12.dp),
+            action = {
+                androidx.compose.material3.TextButton({ s.showing = null; s.held.remove(id); blockers = id }) {
+                    Text(Wording.Hosts.restartDetails)
+                }
+            },
+            dismissAction = {
+                IconButton(Adwaita.WindowClose, Wording.Common.close, tint = androidx.compose.material3.SnackbarDefaults.dismissActionContentColor) {
+                    s.showing = null
+                    if (s.held.remove(id) && Mesh.conn(id)?.info?.restart != null) // (a See Thread's pause: let go of)
+                        Mesh.conn(id)?.request(Msg.Restart(`do` = "free").json()) {}
+                }
+            }) {
+            Text(if (restarts.size > 1) Wording.Hosts.restartOn(host = Mesh.label(id), said = said) else said)
+        }
+    }
+    blockers?.let { h ->
+        RestartBlockers(h, done = { blockers = null }) { b -> // (See Thread: the restart held while it's looked at)
+            if (h !in s.held) s.held.add(h)
+            s.showing = h
+            when (b.kind) {
+                "terminal" -> { Terms.wanted[h] = b.terminal.orEmpty(); tool("terminal", h) }
+                "task" -> { TaskLinks.pending = listOf(h, b.session.orEmpty(), b.task.orEmpty(), b.run.orEmpty()); open(h, b.session.orEmpty()) }
+                else -> open(b.host?.ifBlank { null } ?: h, b.session.orEmpty())
+            }
+        }
+    }
+}
+
+/** How long a pending restart's snackbar stays (Baude's meshui.RESTART_TOAST_S). */
+private const val RESTART_SNACK_MS = 10_000L
+
+/** What a host's pending restart waits for (Baude's meshui.restart_dialog): each chat running a command, each task's
+ * run, each agent run there for a chat elsewhere, each terminal there someone's attached to; the restart held while
+ * it's shown (restart pause: every app says it's paused), and again once its connection's back. Restart: it restarts
+ * once nothing's running; Force Restart: now, what's running stopped. Closed, or gone from the screen otherwise, the
+ * pause is let go of (restart free, only while it's still pending: never a restart of its own). See Thread on a row:
+ * see(it), the restart held meanwhile (its snackbar says it's paused; Details, this again). */
+@Composable
+fun RestartBlockers(hostId: String, done: () -> Unit, see: (Msg.RestartBlocker) -> Unit = {}) {
+    val c = LocalBaude.current
+    Mesh.tick.value
+    val conn = Mesh.conn(hostId)
+    val up = conn?.state == "up"
+    var held by remember { mutableStateOf(true) } // (false once it's answered, or left to look at a row)
+    LaunchedEffect(hostId, up) { if (up) conn?.request(Msg.Restart(`do` = "pause").json()) {} }
+    androidx.compose.runtime.DisposableEffect(hostId) {
+        onDispose { if (held && conn?.info?.restart != null) conn.request(Msg.Restart(`do` = "free").json()) {} }
+    }
+    val blockers = conn?.info?.restart?.blockers.orEmpty()
+    fun answer(now: Boolean) {
+        held = false
+        conn?.request(Msg.Restart(`do` = if (now) "now" else "free").json()) {}
+        done()
+    }
+    AlertDialog(onDismissRequest = { done() }, // (gone from the screen: let go of, above)
+        title = { Text(Wording.Hosts.restartBlockers) },
+        text = {
+            Column {
+                if (blockers.isEmpty()) Text(Wording.Hosts.restartNothing, style = Type.body, color = c.dim)
+                for (b in blockers) Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(when {
+                        b.waiting == true -> Adwaita.Waiting // (a task's run waiting for input: as its Tasks page draws it)
+                        else -> when (b.kind) {
+                        "task" -> Adwaita.MediaPlaybackStart
+                        "agent" -> Adwaita.EmblemSystem
+                        "terminal" -> Adwaita.InputKeyboard
+                        else -> Adwaita.UtilitiesTerminal
+                        }
+                    }, null, tint = if (b.waiting == true) c.warning else c.fg, modifier = Modifier.size(16.dp.icon))
+                    Text(b.name?.ifBlank { null } ?: b.what.orEmpty(), style = Type.body, color = c.fg, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (!b.session.isNullOrEmpty() || !b.terminal.isNullOrEmpty())
+                        Button(Wording.Hosts.seeThread) { held = false; done(); see(b) }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.SharedSettings.restart, suggested = true) { answer(false) } },
+        dismissButton = { Button(Wording.Hosts.forceRestart, destructive = true) { answer(true) } }, containerColor = c.dialog)
 }
 
 /** A section's header (Baude's header_row): its name (.sidebar-folder), the arrow to fold it, + for a new session
@@ -575,7 +812,7 @@ private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: 
 /** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines
  * (underBot: the top one comes down from a Bot's picture), its status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
 @Composable
-private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick: () -> Unit) {
+internal fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, tag: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val s = item.s
     val off = off(item.hostId)
@@ -595,7 +832,8 @@ private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
             else HeldTag(s)
-            StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
+            tag?.let { RowTag(it) }
+            StatusDot(if (dead || off) "" else Mesh.dot(s), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
             MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
@@ -608,7 +846,7 @@ private val BOT_START = 4.dp
 /** A Bot's row (Baude's bot_row): its picture, its name (nothing else of its chat's), its status dot; a long-press: its
  * menu. kids: the line to the chats under it starts under its picture. */
 @Composable
-private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
+internal fun BotRow(item: Item, kids: Boolean, tag: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val contact = Contact(item.hostId, item.s)
     var menu by remember { mutableStateOf(false) }
@@ -628,7 +866,8 @@ private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
             Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             HeldTag(item.s)
-            StatusDot(contact.state, contact.asking)
+            tag?.let { RowTag(it) }
+            StatusDot(Mesh.dot(item.s), contact.asking)
             MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
@@ -693,25 +932,48 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val pick = picked()
-    val known = (Mesh.hosts.map { it.id } + Mesh.sessions.keys + Mesh.members.keys.map { "mesh:$it" }).distinct()
-        .filter { takes(Mesh.conn(it)?.info, "subscribe") }
-    val ids = if (pick != null && pick !in known) known + pick else known // (kept, by the name it had)
-    fun name(id: String) = if (id in known) Mesh.label(id) else HomePrefs.hostName.value.ifBlank { Mesh.label(id) }
+    val ids = newSessionHosts()
+    val name = hostName()
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).combinedClickable(onClick = { if (ids.size > 1) open = true },
             onLongClick = { menu = true }).padding(horizontal = 8.dp, vertical = 7.dp).alpha(if (ids.size > 1) 1f else 0.5f),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(pick?.let(::name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+            Text(pick?.let(name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                 modifier = Modifier.widthIn(max = 120.dp))
             Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.END) {
-            for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() }))) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
-                HomePrefs.pick(id); open = false
-            }
+            HostChoices(ids, pick) { id -> HomePrefs.pick(id); open = false }
         }
         HostMenu(menu) { menu = false }
     }
+}
+
+/** New session's hosts, as its picker lists them: every host known that takes chats, and the one picked, by the name it
+ * had, while it isn't known. */
+fun newSessionHosts(): List<String> {
+    val pick = picked()
+    val known = knownHosts()
+    return if (pick != null && pick !in known) known + pick else known
+}
+
+private fun knownHosts() = (Mesh.hosts.map { it.id } + Mesh.sessions.keys + Mesh.members.keys.map { "mesh:$it" }).distinct()
+    .filter { takes(Mesh.conn(it)?.info, "subscribe") }
+
+/** A host's name as New session's picker says it (the one picked, while it isn't known, by the name it had). */
+fun hostName(): (String) -> String {
+    val known = knownHosts()
+    return { id -> if (id in known) Mesh.label(id) else HomePrefs.hostName.value.ifBlank { Mesh.label(id) } }
+}
+
+/** New session's host list (HostPick's, and ⋮'s family rows' carets): ids, this phone first, then the rest by name,
+ * the one picked ticked, one out of reach greyed; pick(id) as one's tapped. */
+@Composable
+fun HostChoices(ids: List<String>, picked: String?, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    val name = hostName()
+    for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() })))
+        MenuChoice(name(id), picked == id, textColor = if (dead(id)) c.dim else null) { pick(id) }
 }
 
 /** ⋮ beside the search: Group by (Folder, Created, Updated), the groups shown (a long-press on one: Rename Group…,
@@ -734,9 +996,11 @@ private fun ViewMenu(snack: SnackbarHostState) {
             // (Groups: a square check each and one over them all, its label a heading, as the Kubernetes page's Namespaces)
             val names = Groups.names() + ""
             MenuChecks(Wording.Sidebar.groups, names.map { it to it.ifEmpty { Wording.Sidebar.noGroup } },
-                HomePrefs.groups.filter { it in names }, { next ->
+                if (HomePrefs.noGroups.value) emptyList() else HomePrefs.pickedOf(names), { next ->
                     HomePrefs.groups.clear()
-                    if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
+                    if (next != null) HomePrefs.groups.addAll(next)
+                    HomePrefs.allIfEvery()
+                    HomePrefs.noGroups.value = next?.isEmpty() == true
                     HomePrefs.save()
                 }, onLongClick = { g -> if (g.isNotEmpty() && g != Wording.Sidebar.desktopGroup) held = g }, heading = true) // (No group's
             // and Desktop's, Claude Desktop's chats put there by what they are: no menu)

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A picture given with an ask (inbox_raise, inbox_revise): its bytes.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name, as the body and buttons use it (letters, digits, . _ -)."
+    },
+    "mime": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it is (found from its bytes, if none)."
+    },
+    "data": {
+      "type": "string",
+      "description": "Its bytes, base64."
+    }
+  },
+  "required": [
+    "name",
+    "data"
+  ],
+  "additionalProperties": false
+}

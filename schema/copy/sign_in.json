@@ -3,6 +3,8 @@
   "messages": {
     "not_signed_in": "Claude Code isn't signed in",
     "not_signed_in_on": "Claude Code on {$host} isn't signed in",
+    "expired": "Claude Code's sign-in expired",
+    "expired_on": "Claude Code's sign-in on {$host} expired",
     "sign_in": "Sign in",
     "signing_in": "Signing in to Claude…",
     "starting": "Starting the sign-in…",

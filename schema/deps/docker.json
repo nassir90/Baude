@@ -1,12 +1,12 @@
 {
-  "description": "Docker, which Database Schemas finds a host's running Postgres and ArangoDB servers in.",
+  "description": "Docker, which the Docker view reads and acts on a host's containers, images, volumes, networks and Compose projects with (a container's logs and shell too), and Databases finds a host's running Postgres and ArangoDB servers in.",
   "name": "Docker",
   "where": "host",
-  "needed_by": ["window.database_schemas"],
-  "group": "window.database_schemas",
+  "needed_by": ["window.docker", "window.database_schemas"],
+  "group": "window.docker",
   "detect": {
-    "macos": [{"which": "docker"}],
-    "linux": [{"which": "docker"}]
+    "macos": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}, {"glob": "/usr/local/bin/docker"}, {"glob": "/opt/homebrew/bin/docker"}, {"glob": "~/.docker/bin/docker"}, {"glob": "/Applications/Docker.app/Contents/Resources/bin/docker"}, {"glob": "~/.orbstack/bin/docker"}, {"glob": "~/.rd/bin/docker"}],
+    "linux": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}, {"glob": "/usr/local/bin/docker"}, {"glob": "/usr/bin/docker"}, {"glob": "/snap/bin/docker"}, {"glob": "~/.docker/bin/docker"}, {"glob": "~/.rd/bin/docker"}]
   },
   "install": {
     "macos": "brew install --cask docker",

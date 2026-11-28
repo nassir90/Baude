@@ -11,12 +11,13 @@ import base64
 import itertools
 import json
 import os
+import shutil
 import socket
 import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, selfupdate, wire, wording
+from baudelib import claude, errorbook, mesh, selfupdate, toolnames, wire, wording
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -92,6 +93,17 @@ def chat_name(info):
     return (info.get("bot") or {}).get("name") or info.get("title")
 
 
+def unseen(listed):
+    """Has a chat's last turn's end (as its host lists it: ended, seen) not been seen yet, on any head of the mesh?"""
+    ended, seen = (listed or {}).get("ended"), (listed or {}).get("seen")
+    return isinstance(ended, dict) and (seen or {}).get("size", -1) < ended.get("size", 0)
+
+
+def seen_past(listed, size):
+    """Has a turn's end at size (its transcript's size then) been seen on a head of the mesh, or one after it?"""
+    return ((listed or {}).get("seen") or {}).get("size", -1) >= size
+
+
 def stopping_line(name, restart, left, total):
     """A host stopping (or restarting), how far along, as its menu bar item and the heads' banners say it."""
     if left is not None and left > 0:
@@ -104,6 +116,18 @@ def stopping_line(name, restart, left, total):
         wording.say("host_status.stopping", host=name)
 
 
+
+FAILS = {"input": "send", "start": "send", "held": "send", "queue": "send", "draft_save": "draft_save"}  # (the
+# requests whose error is an error of the user's: a message not sent, a draft not saved)
+
+
+def _noting(kind, op, reply):
+    def noted(r):
+        if r.get("op") == "error":
+            errorbook.note(kind, op, r.get("error") or "", key=r.get("code"), wire_op=op, code=r.get("code"))
+        reply(r)
+    return noted
+
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
@@ -115,11 +139,16 @@ class Remote:
         cached = cached or {}
         self.network, self.key, self.where = network, key, dict(where)
         self.info = cached.get("info") or {}
+        toolnames.learn(self.info.get("tool_names"))  # (how its MCP tools are named: every chat's cards say them so)
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
+        self.eras = {}  # session id -> how many times its mirror's been let go of (forget_mirror): what a sync
+        self.mirror_lock = threading.Lock()  # fetched before then isn't written; held as a mirror's written or let go of
         self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
         self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
+        self.ended = {}  # session id -> its last turn's end it's told of (turn_ended: {uuid, size, at: monotonic})
+        self.inbox = {}  # ask id -> its asks of a person waiting or stopped, as it says (inbox, inbox_changed)
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
@@ -233,16 +262,22 @@ class Remote:
         ch.keep_alive()
         ch.refused_here = self.answered  # (a request refused before it went: answered at once, its reader in readline)
         ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
+        self.request({"op": "inbox"}, self.took_inbox)  # (its asks of a person, then each as it changes)
         for msg in ch:
             self.seen = time.time()
             op = msg.get("op")
             if op == "sessions":
                 self.info = msg.get("server") or self.info
+                toolnames.learn(self.info.get("tool_names"))
                 # (this machine's Claude Desktop chats its host only lists: Baude lists them itself, from Desktop's
                 # own list, as its own claude runs them; Record has no chats)
-                self.sessions = {s["id"]: s for s in msg.get("sessions") or []
-                                 if isinstance(s, dict) and wire.is_id(s.get("id"))
-                                 and not (self.mine and s.get("taken_up") is False)}
+                now = {s["id"]: s for s in msg.get("sessions") or []
+                       if isinstance(s, dict) and wire.is_id(s.get("id"))
+                       and not (self.mine and s.get("taken_up") is False)}
+                for sid, s in now.items():  # (a Bot rotated since: its conversation's another, fetched from nothing)
+                    if (s.get("rotated") or None) != ((self.sessions.get(sid) or {}).get("rotated") or None):
+                        self.forget_mirror(sid)
+                self.sessions = now
                 if self.state != "alive":
                     self.state = "alive"
                 if self.mine:
@@ -257,6 +292,17 @@ class Remote:
                                  "restart": bool(msg.get("restart")),
                                  "at": self.stopping["at"] if self.stopping else time.monotonic()}
                 self.network.changed()
+            elif op == "inbox_changed":  # (an ask raised, put anew, answered or gone: every head told, as a draft's)
+                ask = msg.get("ask") or {}
+                if wire.is_id(ask.get("id") or ""):
+                    if msg.get("removed") or ask.get("status") not in ("waiting", "stopped"):
+                        self.inbox.pop(ask["id"], None)
+                    else:
+                        self.inbox[ask["id"]] = ask
+                    self.network.changed()
+            elif op == "turn_ended":  # (said before any listing has it: what a notification of it is known by)
+                if wire.is_id(msg.get("uuid") or "") and isinstance(msg.get("size"), int):
+                    self.ended[msg.get("session")] = {"uuid": msg["uuid"], "size": msg["size"], "at": time.monotonic()}
             elif op != "ping":
                 self.answered(msg)
         with self.lock:
@@ -265,6 +311,12 @@ class Remote:
         ch.close()
         for done in calls.values():
             done({"op": "error", "error": "the server's gone"})
+
+    def took_inbox(self, reply):
+        """inbox's answer: its asks as they are now (a host that has no Inbox: none)."""
+        if reply.get("op") == "inbox_reply":
+            self.inbox = {a["id"]: a for a in reply.get("asks") or [] if wire.is_id(a.get("id") or "")}
+            self.network.changed()
 
     def said_stopping(self, name):
         """What it says as it stops (stopping: how many processes it has still to stop), as a banner says it, under
@@ -282,8 +334,11 @@ class Remote:
 
     def request(self, msg, done=None):
         """Send a request; done(reply) through dispatch (an error reply if the server isn't there, or the schema's
-        refusal of it, at once, if it isn't one the schema has)."""
+        refusal of it, at once, if it isn't one the schema has). A message not sent, or a draft not saved, kept as
+        an error of this process's (errorbook's)."""
         reply = (lambda r: self.network.dispatch(lambda: done(r))) if done else (lambda r: None)
+        if (kind := FAILS.get(msg.get("op"))) is not None:
+            reply = _noting(kind, msg["op"], reply)
         with self.lock:
             ch = self.ch
             req = next(self.reqs)
@@ -352,6 +407,24 @@ class Remote:
                 return path
         return os.path.join(self.network.home, self.key, f"{session_id}.jsonl")
 
+    def forget_mirror(self, session_id):
+        """A session's copy here let go of (a Bot rotated: its conversation's a new one), its subagents' and who its
+        messages were from with it: fetched again from nothing. A sync going on writes nothing it fetched before this
+        (its era's gone: fetched again), so nothing of the old conversation's added after. Not under its sync's lock:
+        this runs on the thread that reads the host's answers, which that sync waits on."""
+        self.agents_synced.pop(session_id, None)
+        self.senders.pop(session_id, None)
+        if self.local:
+            return  # (read where it is: nothing copied)
+        with self.mirror_lock:
+            self.eras[session_id] = self.eras.get(session_id, 0) + 1
+            try:
+                with open(self.mirror(session_id), "wb"):
+                    pass
+            except OSError:
+                pass
+            shutil.rmtree(self.subagents_mirror(session_id), ignore_errors=True)
+
     def direct(self, session_id):
         """Is a session's transcript read where it is (mirror), not copied?"""
         return not self.mirror(session_id).startswith(os.path.join(self.network.home, ""))
@@ -375,13 +448,16 @@ class Remote:
             lock = self.syncing.setdefault(session_id, threading.Lock())
         with lock:
             while True:
-                at = self.mirrored(session_id)
+                era, at = self.eras.get(session_id, 0), self.mirrored(session_id)
                 r = self.call({"op": "transcript", "session": session_id, "offset": at}, timeout)
                 if r.get("op") != "transcript":
                     return False
                 data = base64.b64decode(r.get("data") or "")
-                with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
-                    f.write(data)
+                with self.mirror_lock:
+                    if self.eras.get(session_id, 0) != era:  # (let go of meanwhile: fetched again, from nothing)
+                        continue
+                    with open(path, "ab" if r["offset"] == at and at else "wb") as f:  # (shorter there: written again)
+                        f.write(data)
                 if not data or r["next"] >= r["size"]:
                     break
         if subagents and self.subagents_behind(session_id):  # (not under the transcript's lock: a window that
@@ -432,43 +508,53 @@ class Remote:
     def _sync_subagents(self, session_id, timeout):
         folder = self.subagents_mirror(session_id)
         while True:
-            had = self.subagents_had(session_id)
+            era, had = self.eras.get(session_id, 0), self.subagents_had(session_id)
             r = self.call({"op": "subagents", "session": session_id, "have": had}, timeout)
             if r.get("op") != "subagents":
                 return False
-            got, listed = False, set()
-            for f in r.get("files") or []:
-                name = f.get("name") if isinstance(f, dict) else None
-                if not _subagent_file(name):
-                    continue
-                listed.add(name)
-                path, at = os.path.join(folder, name), (had.get(name) or [0])[0]
-                data = base64.b64decode(f.get("data") or "")
-                got |= bool(data)
-                if f.get("offset") == at and at:
-                    if data:
-                        with open(path, "ab") as fh:
-                            fh.write(data)
-                elif data or f.get("offset") != at or name not in had:  # (new, changed, or shorter there)
-                    os.makedirs(folder, exist_ok=True)
-                    with open(os.path.join(folder, f".{name}.tmp"), "wb") as fh:
-                        fh.write(data)
-                    os.replace(os.path.join(folder, f".{name}.tmp"), path)
-                if isinstance(f.get("mtime"), int) and os.path.exists(path) and \
-                        (not data or (f.get("next") or 0) >= (f.get("size") or 0)):  # (as it is there, all of it)
-                    os.utime(path, ns=(f["mtime"], f["mtime"]))
-            if r.get("more") and got:
+            with self.mirror_lock:
+                if self.eras.get(session_id, 0) == era:
+                    done = self._take_subagents(session_id, folder, had, r)
+                    if done is not None:
+                        return done
+            # (more to fetch; or let go of meanwhile: fetched again, from nothing)
+
+    def _take_subagents(self, session_id, folder, had, r):
+        """(_sync_subagents', its mirror's lock held) What the server sent of a session's subagents' files, written:
+        True, or None if there's more to fetch."""
+        got, listed = False, set()
+        for f in r.get("files") or []:
+            name = f.get("name") if isinstance(f, dict) else None
+            if not _subagent_file(name):
                 continue
-            if not r.get("more"):
-                for name in set(had) - listed:  # (gone there)
-                    try:
-                        os.remove(os.path.join(folder, name))
-                    except OSError:
-                        pass
-                self.agents_synced[session_id] = max(  # (what the server lists now: its files' newest)
-                    (f["mtime"] for f in r.get("files") or [] if isinstance(f, dict) and isinstance(f.get("mtime"), int)),
-                    default=0)
-            return True
+            listed.add(name)
+            path, at = os.path.join(folder, name), (had.get(name) or [0])[0]
+            data = base64.b64decode(f.get("data") or "")
+            got |= bool(data)
+            if f.get("offset") == at and at:
+                if data:
+                    with open(path, "ab") as fh:
+                        fh.write(data)
+            elif data or f.get("offset") != at or name not in had:  # (new, changed, or shorter there)
+                os.makedirs(folder, exist_ok=True)
+                with open(os.path.join(folder, f".{name}.tmp"), "wb") as fh:
+                    fh.write(data)
+                os.replace(os.path.join(folder, f".{name}.tmp"), path)
+            if isinstance(f.get("mtime"), int) and os.path.exists(path) and \
+                    (not data or (f.get("next") or 0) >= (f.get("size") or 0)):  # (as it is there, all of it)
+                os.utime(path, ns=(f["mtime"], f["mtime"]))
+        if r.get("more") and got:
+            return None
+        if not r.get("more"):
+            for name in set(had) - listed:  # (gone there)
+                try:
+                    os.remove(os.path.join(folder, name))
+                except OSError:
+                    pass
+            self.agents_synced[session_id] = max(  # (what the server lists now: its files' newest)
+                (f["mtime"] for f in r.get("files") or [] if isinstance(f, dict) and isinstance(f.get("mtime"), int)),
+                default=0)
+        return True
 
     def stop(self):
         self.stopped = True
@@ -904,6 +990,10 @@ class Network:
                 out.update(s.get("group") for s in r.sessions.values() if s.get("group"))
         return sorted(out, key=str.lower)
 
+    def asks(self):
+        """Every host's asks of a person it's told of (the Inbox), each with its host (server)."""
+        return [{**a, "server": r} for r in self.remotes() for a in r.inbox.values()]
+
     def sessions(self, group=None):
         """Every host's sessions (of a group, if given), each with "server": the Remote it's on."""
         with self.lock:
@@ -914,6 +1004,14 @@ class Network:
         """Every host known, there or not: those reached once, or given by hand."""
         with self.lock:
             return [r for r in self.servers.values() if r.info.get("id") or r.by_hand]
+
+    def in_front(self, host_id, session_id):
+        """Is a chat (its host's id, its session's) in front of someone on any machine of the mesh, as each host there
+        says of its own machine's apps (Info's front)?"""
+        with self.lock:
+            return any(r.state == "alive" and any(
+                isinstance(f, dict) and f.get("host") == host_id and f.get("session") == session_id
+                for f in r.info.get("front") or []) for r in self.servers.values())
 
     def find(self, session_id):
         with self.lock:
@@ -987,8 +1085,13 @@ class RemoteProc(claude.ClaudeProc):
             self.dispatch(lambda: done(r))  # (held refused before it went: answered at once)
         self.listing = reply.get("session") or {}
         self.asks = {m["request_id"]: m for m in reply.get("asks") or [] if m.get("request_id")}
+        self.login = reply.get("login")  # (its sign-in, as its host has it: ChatLogin, or None)
+        self.keeps_login = "login" in reply  # (a host that keeps it: one that doesn't, its heads' cards their own)
+        self.writes = reply.get("writes") is not False  # (false: its host lets this head only read it)
+        self.draft = reply.get("draft")  # (what's written in its box, as its host keeps it: ChatDraft, or None)
+        self.queue = reply.get("queue")  # (what's queued at its turns, as its host keeps it: ChatQueue, or None)
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()
-        self.init_rid = self.control({"subtype": "initialize", "hooks": None})
+        self.init_rid = self.control({"subtype": "initialize", "hooks": None}) if self.writes else None
 
     def _read_remote(self):
         for msg in self.ch:
@@ -997,6 +1100,15 @@ class RemoteProc(claude.ClaudeProc):
                 self.dispatch(lambda m=msg, done=done: done(m))
             elif op == "claude" and msg.get("session") == self.session:
                 self.dispatch(lambda m=msg["msg"]: self.on_msg(self, m))
+            elif op == "login_state" and msg.get("session") == self.session:  # (its sign-in, its host's: told
+                self.login = msg.get("login")  # as {type: "_login"}, as a note of its host's is "_note")
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_login", "login": m.get("login")}))
+            elif op == "draft_changed" and msg.get("session") == self.session:  # (its draft, another head's write,
+                self.draft = msg.get("draft")  # as "_draft")
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_draft", "draft": m.get("draft")}))
+            elif op == "queue_changed" and msg.get("session") == self.session:  # (its queue, another head's change
+                self.queue = msg.get("queue")  # or its host's sending it, as "_queue")
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_queue", "queue": m.get("queue")}))
             elif op == "exited" and msg.get("session") == self.session:  # ("stopped": its host was told to stop it)
                 self.code = "stopped" if msg.get("stopped") else msg.get("code")
                 break
@@ -1018,7 +1130,18 @@ class RemoteProc(claude.ClaudeProc):
             self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):
-        self.ch.send({"op": "input", "session": self.session, "msg": obj})
+        if self.writes:  # (one only read here: nothing of this head's goes to its claude)
+            self.ch.send({"op": "input", "session": self.session, "msg": obj})
+
+    def send_taken(self, obj, done):
+        """obj sent, and done told its host's answer (op accepted, or error, why), as held's."""
+        if not self.writes:
+            return self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
+        req = next(self.req_ids)
+        self.answering[req] = done
+        if not self.ch.send({"op": "input", "session": self.session, "msg": obj, "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
 
     def held(self, held_id, send, done):
         """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says
@@ -1027,6 +1150,16 @@ class RemoteProc(claude.ClaudeProc):
         req = next(self.req_ids)
         self.answering[req] = done
         if not self.ch.send({"op": "held", "session": self.session, "id": held_id, "send": bool(send), "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
+
+    def queue_op(self, change, done):
+        """Its queue changed on its host (queue: change's add, drop, upto), on this connection, so it's in order with
+        what's sent its claude: done(answer) with the host's answer (op queue, its queue; or error), on the main
+        loop."""
+        req = next(self.req_ids)
+        self.answering[req] = done
+        if not self.ch.send({"op": "queue", "session": self.session, "req": req, **change}):
             self.answering.pop(req, None)
             self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
 

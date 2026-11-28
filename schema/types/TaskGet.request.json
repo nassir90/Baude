@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a Bot's tasks, its script and latest runs.",
+  "properties": {
+    "op": {
+      "const": "task",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "id": {
+      "type": "string",
+      "description": "The task's id."
+    },
+    "script": {
+      "type": "boolean",
+      "description": "Whether the task's script comes back with it (its version always does); left out, it doesn't."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "id"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "browser_open's answer: Emission's window is in front there.",
+  "properties": {
+    "op": {
+      "const": "browser_opened",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "started": {
+      "type": "boolean",
+      "description": "Whether an Emission was started for it (none had the profile)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

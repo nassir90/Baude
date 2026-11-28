@@ -1,6 +1,7 @@
-"""hostdb — the running databases here, read for a head elsewhere (the phone's Database Schemas): the servers Docker (and
-a local cluster) has and their databases (servers), a database's tables and foreign keys (schema), a table's first rows
-(rows). The desktop's own functions (schemadata), read-only, a secret-looking column's values masked there. No GTK."""
+"""hostdb — the running databases here, read for a head elsewhere (the phone's Databases, a task's script): the
+servers Docker (and a local cluster) has and their databases (servers), a database's tables and foreign keys (schema),
+a table's first rows (rows), a query's rows (query). The desktop's own functions (schemadata), read-only, a
+secret-looking column's values masked there. No GTK."""
 import json
 import os
 import sys
@@ -12,7 +13,9 @@ if ROOT not in sys.path:  # (as server.catalogue has it: the modules at the root
 
 import lookupkube  # noqa: E402
 import schemadata  # noqa: E402
-from baudelib import deps, wording  # noqa: E402
+from baudelib import deps, wire, wording  # noqa: E402
+
+QUERY_ROWS_MAX = wire.CONSTANTS["QUERY_ROWS_MAX"]
 
 
 def _server(container):
@@ -59,9 +62,13 @@ def answer(server, msg):
                                for _key, t in sorted(schema["tables"].items())],
                     "links": [{"from_schema": a[0], "from_table": a[1], "from_column": ac, "to_schema": b[0],
                                "to_table": b[1], "to_column": bc} for a, ac, b, bc in schema["links"]]}
+        if what == "query":
+            return {"what": what, "rows": [{k: _text(v) for k, v in r.items()}
+                                           for r in schemadata.pg_select(_server(container), database, msg.get("sql"),
+                                                                         QUERY_ROWS_MAX)]}
         if what == "rows":
             rows = schemadata.pg_rows(_server(container), database, msg.get("schema"), msg.get("table"))
             return {"what": what, "rows": [{k: _text(v) for k, v in r.items()} for r in rows]}
     except (RuntimeError, ValueError) as e:
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "databases takes servers, schema or rows"}
+    return {"what": what, "error": "databases takes servers, schema, rows or query"}

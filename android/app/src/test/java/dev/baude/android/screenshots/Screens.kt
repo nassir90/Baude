@@ -1054,7 +1054,8 @@ abstract class Screens(private val theme: String) {
             val id = if (made++ == 0) "n" else "n$made"
             println("start ${m.optString("cwd")}: $id") // (where it was asked to start: the run's output says)
             val s = Msg.Session(id = id, cwd = m.optString("cwd"), created = now, updated = now, state = "idle",
-                mode = "auto", draft = true, group = m.optString("group"))
+                mode = "auto", draft = true, group = m.optString("group"), model = m.optString("model").ifBlank { null },
+                effort = m.optString("effort").ifBlank { null }, spawnedBy = m.optString("spawned_by").ifBlank { null })
             Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty() + s
             org.json.JSONObject().put("op", "started").put("session", org.json.JSONObject().put("id", id)
                 .put("cwd", m.optString("cwd")).put("draft", true))
@@ -1728,6 +1729,16 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
         tap("Juniper", long = true)
         layOut()
         screen("09d-home-bot-menu")
+    }
+
+    // (a Bot's New session: its host starts a draft under it, in its folder, and the blank chat's opened at once)
+    @Test fun homeBotNewSession() {
+        workshopBot()
+        newChat("09g-home-bot-new-session") {
+            tap("Juniper", long = true)
+            layOut()
+            tap("New session", nth = 1)
+        }
     }
 
     @Test fun homeBotThreadSearch() {

@@ -2,7 +2,7 @@
   "description": "The menu on a session row in the sessions sidebar, opened by right-click (press and hold on touch) at the pointer. Its items depend on whether the session is on this machine or on a host, its state, and whether it can be a Bot. A Bot row has the same menu.",
   "apps": ["baude"],
   "opens": ["right-click a session row (not the open unsaved chat, not a ghost)", "key F2 (Rename… only)"],
-  "code": ["sidebarmenu.py:SidebarMenu.show_menu", "sidebarmenu.py:SidebarMenu.group_submenu", "sidebarmenu.py:SidebarMenu.on_key"],
+  "code": ["sidebarmenu.py:SidebarMenu.show_menu", "sidebarmenu.py:SidebarMenu.new_agent_session", "windowremote.py:WindowRemote.new_agent_session", "windowremote.py:WindowRemote.start_agent_draft", "sidebarmenu.py:SidebarMenu.group_submenu", "sidebarmenu.py:SidebarMenu.on_key"],
   "copy": ["common", "trash", "new_session", "sidebar"],
   "phone": {"does": "Opened by a long-press on a session or Bot row, at the finger; Move to Group's list opens in place of the items, with a back row first", "why": "Touch's right-click", "decided": "2026-11-21"},
   "parts": [
@@ -13,6 +13,14 @@
       "actions": [
         {"by": "click", "does": "Opens Rename session / Rename Bot."},
         {"by": "key F2", "does": "Same, on the focused or selected row."}
+      ]
+    },
+    {
+      "name": "New session",
+      "shows": "\"New session\", for a Bot whose host is up (not deactivated, not gone): right after Rename…, before the Bot items. No dialog or form.",
+      "copy": ["sidebar.new_session", "new_session.host_refused"],
+      "actions": [
+        {"by": "click", "does": "Opens a blank chat for a new chat of the Bot's, on the Bot's host, in the Bot's folder and group, on the Bot's model and effort, with the usual text box and header controls. It is nested under the Bot (spawned_by) once its host has it, and is a draft till something is sent in it: left empty, it leaves nothing behind. What is written in it goes only to that new chat, never to a plain one: the host starts the chat before its first message goes, and if the host doesn't start it the text stays in the box (on the phone the host starts the draft as it's opened, so nothing is written before it has) and \"<host> didn't start it: <why>\" is said in a toast."}
       ]
     },
     {
@@ -89,7 +97,7 @@
   ],
   "states": [
     {"name": "this machine's session (plain)", "shows": "Rename…, Move to Group ▸, Archive (or Unarchive), Move to Trash…. Order: Rename…, Move to Group, Archive, Move to Trash…."},
-    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | Bot Settings…, Rotate and Turn Back into a Chat], Move to Group ▸, Archive, Move to Trash…."},
+    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | New session, Bot Settings…, Rotate and Turn Back into a Chat], Move to Group ▸, Archive, Access…, Move to Trash…."},
     {"name": "host session, working or waiting", "shows": "Rename…, Move to Group ▸, Stop, Move to Trash… (no Archive; an archived one at a turn shows Unarchive)."},
     {"name": "host session, host gone", "shows": "Move to Group ▸, Delete. (Rename… is absent.)"},
     {"name": "host session, deactivated", "shows": "As gone: Move to Group ▸, Delete."}

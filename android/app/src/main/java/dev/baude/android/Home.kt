@@ -50,6 +50,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -446,8 +447,10 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val underBot = rows.map { if (it.depth == 0) top = it; top?.let(isBot) == true }
                 itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
                     val kids = rows.getOrNull(i + 1)?.let { it.depth > item.depth } == true
-                    if (isBot(item)) BotRow(item, kids) { open(item.hostId, item.id) }
-                    else SessionRow(item, through[i], underBot[i]) { open(item.hostId, item.id) }
+                    CompositionLocalProvider(LocalOpenChat provides open) {
+                        if (isBot(item)) BotRow(item, kids) { open(item.hostId, item.id) }
+                        else SessionRow(item, through[i], underBot[i]) { open(item.hostId, item.id) }
+                    }
                 }
             }
         }

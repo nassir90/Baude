@@ -367,11 +367,6 @@ class ServerRunning:
                     if msg["op"] == "relay" and conn.task is not None:  # (a task's script's: from its run's Bot)
                         msg = {**msg, "as": conn.task["bot"]["id"]}
                         msg.pop("as_meta", None), msg.pop("as_agent", None)
-                    if conn.member is not None or msg["op"] == "relay" and self.started_by(msg.get("as")):  # (a
-                        # member's, or a chat a member started: what's relayed from here is this host's, and a join is
-                        # a host's own; neither borrowed)
-                        conn.send(wire.refused(wire.DENIED, msg.get("req"), wording.say("access.not_passed_on")))
-                        continue
                     with self.lock:
                         self.conns.discard(conn)
                     conn.close()

@@ -8,7 +8,7 @@ whatever a rule refuses must come back access_denied, whatever it lets through m
 answer after. The same ops from a head on the host's own socket are never refused. Then, each round:
   - opens forged on the way: no from, another member's from, a signature taken off: closed, or, from a member whose
     key isn't known, served as from one no rule chooses;
-  - relays borrowed: a member's tunnel, or a chat a member started, asking to be passed on: refused;
+  - a chat a member started, reaching another host through this one: passed on;
   - ops whose chat or folder is optional (git, signal_names, read_file, catalogue, list_dir): a member's only where it
     may read; a chat moved to another subscription (accounts' use): only where it may write the chat and the
     subscriptions;
@@ -371,17 +371,9 @@ def main():
         else:
             assert ch is None, f"round {n}: an open forged ({how}) was served"
 
-        # (relays borrowed: a member's tunnel, or a chat a member started, passed on: refused)
-        req += 1
-        got = ask(member, {"op": "relay", "to": other.me["id"]}, req)
-        assert got.get("code") == wire.DENIED, f"round {n}: a member's tunnel relayed: {got}"
-        try:
-            ch, _ = wire.reach({"via": "mesh", "host": other.me["id"], "path": asked.socket_path}, timeout=5,
-                               as_=mchat)
-            ch.close()
-            raise AssertionError(f"round {n}: a member's chat relayed")
-        except OSError:
-            pass
+        # (a chat a member started reaches other hosts as any chat here does)
+        ch, _ = wire.reach({"via": "mesh", "host": other.me["id"], "path": asked.socket_path}, timeout=5, as_=mchat)
+        ch.close()
         req += 1  # (its own tools, on the host's socket: judged as the member)
         listed = ask(as_mchat, {"op": "subscribe"}, req)
         assert (chat.id in {x["id"] for x in listed["sessions"]}) == chat_let, f"round {n}: a member's chat's listing"

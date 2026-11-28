@@ -48,7 +48,7 @@
     },
     {
       "name": "provider group",
-      "shows": "On Baude desktop, Claude, Codex, then Antigravity: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account. Antigravity cards show ACP context tokens and reported cost when available; ACP does not expose subscription allowance limits. Its Add account dialog signs in with Google in an isolated host directory or uses an existing Gemini directory. The phone currently shows Claude and Codex only.",
+      "shows": "On Baude desktop, Claude, Codex, then Antigravity: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account. Antigravity cards show their latest context as a bar and their reported cost when available; ACP does not expose subscription allowance limits. Its Add account dialog signs in with Google in an isolated host directory or uses an existing Gemini directory. The phone currently shows Claude and Codex only.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
@@ -88,7 +88,7 @@
       "parts": [
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, \"Disabled\" dim at the end of its line where it's disabled, and ⋮ (every card's, CLI default's too). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for the CLI default or a folder account whose sign-in isn't a claude.ai subscription's (signed out, an API key, Bedrock or Vertex, a Console login) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Usage available after a message\" before its first turn.",
+          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, \"Disabled\" dim at the end of its line where it's disabled, and ⋮ (every card's, CLI default's too). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for the CLI default or a folder account whose sign-in isn't a claude.ai subscription's (signed out, an API key, Bedrock or Vertex, a Console login) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Usage available after a message\" before its first turn. An Antigravity card (its CLI default's and each account's), which has no limits from its provider, has its usage as a bar too, drawn as a limit's: \"Latest Context\" with its tokens at the end (\"43,820 / 200,000 tokens\": the context the account's most recently active chat last reported, of that chat's context window) and a bar under them filled that far, then \"Reported cost across sessions: $<cost>\" dim under it where its chats reported a cost in USD; \"Usage available after a message\" before any of its chats has reported its context.",
           "actions": [
             {
               "by": "click ⋮",
@@ -122,7 +122,10 @@
             "subscriptions.enable",
             "subscriptions.auto_disable",
             "subscriptions.auto_resume",
-            "subscriptions.disabled"
+            "subscriptions.disabled",
+            "subscriptions.antigravity_context",
+            "subscriptions.antigravity_tokens",
+            "subscriptions.antigravity_cost"
           ],
           "decisions": [
             {
@@ -226,6 +229,17 @@
               "source": [
                 {
                   "issue": "BaudeInternal#307"
+                }
+              ]
+            },
+            {
+              "said": "make sure that the anitgravity token usage is a bar and not jsut a number",
+              "rule": "Every app shows an Antigravity subscription's token usage as a bar, in the same widget, sizes and style as a Claude or Codex limit's bar, with the number at the end of its line where theirs show their percentage; since Antigravity says no limit, the bar is the latest context's tokens of its context window (Latest Context, <used> / <size> tokens)",
+              "decided": "2026-11-28",
+              "source": [
+                {
+                  "session": "25de5738-9230-40a5-be10-70c78dae3bab",
+                  "message": "87ae50c1-a4bf-4d74-9116-b35bd050cd45"
                 }
               ]
             }

@@ -79,7 +79,8 @@ def _(app):
 
 
 @scene("39i-antigravity-subscriptions", "Settings → Subscriptions with Antigravity's CLI default and a named account, "
-                                          "showing locally tracked ACP context and cost", size=(1200 + SIDEBAR, H))
+                                          "the account's latest context as a bar and its reported cost",
+       size=(1200 + SIDEBAR, H))
 def _(app):
     return antigravity_subscriptions(app)[0]
 

@@ -20,9 +20,11 @@ from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from baudelib import deps, icons, tokens, wire, wording
 
-PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
+PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"),
+             ("antigravity", "programs.antigravity", "gemini"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
 CODEX_CLI = "codex"  # (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
+ANTIGRAVITY_CLI = "antigravity"
 MENU_USAGE_W = tokens.px("subscriptions.menu-usage-width")  # (☰'s usage row's least width: MenuUsage.fit)
 STALE_OPACITY = tokens.number("subscriptions.stale-opacity")  # (a card's usage as the host last read it, till the page's own read answers)
 
@@ -165,6 +167,7 @@ class Page(Adw.PreferencesPage):
         self.resumes = set()  # (those resuming their chats a usage limit stopped as it resets: usage keys)
         self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.lists, self.usage, self.bars, self.reading, self.last = {}, {}, {}, set(), {}
+        self.tracked = {}
         self.as_of = {}  # (a subscription's usage as its chats' turns last said it: when, by usage key)
         self.shown, self.timer, self.window_watch = None, None, None
         top = Adw.PreferencesGroup()
@@ -221,6 +224,7 @@ class Page(Adw.PreferencesPage):
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
         self.codex_usage = bool(reply.get("codex_usage"))
+        self.tracked = reply.get("antigravity_usage") or {}
         self.disabled, self.auto = set(reply.get("disabled") or ()), set(reply.get("auto_disable") or ())
         self.resumes = set(reply.get("auto_resume") or ())
         if self.drawn() != self.shown:
@@ -238,11 +242,14 @@ class Page(Adw.PreferencesPage):
         each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account."""
         return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude"),
                 *([CODEX_CLI] if self.cli_card("codex") else []),
-                *(a["id"] for a in self.accounts if a["provider"] == "codex" and self.codex_usage)]
+                *(a["id"] for a in self.accounts if a["provider"] == "codex" and self.codex_usage),
+                *([ANTIGRAVITY_CLI] if self.cli_card("antigravity") else []),
+                *(a["id"] for a in self.accounts if a["provider"] == "antigravity")]
 
     def cli_card(self, provider):
         """Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage)."""
-        return self.claude_cli if provider == "claude" else provider not in self.missing and self.codex_usage
+        return self.claude_cli if provider == "claude" else provider not in self.missing and \
+            (provider == "antigravity" or self.codex_usage)
 
     def drawn(self):
         """What the cards are drawn from: drawn again when it changes."""
@@ -270,7 +277,8 @@ class Page(Adw.PreferencesPage):
                 rows.append(row(dep, deps.title(dep, title_of(provider))))
             else:
                 add = Adw.ButtonRow(title=wording.say("subscriptions.add_account"), end_icon_name="list-add-symbolic")
-                add.connect("activated", lambda _row, p=provider: (add_claude if p == "claude" else add_codex)(self))
+                add.connect("activated", lambda _row, p=provider: {
+                    "claude": add_claude, "codex": add_codex, "antigravity": add_antigravity}[p](self))
                 rows.append(add)
             cards.append(rows)
 
@@ -278,7 +286,8 @@ class Page(Adw.PreferencesPage):
         """A subscription's card: its name, Disabled where it is, and ⋮ (an account's: Rename…, Sign In Again… or
         Replace Token…; every card's: Disable or Enable, Auto Disable on Exhaustion, Auto Resume on Reset; an account's: Remove…), then its
         usage: a bar for each limit with its percentage."""
-        key = account["id"] if account else "" if provider == "claude" else CODEX_CLI
+        key = account["id"] if account else "" if provider == "claude" else \
+            ANTIGRAVITY_CLI if provider == "antigravity" else CODEX_CLI
         card = Gtk.Box(css_classes=["card"])
         inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, margin_top=6, margin_bottom=12,
                          margin_start=12, margin_end=6)
@@ -291,7 +300,7 @@ class Page(Adw.PreferencesPage):
             top.append(Gtk.Label(label=wording.say("subscriptions.disabled"), css_classes=["dim-label"]))
         top.append(self.account_menu(provider, key, account))
         inside.append(top)
-        if provider == "claude" or self.codex_usage:
+        if provider == "antigravity" or provider == "claude" or self.codex_usage:
             bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
             inside.append(bars)
             self.bars[key] = bars
@@ -309,6 +318,9 @@ class Page(Adw.PreferencesPage):
         bars.set_opacity(STALE_OPACITY if stale else 1)
         if stale:
             read = self.last[profile]
+        if profile == ANTIGRAVITY_CLI or any(a["id"] == profile and a["provider"] == "antigravity"
+                                                  for a in self.accounts):
+            read = read if read is not None else self.tracked.get(profile)
         usage_lines(bars, read, as_of=None if stale else self.as_of.get(profile))
 
     def account_menu(self, provider, key, account):
@@ -317,15 +329,17 @@ class Page(Adw.PreferencesPage):
         actions = Gio.SimpleActionGroup()
         menu = Gio.Menu()
         off = key in self.disabled
+        limit_actions = [("auto", wording.say("subscriptions.auto_disable"),
+                          lambda page, _a: page.switch("auto_disable", provider, key, key not in page.auto)),
+                         ("resume", wording.say("subscriptions.auto_resume"),
+                          lambda page, _a: page.switch("auto_resume", provider, key, key not in page.resumes))] \
+            if provider != "antigravity" else []
         sections = [[("rename", wording.say("common.rename_ellipsis"), rename),
                      ("again", wording.say("subscriptions.replace_token") if account["kind"] == "token" else
                       wording.say("subscriptions.sign_in_again"), sign_in_again)] if account else [],
                     [("disable", wording.say("subscriptions.enable" if off else "subscriptions.disable"),
                       lambda page, _a: page.switch("disable", provider, key, not off)),
-                     ("auto", wording.say("subscriptions.auto_disable"),
-                      lambda page, _a: page.switch("auto_disable", provider, key, key not in page.auto)),
-                     ("resume", wording.say("subscriptions.auto_resume"),
-                      lambda page, _a: page.switch("auto_resume", provider, key, key not in page.resumes))],
+                     *limit_actions],
                     [("remove", wording.say("common.remove_ellipsis"), remove)] if account else []]
         for items in sections:
             if not items:
@@ -354,8 +368,8 @@ class Page(Adw.PreferencesPage):
                 import meta
                 for chat in list(meta.CHATS):
                     chat.model_changed()
-        self.ask({"what": what, "provider": "codex" if key == CODEX_CLI else provider,
-                  "id": "" if key == CODEX_CLI else key, "on": on}, then)
+        self.ask({"what": what, "provider": provider,
+                  "id": "" if key in (CODEX_CLI, ANTIGRAVITY_CLI) else key, "on": on}, then)
 
     def shown_now(self, *_):
         """The page in front: its subscriptions' usage read now and every USAGE_S till it isn't."""
@@ -402,7 +416,8 @@ class Page(Adw.PreferencesPage):
                 self.reading.discard(profile)
                 self.usage[profile], self.as_of[profile] = _read(reply)
                 self.fill_bars(profile)
-            self.ask({"what": "usage", "provider": "codex", "id": ""} if profile == CODEX_CLI else
+            self.ask({"what": "usage", "provider": "antigravity", "id": ""} if profile == ANTIGRAVITY_CLI else
+                     {"what": "usage", "provider": "codex", "id": ""} if profile == CODEX_CLI else
                      {"what": "usage", "id": profile}, done)
 
 
@@ -411,6 +426,8 @@ def _read(reply):
     them, where that's what they are, else None)."""
     if reply.get("error"):
         return reply["error"], None
+    if "tracked" in reply:
+        return reply["tracked"] or wording.say("subscriptions.after_turn"), None
     if reply.get("usage"):
         return _limits(reply["usage"]), reply.get("as_of")
     return wording.say("subscriptions.no_limits" if reply.get("api_key") else "subscriptions.after_turn"
@@ -425,6 +442,16 @@ def usage_lines(box, read, narrow=None, as_of=None):
     where it doesn't fit, what's said instead wrapped within it."""
     while (child := box.get_first_child()) is not None:
         box.remove(child)
+    if isinstance(read, dict):
+        used, size = read.get("context_used"), read.get("context_size")
+        if isinstance(used, int) and isinstance(size, int):
+            box.append(Gtk.Label(label=wording.say("subscriptions.antigravity_context", used=f"{used:,}",
+                                                    size=f"{size:,}"), xalign=0, wrap=True))
+        if isinstance(read.get("cost_usd"), (int, float)):
+            box.append(Gtk.Label(label=wording.say("subscriptions.antigravity_cost",
+                                                    cost=f"{read['cost_usd']:.4f}"), xalign=0, wrap=True,
+                                 css_classes=["dim-label"]))
+        return
     if not isinstance(read, list):
         box.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
                              css_classes=["dim-label"], **({"max_width_chars": narrow} if narrow else {})))
@@ -594,7 +621,8 @@ class MenuUsage(Gtk.Button):
         if account is None:
             profile = ""
         cli = reply.get("claude_cli", True) if provider == "claude" else \
-            provider not in (reply.get("missing") or {}) and bool(reply.get("codex_usage"))
+            provider not in (reply.get("missing") or {}) and \
+            (provider == "antigravity" or bool(reply.get("codex_usage")))
         if account is None and not cli:
             self.none_for = target
             self.shown(False)
@@ -602,10 +630,13 @@ class MenuUsage(Gtk.Button):
         self.none_for = None
         was, self.profile = self.profile, profile
         self.name.set_label(account["name"] if account else wording.say("subscriptions.cli_default"))
-        key = CODEX_CLI if provider == "codex" and not profile else profile
-        last = (reply.get("last_usage") or {}).get(key)
+        key = CODEX_CLI if provider == "codex" and not profile else \
+            ANTIGRAVITY_CLI if provider == "antigravity" and not profile else profile
+        last = (reply.get("antigravity_usage") or {}).get(key) if provider == "antigravity" else \
+            (reply.get("last_usage") or {}).get(key)
         if was != profile:  # (the placeholder's, or another's reading: the host's last of this one, greyed, till it's read)
-            self.show_read(_limits(last["usage"]) if last and last.get("usage") else None, None, stale=True)
+            self.show_read(last if provider == "antigravity" else
+                           _limits(last["usage"]) if last and last.get("usage") else None, None, stale=True)
         else:
             self.name.set_visible(True)
             self.shown(True)
@@ -617,7 +648,8 @@ class MenuUsage(Gtk.Button):
         if not self.current(ticket, target) or profile != self.profile:
             return False
         read, as_of = _read(reply)
-        self.show_read(read if isinstance(read, list) else None, None if isinstance(read, list) else read, as_of=as_of)
+        self.show_read(read if isinstance(read, (list, dict)) else None,
+                       None if isinstance(read, (list, dict)) else read, as_of=as_of)
         return False
 
     def show_read(self, limits, said, stale=False, as_of=None):
@@ -974,6 +1006,54 @@ def add_codex(page):
     return dialog
 
 
+def add_antigravity(page):
+    """Add an isolated Antigravity sign-in, or use an existing Gemini directory on the host."""
+    dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_antigravity"),
+                                              wording.say("sign_in.sign_in"))
+    name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
+    form.append(name)
+    tabs = Gtk.Box(css_classes=["linked"], homogeneous=True)
+    login_tab = Gtk.ToggleButton(label=wording.say("subscriptions.new_login"), active=True)
+    folder_tab = Gtk.ToggleButton(label=wording.say("common.folder"), group=login_tab)
+    tabs.append(login_tab)
+    tabs.append(folder_tab)
+    folder = Gtk.Entry(placeholder_text=wording.say("subscriptions.antigravity_folder_hint"), visible=False)
+    form.append(tabs)
+    form.append(folder)
+    card = _ClaudeLogin(page, dialog, submit, (name, login_tab, folder_tab, folder), lambda *_: save())
+    for widget in (card, status, submit):
+        form.append(widget)
+
+    def picked(*_):
+        folder.set_visible(folder_tab.get_active())
+        submit.set_label(wording.say("subscriptions.use_folder" if folder_tab.get_active() else "sign_in.sign_in"))
+        card.dismiss()
+
+    def save(*_):
+        label = name.get_text().strip()
+        if not label:
+            return name.grab_focus()
+        if folder_tab.get_active():
+            home = folder.get_text().strip()
+            if not home:
+                return folder.grab_focus()
+            card.cancelled()
+            return _send(page, dialog, submit, say, {"what": "add", "provider": "antigravity",
+                                                     "name": label, "home": home},
+                         (name, login_tab, folder_tab, folder))
+        say("")
+        card.start({"what": "sign_in", "provider": "antigravity", "name": label})
+
+    folder_tab.connect("toggled", lambda button: button.get_active() and picked())
+    login_tab.connect("toggled", lambda button: button.get_active() and picked())
+    submit.connect("clicked", save)
+    name.connect("activate", save)
+    folder.connect("activate", save)
+    dialog.connect("response", lambda *_: card.stop())
+    dialog.present(page)
+    return dialog
+
+
 def open_page(widget, url):
     """A sign-in's page opened in this machine's browser."""
     Gtk.UriLauncher(uri=url).launch(widget.get_root(), None, None)
@@ -1306,6 +1386,18 @@ def sign_in_again(page, account):
             form.append(w)
         submit.connect("clicked", start)
         dialog.connect("response", lambda *_: login.stop())
+        dialog.present(page)
+        return dialog
+    if account["provider"] == "antigravity":
+        dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading",
+                                                                    name=account["name"]), wording.say("sign_in.sign_in"))
+        card = _ClaudeLogin(page, dialog, submit, (), lambda *_: start())
+        def start(*_):
+            card.start({"what": "sign_in", "provider": "antigravity", "id": account["id"]})
+        for widget in (card, status, submit):
+            form.append(widget)
+        submit.connect("clicked", start)
+        dialog.connect("response", lambda *_: card.stop())
         dialog.present(page)
         return dialog
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading", name=account["name"]),

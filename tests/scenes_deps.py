@@ -78,6 +78,45 @@ def _(app):
     return dependencies(app)[0]
 
 
+@scene("39i-antigravity-subscriptions", "Settings → Subscriptions with Antigravity's CLI default and a named account, "
+                                          "showing locally tracked ACP context and cost", size=(1200 + SIDEBAR, H))
+def _(app):
+    return antigravity_subscriptions(app)[0]
+
+
+def antigravity_subscriptions(app):
+    from baudelib import accounts
+    from gi.repository import Gtk
+    from widgets import walk
+    import subscriptionpage
+    home = os.path.join(T.TMP, "antigravity-shot-account")
+    os.makedirs(home, exist_ok=True)
+    profile = next((a["id"] for a in accounts.listing() if a["provider"] == "antigravity" and
+                    a["name"] == "Work Google account"), None) or \
+        accounts.add("antigravity", "Work Google account", home)
+    accounts.note_antigravity_usage(profile, "antigravity-shot-session", 43820, 200000, 0.0142, "USD")
+    win = hide(app, [], BAUDE_ANTIGRAVITY="/usr/bin/true")
+    dialog = win.open_settings()
+    page = next(p for p in T.find(dialog, subscriptionpage.Page))
+    dialog.set_visible_page(page)
+    T.wait_for(lambda: page.accounts and page.shown is not None, "Antigravity accounts", 20)
+    T.pump(0.5)
+    scroller = next(w for w in walk(page) if isinstance(w, Gtk.ScrolledWindow))
+    scroller.get_vadjustment().set_value(scroller.get_vadjustment().get_upper())
+    T.pump(0.5)
+    return win, page
+
+
+@scene("39j-antigravity-add-account", "Add Antigravity account, with an isolated login or an existing Gemini folder",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    import subscriptionpage
+    win, page = antigravity_subscriptions(app)
+    subscriptionpage.add_antigravity(page)
+    T.pump(0.5)
+    return win
+
+
 @scene("39g-dependencies-end", "Settings → Dependencies scrolled to its end: Kubernetes, Databases, Multiplex, "
                                "Emission and Signal", size=(1200 + SIDEBAR, H))
 def _(app):

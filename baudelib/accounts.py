@@ -28,7 +28,7 @@ from pathlib import Path
 from baudelib import wording
 from baudelib.selfupdate import settings_path
 
-PROVIDERS = ("claude", "codex")
+PROVIDERS = ("claude", "codex", "antigravity")
 _CLAUDE_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
                 "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
                 "CLAUDE_CODE_USE_FOUNDRY")
@@ -65,6 +65,9 @@ def database():
             db.execute("CREATE TABLE IF NOT EXISTS switches (key TEXT PRIMARY KEY, disabled INTEGER, auto INTEGER)")
             db.execute("CREATE TABLE IF NOT EXISTS resumes (key TEXT PRIMARY KEY)")  # (Auto Resume on Reset's: on)
             db.execute("CREATE TABLE IF NOT EXISTS autooff (key TEXT PRIMARY KEY, until REAL)")  # (disabled by itself)
+            db.execute("CREATE TABLE IF NOT EXISTS antigravity_usage (session TEXT, profile TEXT, "
+                       "used INTEGER, size INTEGER, cost REAL, currency TEXT, seen REAL, "
+                       "PRIMARY KEY (profile, session))")
             yield db
     finally:
         db.close()
@@ -143,7 +146,7 @@ def mark_auto_off(key, until):
 def check_key(key):
     """A usage key that names a subscription here: the CLI's own sign-in's ("" or CODEX_CLI), or an account's id;
     ValueError for one that doesn't."""
-    if key in ("", CODEX_CLI) or account(key) is not None:
+    if key in ("", CODEX_CLI, ANTIGRAVITY_CLI) or account(key) is not None:
         return key
     raise ValueError(wording.say("subscriptions.gone"))
 
@@ -209,7 +212,8 @@ def codex_exhausted(snapshot):
 
 def key_provider(key):
     """The provider a usage key's subscription is of."""
-    return "codex" if key == CODEX_CLI else (account(key) or {}).get("provider", "claude")
+    return "codex" if key == CODEX_CLI else "antigravity" if key == ANTIGRAVITY_CLI else \
+        (account(key) or {}).get("provider", "claude")
 
 
 def listing():
@@ -369,6 +373,7 @@ def remove(profile, exe=None):
         db.execute("DELETE FROM switches WHERE key=?", (profile,))
         db.execute("DELETE FROM resumes WHERE key=?", (profile,))
         db.execute("DELETE FROM autooff WHERE key=?", (profile,))
+        db.execute("DELETE FROM antigravity_usage WHERE profile=?", (profile,))
     _drop_usage(profile, gone=True)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():
@@ -491,6 +496,15 @@ def codex_home(profile):
     return row[0]
 
 
+def antigravity_home(profile):
+    """The isolated Gemini directory of an Antigravity account."""
+    with database() as db:
+        row = db.execute("SELECT credential FROM profiles WHERE id=? AND provider='antigravity'", (profile,)).fetchone()
+    if row is None:
+        raise ValueError(wording.say("subscriptions.gone"))
+    return row[0]
+
+
 def _credential(provider, profile):
     with database() as db:
         row = db.execute("SELECT credential FROM profiles WHERE provider=? AND id=?", (provider, profile)).fetchone()
@@ -542,16 +556,42 @@ def claude_launch(env, profile):
 
 USAGE_CACHE_S = 25  # (how long a read of a subscription's usage is kept: clients asking every 30 s share one)
 CODEX_CLI = "codex"  # (the usage key of Codex's CLI's own sign-in; Claude's is "", an account's its id)
+ANTIGRAVITY_CLI = "antigravity"
 _usage_read = {}  # (usage key → (when, limits, when in seconds since 1970))
 _usage_locks = {}  # (usage key → the lock one read of it runs under)
 _usage_guard = threading.Lock()
-_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock()}  # (one provider's reads run one after another; a hung codex doesn't hold claude's)
+_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock()}
 
 
 def usage_key(provider, profile):
     """What a subscription's usage is kept and said under: an account's id; the CLI's own sign-in's, "" for Claude's,
     CODEX_CLI for Codex's."""
-    return profile or ("" if provider == "claude" else CODEX_CLI)
+    return profile or ("" if provider == "claude" else ANTIGRAVITY_CLI if provider == "antigravity" else CODEX_CLI)
+
+
+def note_antigravity_usage(profile, session, used, size, cost=None, currency=None):
+    """Keep the latest ACP context and cumulative cost of each native session, by account."""
+    if not session or not isinstance(used, int) or not isinstance(size, int):
+        return
+    key = usage_key("antigravity", profile)
+    with database() as db:
+        db.execute("INSERT OR REPLACE INTO antigravity_usage VALUES (?,?,?,?,?,?,?)",
+                   (session, key, used, size, cost if isinstance(cost, (int, float)) else None,
+                    currency if isinstance(currency, str) else None, time.time()))
+
+
+def antigravity_usage(profile):
+    """The latest context and cumulative cost reported for an account's native sessions."""
+    key = usage_key("antigravity", profile)
+    with database() as db:
+        rows = list(db.execute("SELECT used,size,cost,currency,seen FROM antigravity_usage WHERE profile=?",
+                               (key,)))
+    if not rows:
+        return None
+    latest = max(rows, key=lambda row: row[4])
+    costs = [row[2] for row in rows if row[3] == "USD" and row[2] is not None]
+    return {"context_used": latest[0], "context_size": latest[1], "cost_usd": sum(costs) if costs else None,
+            "sessions": len(rows), "seen": latest[4]}
 
 
 def plan_usage(profile, exe=None, provider="claude"):

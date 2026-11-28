@@ -25,7 +25,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, deciders, desktopchats, emissionlink, inbox, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    access, accounts, antigravity, codex, deciders, desktopchats, emissionlink, inbox, mesh, multiplexlink, phonebrowser, models, notes, providers,
     selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
@@ -76,6 +76,9 @@ class Server(ServerRunning, ServerSessions):
         self.codex_catalogs = {}
         self.codex_refresh_at = {}
         self.codex_refreshing = set()
+        self.antigravity_catalogs = {}
+        self.antigravity_refresh_at = {}
+        self.antigravity_refreshing = set()
         me = os.path.join(self.state_dir, "server.json")
         try:
             with open(me, encoding="utf-8") as f:
@@ -202,7 +205,39 @@ class Server(ServerRunning, ServerSessions):
             self.me["claude_models"] = claudes
             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
         codex_models = self.codex_models()
-        return (claudes or self.me.get("claude_models") or []) + codex_models + models.runnable_models()
+        return (claudes or self.me.get("claude_models") or []) + codex_models + self.antigravity_models() + models.runnable_models()
+
+    def antigravity_models(self, profile=None):
+        exe = models.antigravity_exe()
+        if not exe:
+            return []
+        profile = accounts.selected("antigravity") if profile is None else profile
+        with self.lock:
+            if profile not in self.antigravity_refreshing and time.monotonic() >= self.antigravity_refresh_at.get(profile, 0):
+                self.antigravity_refreshing.add(profile)
+                threading.Thread(target=self.refresh_antigravity_models, args=(exe, profile), daemon=True).start()
+            return self.antigravity_catalogs.get(profile) or [models.ANTIGRAVITY_DEFAULT]
+
+    def refresh_antigravity_models(self, exe, profile):
+        try:
+            choices = antigravity.discover(exe, self.state_dir, profile)
+        except Exception as exc:
+            self.log(f"Antigravity model discovery: {exc}")
+            choices = []
+        with self.lock:
+            # agy unpacks a large runtime on launch; a failed sign-in must not trigger a probe every minute.
+            self.antigravity_refresh_at[profile] = time.monotonic() + (300 if choices else 600)
+            self.antigravity_refreshing.discard(profile)
+            if choices and choices != self.antigravity_catalogs.get(profile):
+                self.antigravity_catalogs[profile] = choices
+                self.changed()
+
+    def antigravity_model_update(self, choices, profile=""):
+        with self.lock:
+            if choices and choices != self.antigravity_catalogs.get(profile):
+                self.antigravity_catalogs[profile] = choices
+                self.antigravity_refresh_at[profile] = time.monotonic() + 300
+                self.changed()
 
     def codex_models(self, profile=None):
         exe = models.codex_exe()
@@ -244,7 +279,7 @@ class Server(ServerRunning, ServerSessions):
         MLX's, the model itself here)?"""
         if (agent := models.proxied(model)) is not None:  # (another member's, run there: while it's in the mesh)
             return any(m.get("id") == agent[0] for m in self.mesh.view()["members"])
-        if models.model_program(model) in ("claude", "codex"):
+        if models.model_program(model) in ("claude", "codex", "antigravity"):
             return not models.launch(model, None, None)["missing"]
         if isinstance(model, str) and model.startswith(models.SERVED):
             return providers.pi_installed()
@@ -252,7 +287,7 @@ class Server(ServerRunning, ServerSessions):
 
     def _info(self):
         return {"id": self.me["id"], "name": self.me["name"], "group": self.me["group"], "version": wire.VERSION,
-                "models": [m if models.model_program(m["value"]) == "codex" else
+                "models": [m if models.model_program(m["value"]) in ("codex", "antigravity") else
                            {"value": m["value"], "displayName": m.get("displayName") or m["value"]}
                            for m in self.models()],
                 "host": socket.gethostname(), "home": os.path.expanduser("~"), "pid": os.getpid(),

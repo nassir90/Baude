@@ -45,10 +45,15 @@ def claude_cli(server):
 
 def state(server=None):
     missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
+    if (dep := deps.missing("antigravity")) is not None:
+        missing["antigravity"] = dep
     last = {profile: {"read": round(read), "usage": _limits(limits)} for profile, (read, limits) in accounts.last_usage().items()}
     switches = accounts.switches()
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
             "missing": missing, "last_usage": last, "codex_usage": True,
+            "antigravity_usage": {key: found for key in [accounts.ANTIGRAVITY_CLI,
+                *(a["id"] for a in accounts.listing() if a["provider"] == "antigravity")]
+                if (found := accounts.antigravity_usage("" if key == accounts.ANTIGRAVITY_CLI else key))},
             "disabled": sorted(k for k, v in switches.items() if v["disabled"]),
             "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"]),
             "auto_resume": sorted(accounts.auto_resume())}
@@ -73,6 +78,11 @@ def answer(server, conn, msg, reply):
                 accounts.add("claude", msg.get("name"), _signed_in_folder(server, msg["folder"]), kind="folder")
             elif provider == "claude":
                 accounts.add("claude", msg.get("name"), accounts.check_token(msg.get("token")))
+            elif provider == "antigravity" and msg.get("home"):
+                home = os.path.expanduser(msg["home"])
+                if not os.path.isdir(home):
+                    raise ValueError(wording.say("subscriptions.not_antigravity_home"))
+                accounts.add("antigravity", msg.get("name"), os.path.abspath(home))
             elif msg.get("home"):
                 accounts.add("codex", msg.get("name"), _signed_in_home(msg["home"]))
             elif "token" in msg:
@@ -120,6 +130,8 @@ def answer(server, conn, msg, reply):
             if provider == "claude" or (accounts.account(profile) or {}).get("provider") == "claude":
                 done = _for_chat(server, conn, msg, done)
                 return _claude_sign_in(server, conn, msg, reply, done)
+            if provider == "antigravity" or (accounts.account(profile) or {}).get("provider") == "antigravity":
+                return _antigravity_sign_in(conn, msg, reply, done)
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
@@ -168,6 +180,9 @@ def _usage(server, profile, provider, done):
     """A subscription's usage (profile; "": the CLI's own sign-in of provider, Claude's where none is said)."""
     if profile:
         provider = (accounts.account(profile) or {}).get("provider", provider)
+    if provider == "antigravity":
+        return done(tracked=accounts.antigravity_usage(profile))
+    if profile:
         if accounts.api_key(profile):
             return done(usage=None, api_key=True)
     try:
@@ -300,6 +315,58 @@ def _claude_sign_in(server, conn, msg, reply, done):
         shutil.rmtree(folder, ignore_errors=True)
 
     threading.Thread(target=read, daemon=True, name="claude-login").start()
+    return None
+
+
+def _antigravity_sign_in(conn, msg, reply, done):
+    """Sign in through agy's official code flow, in a directory owned by this account."""
+    if (running := getattr(conn, "accounts_login", None)) is not None and running.poll() is None:
+        return done(error="this connection runs a sign-in already")
+    profile = msg.get("id") or ""
+    fresh = not profile
+    name = accounts.check_name("antigravity", msg.get("name")) if fresh else ""
+    deps.need("antigravity", "programs.antigravity")
+    accounts.root().mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory = tempfile.mkdtemp(prefix="antigravity-", dir=accounts.root()) if fresh else \
+        accounts.antigravity_home(profile)
+    env = {k: v for k, v in (os.environ | NO_BROWSER).items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    try:
+        proc = subprocess.Popen([deps.program("antigravity"), "acp", "--gemini-dir", directory,
+                                 "--app-data-dir", "antigravity-acp", "--login"],
+                                env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, errors="replace")
+    except OSError:
+        if fresh:
+            shutil.rmtree(directory, ignore_errors=True)
+        raise
+    conn.accounts_login = proc
+    if getattr(conn, "gone", False):
+        proc.terminate()
+
+    def read():
+        lines = []
+        with proc.stdout:
+            for line in proc.stdout:
+                line = ESCAPES.sub("", line).strip()
+                if line:
+                    lines.append(line)
+                    reply("accounts", what="sign_in", line=line)
+        ok = proc.wait() == 0
+        if ok and fresh:
+            try:
+                accounts.add("antigravity", name, directory, profile=profile or None)
+            except ValueError as exc:
+                shutil.rmtree(directory, ignore_errors=True)
+                return done(error=str(exc))
+        elif not ok and fresh:
+            shutil.rmtree(directory, ignore_errors=True)
+        if not ok:
+            reason = next((line for line in reversed(lines) if line.lower().startswith("error")), None) or \
+                wording.say("subscriptions.antigravity_failed")
+            return done(error=reason)
+        done(signed_in=True, who=name or (accounts.account(profile) or {}).get("name"))
+
+    threading.Thread(target=read, daemon=True, name="antigravity-login").start()
     return None
 
 

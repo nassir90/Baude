@@ -39,6 +39,10 @@
         "codex": {
           "type": "string",
           "description": "Codex's."
+        },
+        "antigravity": {
+          "type": "string",
+          "description": "Antigravity's account id, or an empty string for its CLI default."
         }
       },
       "additionalProperties": false,
@@ -93,6 +97,33 @@
     "codex_usage": {
       "type": "boolean",
       "description": "Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's \"codex\"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of \"\" is Claude's."
+    },
+    "tracked": {
+      "type": ["object", "null"],
+      "properties": {
+        "context_used": {"type": "integer"},
+        "context_size": {"type": "integer"},
+        "cost_usd": {"type": ["number", "null"]},
+        "sessions": {"type": "integer"},
+        "seen": {"type": "number"}
+      },
+      "additionalProperties": false,
+      "description": "The Antigravity account's locally tracked ACP context and reported cost."
+    },
+    "antigravity_usage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "context_used": {"type": "integer"},
+          "context_size": {"type": "integer"},
+          "cost_usd": {"type": ["number", "null"]},
+          "sessions": {"type": "integer"},
+          "seen": {"type": "number"}
+        },
+        "additionalProperties": false
+      },
+      "description": "Last tracked ACP usage for each Antigravity account."
     },
     "missing": {
       "type": "object",

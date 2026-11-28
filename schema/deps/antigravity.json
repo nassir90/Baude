@@ -1,0 +1,18 @@
+{
+  "description": "Google's agy ACP agent, which runs Antigravity chats on a host.",
+  "name": "Antigravity CLI",
+  "where": "host",
+  "needed_by": ["programs.antigravity"],
+  "group": "deps.providers",
+  "detect": {
+    "macos": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}],
+    "linux": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}]
+  },
+  "install": {
+    "macos": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    "debian": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    "fedora": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    "arch": "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+  },
+  "link": "https://antigravity.google/docs/ide/extensions/acp/"
+}

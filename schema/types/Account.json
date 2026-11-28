@@ -10,7 +10,8 @@
     "provider": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "antigravity"
       ],
       "description": "Whose subscription it is."
     },

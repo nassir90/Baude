@@ -680,7 +680,7 @@ class Mesh:
                            title=s.get("title")), **named}
 
 
-PROVIDERS = ("claude", "codex")  # (accounts.PROVIDERS: the providers a subscription is of)
+PROVIDERS = ("claude", "codex", "antigravity")  # (accounts.PROVIDERS: the providers a subscription is of)
 CODEX = "codex/"  # (a Codex model's value's start: models.model_program's)
 
 

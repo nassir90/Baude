@@ -96,7 +96,7 @@ def provider_name(pid, settings=None):
     return str(pid)
 
 
-DEFAULTS = ("default", "codex/default")  # (aliases of a host's default model, not models: never a model's name)
+DEFAULTS = ("default", "codex/default", "antigravity/default")  # aliases of a host's default model
 
 
 def model_name(value, listed=()):
@@ -110,7 +110,7 @@ def model_name(value, listed=()):
     hit = next((m for m in every if m["value"] == value), None) or \
         next((m for m in listed if m.get("resolvedModel") == value), None) or \
         modelslib.claude_match(value, [m for m in listed if provider_of(m["value"]) is None and
-                                       not m["value"].startswith("codex/")])
+                                       not m["value"].startswith(("codex/", "antigravity/"))])
     if hit is not None and hit.get("displayName"):
         return hit["displayName"]
     for p in found():

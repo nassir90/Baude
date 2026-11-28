@@ -35,7 +35,8 @@
     "provider": {
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "antigravity"
       ],
       "description": "add, sign_in (a new account): whose. usage, disable, auto_disable and auto_resume with id \"\": whose CLI's own sign-in (Claude's where left out)."
     },

@@ -1409,7 +1409,7 @@ class ServerRunning:
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
         meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",
                     rotating=True, cli_id=s.meta.get("cli_id") or (
-                        None if models.model_program(s.meta.get("model")) == "codex" else s.id))
+                        None if models.model_program(s.meta.get("model")) in ("codex", "antigravity") else s.id))
         if not meta["cli_id"]:
             meta.pop("cli_id")
         if meta.get("ended"):  # (its last turn's end, seen: rotated by hand, and read-only from now on)
@@ -1426,8 +1426,8 @@ class ServerRunning:
                 s.meta.pop(key, None)
             if ended:  # (the Bot's last turn's end, said seen: every head's notification of it taken back)
                 s.meta["seen"] = dict(ended)
-            if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
-                s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
+            if models.model_program(s.meta.get("model")) not in ("codex", "antigravity"):
+                s.meta["cli_id"] = str(uuid.uuid4())  # ACP and Codex name their own sessions on start.
             s.meta.update(said=listed.get("said"), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
                           last_thread=thread.id)  # (its place in the list kept: what's next said in it moves it up)
             self.save(s)  # (3: the Bot afresh: from here the thread's its own)
@@ -1488,10 +1488,10 @@ class ServerRunning:
             run["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")),
                                                 model, run["effort"])
         s.meta.update(model=model, mode=run["mode"], effort=run["effort"])
-        if run["program"] != was:  # (a conversation of the new program's: Codex names its own thread as it starts)
+        if run["program"] != was:  # a new program starts a new native conversation
             for key in ("cli_id", "path", "codex_started", "context_usage", "init"):
                 s.meta.pop(key, None)
-            if run["program"] != "codex":
+            if run["program"] not in ("codex", "antigravity"):
                 s.meta["cli_id"] = str(uuid.uuid4())
         self.save(s)
         if s.proc is not None:  # (its agent between turns, the old model's: let go of, as rotate does)

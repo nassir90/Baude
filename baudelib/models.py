@@ -379,7 +379,8 @@ ANTIGRAVITY_DEFAULT = {"value": "antigravity/default", "displayName": "Antigravi
 
 
 def antigravity_exe():
-    return shutil.which(os.environ.get("BAUDE_ANTIGRAVITY", "agy"))
+    from baudelib import deps
+    return None if "antigravity" in deps.hidden() else deps.program("antigravity")
 
 
 def antigravity_choices(options):

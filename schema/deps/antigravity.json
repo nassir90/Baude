@@ -5,8 +5,8 @@
   "needed_by": ["programs.antigravity"],
   "group": "deps.providers",
   "detect": {
-    "macos": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}],
-    "linux": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}]
+    "macos": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}, {"glob": "~/.local/bin/agy"}, {"glob": "~/.antigravity/antigravity/bin/agy"}, {"glob": "~/.antigravity/bin/agy"}, {"glob": "/opt/homebrew/bin/agy"}, {"glob": "/usr/local/bin/agy"}, {"glob": "/Applications/Antigravity.app/Contents/Resources/app/bin/agy"}],
+    "linux": [{"env": "BAUDE_ANTIGRAVITY"}, {"which": "agy"}, {"glob": "~/.local/bin/agy"}, {"glob": "~/.antigravity/antigravity/bin/agy"}, {"glob": "~/.antigravity/bin/agy"}, {"glob": "/usr/local/bin/agy"}, {"glob": "/usr/bin/agy"}, {"glob": "/snap/bin/agy"}]
   },
   "install": {
     "macos": "curl -fsSL https://antigravity.google/cli/install.sh | bash",

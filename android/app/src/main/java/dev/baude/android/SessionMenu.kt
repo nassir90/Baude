@@ -2,6 +2,7 @@ package dev.baude.android
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,7 +81,28 @@ object Groups {
     }
 }
 
-/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, Bot items (Rotate among them),
+/** How a row's menu opens a chat (host, session): the home list's or the Inbox's own. */
+val LocalOpenChat = compositionLocalOf<(String, String) -> Unit> { { _, _ -> } }
+
+/** A Bot's New session (Baude's new_agent_session): a blank chat nested under Bot s on its host h, in its folder and
+ * group on its model and effort, a draft till it's written in, opened once its host has it. */
+fun newBotSession(h: String, s: Msg.Session, open: (String, String) -> Unit) {
+    hostState(h)?.let { toast(it); return }
+    val group = s.group.orEmpty()
+    val cwd = s.cwd?.ifBlank { null } ?: HomePrefs.folder(Mesh.app, h) ?: Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "~"
+    val msg = Msg.Start(prompt = "", cwd = cwd, model = s.model?.ifBlank { null }, effort = s.effort?.ifBlank { null },
+        mode = "auto", draft = true, group = group.ifBlank { null }, spawnedBy = s.id).json()
+    Mesh.ask(h, msg) { r ->
+        val id = Msg.Started.from(r).session?.id
+        if (r.optString("op") == Op.STARTED && id != null) {
+            if (group.isNotBlank()) Groups.putIn(group)
+            open(h, id)
+        } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
+            why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }))
+    }
+}
+
+/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, a Bot's New session, Bot items (Rotate among them),
  * Move to Group ▸ (its list in place of the items, a back row first), Archive, Stop, Access…, Move to Trash…; Delete alone
  * while its host's gone. at: where it was pressed, in the row. */
 @Composable
@@ -94,6 +116,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     var botting by remember { mutableStateOf(false) }
     var grouping by remember { mutableStateOf(false) }
     var accessing by remember { mutableStateOf(false) }
+    val openChat = LocalOpenChat.current
     LaunchedEffect(open) { if (!open) page = "items" }
     fun said(r: JSONObject) = Msg.Error.from(r).said.orEmpty()
     val alive = Mesh.conn(h)?.state == "up" && !off(h)
@@ -115,6 +138,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
             return@Popover
         }
         if (!gone) MenuChoice(Wording.Common.renameEllipsis, false) { dismiss(); renaming = true }
+        if (!gone && s.bot != null) MenuChoice(Wording.Sidebar.newSession, false) { dismiss(); newBotSession(h, s, openChat) }
         val canRotate = !gone && !active && s.bot != null && takes(h, "rotate") // (not at a turn, as Archive isn't)
         fun rotate() {
             dismiss()

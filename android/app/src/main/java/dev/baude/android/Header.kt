@@ -490,9 +490,12 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
         } else rotate(v)
         return
     }
-    if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
-        val msg = Msg.Start(prompt = "", cwd = s.cwd.orEmpty().ifBlank { "~" }, model = v,
-            mode = if (program(v) == "codex") "default" else "auto", draft = true, group = s.group).json()
+    if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it, under
+        // the same Bot if it's a Bot's new chat, at its effort if the one picked takes it)
+        val effort = (asked["effort"] ?: s.effort?.ifBlank { null })?.takeIf { it in chosen(choices, v)?.efforts.orEmpty() }
+        val msg = Msg.Start(prompt = "", cwd = s.cwd.orEmpty().ifBlank { "~" }, model = v, effort = effort,
+            mode = if (program(v) == "codex") "default" else "auto", draft = true, group = s.group,
+            spawnedBy = s.spawnedBy?.ifBlank { null }).json()
         Mesh.ask(hostId, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) open(hostId, id)

@@ -260,14 +260,14 @@ private fun stopStuck(chat: Chat, ran: Boolean) {
 }
 
 /** A new chat on the host of one it no longer has (new_session_on): its folder the last used there, its model the
- * chat's if claude runs it; opened once the host has started it. */
+ * chat's if claude runs it, under the agent it's under; opened once the host has started it. */
 fun newChatOn(chat: Chat, open: (String, String) -> Unit, cwd: String? = null) {
     val at = chat.hostId
     val s = Mesh.session(at, chat.sid)
     val model = s?.model?.ifBlank { null }?.takeIf { program(it) == "claude" }
     val msg = Msg.Start(prompt = "", cwd = cwd ?: HomePrefs.folder(Mesh.app, at) ?: "~", model = model,
         effort = if (model != null) s?.effort?.ifBlank { null } else null, mode = "auto", draft = true,
-        group = s?.group).json()
+        group = s?.group, spawnedBy = s?.spawnedBy?.ifBlank { null }).json()
     Mesh.ask(at, msg) { r ->
         val id = Msg.Started.from(r).session?.id
         if (r.optString("op") == Op.STARTED && id != null) open(at, id)

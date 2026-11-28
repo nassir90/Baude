@@ -54,8 +54,8 @@ def css():
     rules.append(f"""
 .ask-card {{ padding: 14px 16px 16px 16px; }}
 .ask-picture {{ border-radius: 12px; }}
-.picture-frame {{ border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); }}
-.picture-frame picture:hover {{ filter: brightness(0.94); }}
+.ask-picture-frame {{ border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); }}
+.ask-picture-frame picture:hover {{ filter: brightness(0.94); }}
 .picture-view {{ margin: 8px; padding: 6px; border-radius: 99px; background-color: alpha(black, 0.55); color: white; }}
 button.picture-press {{ padding: 8px 12px; font-weight: bold; }}
 .ask-fade {{ background-image: linear-gradient(alpha(@card_bg_color, 0), @card_bg_color); min-height: {FADE}px; }}
@@ -631,7 +631,7 @@ class AskView(Gtk.Box):
         (the whole, and that button)"""
         meta = next((p for p in self.ask["versions"][n - 1]["pictures"] if p["name"] == b["picture"]), {})
         pic = PicturePart(meta.get("width") or 4, meta.get("height") or 3, b["label"])
-        frame = Gtk.Overlay(child=pic, overflow=Gtk.Overflow.HIDDEN, css_classes=["picture-frame"])
+        frame = Gtk.Overlay(child=pic, overflow=Gtk.Overflow.HIDDEN, css_classes=["ask-picture-frame"])
         frame.add_overlay(Gtk.Image(icon_name="system-search-symbolic", halign=Gtk.Align.END, valign=Gtk.Align.START,
                                     can_target=False, css_classes=["picture-view"]))
 

@@ -17,11 +17,19 @@
     },
     {
       "name": "picture",
-      "shows": "A round avatar 64px across, centred: the Bot's picture, else its initials from the name typed, set into the page: see README's A picture is set into the page. Under it two buttons: \"Choose Picture…\" and (only while there is a picture) \"Remove Picture\".",
+      "shows": "A round avatar 64px across, centred: the Bot's picture, else its initials from the name typed, set into the page with no outer square or rounded-square border around the circle: see README's A picture is set into the page. Under it two buttons: \"Choose Picture…\" and (only while there is a picture) \"Remove Picture\".",
       "copy": ["bot_settings.choose_picture", "bot_settings.remove_picture", "bot_settings.choose_a_picture", "bot_settings.unreadable"],
       "actions": [
         {"by": "click Choose Picture…", "does": "A file chooser (Pictures) opens; the picture is scaled to fit 256 by 256 and shown. An unreadable one says \"Couldn't read that picture: <why>\"."},
         {"by": "click Remove Picture", "does": "Clears the picture."}
+      ],
+      "decisions": [
+        {
+          "said": "Bot icons in Bot Settings had an odd rounded-square border around the circular avatar (paraphrased)",
+          "rule": "In every app, the round Bot avatar in Bot Settings sits directly on the dialog with only its circular inset shade (`picture-shade`) and no outer square or rounded-square border.",
+          "decided": "2026-11-28",
+          "source": [{"issue": "BaudeInternal#314"}]
+        }
       ]
     },
     {

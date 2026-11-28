@@ -718,7 +718,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # (forks are found within a folder, by day too: a fork is in its session's folder. A folder with a server's
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
         # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)
-        home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items}
+        home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items if i["id"]}
         archived_ids = {i["id"] for i in gone}  # (archived: its threads are under it there, wherever they were)
         while lost := [(k, i) for k, (_label, _folder, items) in groups.items() for i in items
                        if i["id"] in pulled and i.get("spawned_by") not in home.keys() | archived_ids] + \

@@ -309,11 +309,11 @@ fun InboxScreen(back: () -> Unit, open: (String, String) -> Unit, ask: (String, 
     Box(Modifier.fillMaxSize().background(c.frame)) {
         Column(Modifier.fillMaxSize()) {
             Bar(Wording.Inbox.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
-            if (asks.isEmpty() && pending.isEmpty() && running.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth().background(c.inside),
+            if (asks.isEmpty() && pending.isEmpty() && running.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(),
                 contentAlignment = Alignment.Center) {
                 Text(Wording.Inbox.nothing, style = Type.body, color = c.dim, textAlign = TextAlign.Center)
             } else {
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().background(c.inside).navigationBarsPadding(),
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 10.dp)) {
                     items(asks, key = { "a:" + Inbox.key(it.first, it.second.id) }) { (h, a) ->
                         AskCard(h, a) { ask(h, a.id.orEmpty()) }
@@ -357,26 +357,25 @@ private fun GroupHead(text: String) {
         modifier = Modifier.alpha(0.6f).padding(start = Gap.inside + 4.dp, end = Gap.inside, top = 14.dp, bottom = 4.dp))
 }
 
-/** An ask in the Inbox: a card as wide as the screen with the chat's gutters, its head (title, when, the waiting dot;
- * a stopped one's title struck through), then the ask as it's opened, its body cut a few lines down. */
+/** An ask in the Inbox: an inset card on the frame (Panel) as wide as the screen with the chat's gutters, its head
+ * (title, when, the waiting dot; a stopped one's title struck through), then the ask as it's opened, its body cut a
+ * few lines down. */
 @Composable
 private fun AskCard(host: String, a: Msg.InboxAsk, open: () -> Unit) {
     val c = LocalBaude.current
     val stopped = a.status == "stopped"
     val v = a.versions?.lastOrNull() ?: return
-    Column(Modifier.fillMaxWidth().padding(horizontal = Gap.inside, vertical = 5.dp).clip(RoundedCornerShape(12.dp))
-        .background(c.card).border(1.dp, c.rule, RoundedCornerShape(12.dp)).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Box(Modifier.padding(horizontal = Gap.inside, vertical = 5.dp)) { Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FadedLine(askTitle(v), Type.bold.copy(textDecoration = if (stopped) androidx.compose.ui.text.style.TextDecoration.LineThrough else null),
-                if (stopped) c.dim else c.fg, c.card, Modifier.weight(1f).clickable(onClick = open))
+                if (stopped) c.dim else c.fg, c.inside, Modifier.weight(1f).clickable(onClick = open))
             if (!stopped) { // (a stopped one's "Not answered" is on its from line: the phone's too narrow for it beside the title)
                 Text(askWhen(a.at?.toDouble()), style = Type.caption, color = c.dim, maxLines = 1)
                 StatusDot("", true)
             }
         }
-        AskView(host, a, inList = true, under = c.card)
-    }
+        AskView(host, a, inList = true, under = c.inside)
+    } }
 }
 
 /** What an ask's called: its title, else its body's first line (its heading's marks off). */

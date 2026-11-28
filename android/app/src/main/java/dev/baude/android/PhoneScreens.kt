@@ -213,9 +213,10 @@ private fun PanelHeading(text: String) {
     Text(text, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
 }
 
-/** A rounded group on the frame, as Hosts has them (rows: its rows each pad themselves, with rules between). */
+/** A rounded group on the frame, as Hosts and the Inbox's asks have them (rows: its rows each pad themselves, with
+ * rules between). */
 @Composable
-private fun Panel(rows: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+internal fun Panel(rows: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)
         .then(if (rows) Modifier else Modifier.padding(12.dp)),

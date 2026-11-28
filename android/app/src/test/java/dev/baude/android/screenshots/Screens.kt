@@ -273,6 +273,11 @@ abstract class Screens(private val theme: String) {
         login.folder.value = "~/.gemini"
         laidOut()
         screen("05y-subscriptions-antigravity-add-folder")
+        login.existing.value = false
+        login.active.value = true
+        login.url.value = "https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=fixture"
+        laidOut()
+        screen("05y-subscriptions-antigravity-sign-in")
     }
 
     // (Add account (Claude) on workshop, each step: Login, Token (empty, then typed), Folder, starting, the page's link with the code

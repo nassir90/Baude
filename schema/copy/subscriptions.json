@@ -1,5 +1,5 @@
 {
-  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude and Codex accounts kept on a host (the one picked beside New session), the dialogs that change them and sign in to them, their usage, and what a host says of them.",
+  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude, Codex and Antigravity accounts kept on a host (the one picked beside New session), the dialogs that change them and sign in to them, their usage, and what a host says of them.",
   "messages": {
     "title": "Subscriptions",
     "general": "General",
@@ -23,6 +23,7 @@
     "add_claude": "Add Claude account",
     "add_codex": "Add Codex account",
     "add_antigravity": "Add Antigravity account",
+    "antigravity_signing_in": "Signing in to Antigravity…",
     "antigravity_folder_hint": "Existing Gemini directory on this host",
     "antigravity_context": "Latest Context",
     "antigravity_tokens": "{$used} / {$size} tokens",

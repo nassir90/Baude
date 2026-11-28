@@ -851,17 +851,17 @@ def add_claude(page):
 
 
 class _ClaudeLogin(Gtk.Box):
-    """claude auth login run on the host with an account's folder, in a dialog's form, as a card the way Codex's is
-    (CodexLogin): a bold title and a line, then what can be done now, one step at a time. Signing in (the dialog's own
-    button gone, its fields greyed): starting; then the page to open as a link, and a box for the code the page may
-    show with Continue, the one button that moves it on (the code sent to it on the same connection, and what claude
-    says of it under it); Cancel. The dialog closed once it's signed in; else why not, and Try Again (again: the
-    dialog's own button's)."""
+    """A code-paste sign-in run on the host with an account's folder (claude auth login, or agy acp --login for
+    Antigravity), in a dialog's form, as a card the way Codex's is (CodexLogin): a bold title (signing_in) and a line,
+    then what can be done now, one step at a time. Signing in (the dialog's own button gone, its fields greyed):
+    starting; then the page to open as a link, and a box for the code the page may show with Continue, the one button
+    that moves it on (the code sent to it on the same connection, and what the CLI says of it under it); Cancel. The
+    dialog closed once it's signed in; else why not, and Try Again (again: the dialog's own button's)."""
 
-    def __init__(self, page, dialog, submit, inputs, again):
+    def __init__(self, page, dialog, submit, inputs, again, signing_in="sign_in.signing_in"):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.add_css_class("perm-card")
-        self.page, self.dialog, self.submit, self.inputs = page, dialog, submit, inputs
+        self.page, self.dialog, self.submit, self.inputs, self.signing_in = page, dialog, submit, inputs, signing_in
         self.ask, self.checking = None, False
         self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
         self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
@@ -907,7 +907,7 @@ class _ClaudeLogin(Gtk.Box):
         self.cancel.set_visible(True)
         self.again.set_visible(False)
         self.checking = False
-        self.say(wording.say("sign_in.signing_in"), wording.say("sign_in.starting"), dim=True)
+        self.say(wording.say(self.signing_in), wording.say("sign_in.starting"), dim=True)
         self.ask = Ask(self.page.where, msg, self.answered, self.heard)
 
     def heard(self, line):
@@ -916,7 +916,7 @@ class _ClaudeLogin(Gtk.Box):
         if m := re.search(r"https://\S+", line):
             url = html.escape(m.group(0).rstrip(".,)"))
             link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
-            self.say(wording.say("sign_in.signing_in"),
+            self.say(wording.say(self.signing_in),
                      html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link), markup=True)
             self.row.set_visible(True)
             self.code.grab_focus()
@@ -1040,7 +1040,8 @@ def add_antigravity(page):
     folder = Gtk.Entry(placeholder_text=wording.say("subscriptions.antigravity_folder_hint"), visible=False)
     form.append(tabs)
     form.append(folder)
-    card = _ClaudeLogin(page, dialog, submit, (name, login_tab, folder_tab, folder), lambda *_: save())
+    card = _ClaudeLogin(page, dialog, submit, (name, login_tab, folder_tab, folder), lambda *_: save(),
+                        signing_in="subscriptions.antigravity_signing_in")
     for widget in (card, status, submit):
         form.append(widget)
 
@@ -1411,7 +1412,8 @@ def sign_in_again(page, account):
     if account["provider"] == "antigravity":
         dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading",
                                                                     name=account["name"]), wording.say("sign_in.sign_in"))
-        card = _ClaudeLogin(page, dialog, submit, (), lambda *_: start())
+        card = _ClaudeLogin(page, dialog, submit, (), lambda *_: start(),
+                            signing_in="subscriptions.antigravity_signing_in")
         def start(*_):
             card.start({"what": "sign_in", "provider": "antigravity", "id": account["id"]})
         for widget in (card, status, submit):

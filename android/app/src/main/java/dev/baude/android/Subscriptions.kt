@@ -987,17 +987,18 @@ internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, pro
     }
 }
 
-/** A Claude sign-in as a card, the way Codex's is (CodexCard): signing in, starting; then the page's link and the box
- * for the code it may show with Continue, the one button that moves it on, and what claude said of it; Cancel. Failed:
- * why, and Try Again (again). */
+/** A Claude or Antigravity sign-in as a card, the way Codex's is (CodexCard): signing in, starting; then the page's
+ * link and the box for the code it may show with Continue, the one button that moves it on, and what the CLI said of
+ * it; Cancel. Failed: why, and Try Again (again). */
 @Composable
 private fun ClaudeCard(login: ClaudeLogin, again: () -> Unit) {
     val c = LocalBaude.current
     val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
     val failed = login.failed.value
+    val signingIn = if (login.provider == "antigravity") Wording.Subscriptions.antigravitySigningIn else Wording.SignIn.signingIn
     Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
         .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SelectionContainer { Text(if (failed != null) Wording.SignIn.failed else Wording.SignIn.signingIn, style = Type.bold, color = c.fg) }
+        SelectionContainer { Text(if (failed != null) Wording.SignIn.failed else signingIn, style = Type.bold, color = c.fg) }
         val link = login.url.value
         when {
             failed != null -> SelectionContainer { Text(failed, style = Type.body, color = dim) }

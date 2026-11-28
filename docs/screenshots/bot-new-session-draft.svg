@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="590" viewBox="0 0 1040 590" role="img" aria-labelledby="title desc">
+  <title id="title">Bot child draft in the regular chat composer</title>
+  <desc id="desc">A normal Baude chat view with host, model, effort, and mode controls and an empty composer. No setup dialog is shown.</desc>
+  <rect width="1040" height="590" rx="16" fill="#f7f7f8"/>
+  <rect x="1" y="1" width="1038" height="588" rx="16" fill="none" stroke="#d8d8dd"/>
+  <rect width="260" height="590" rx="16" fill="#ededf0"/>
+  <rect x="260" width="780" height="590" rx="16" fill="#fff"/>
+  <text x="24" y="38" font-family="Arial,sans-serif" font-size="16" fill="#29292d">Sessions</text>
+  <rect x="14" y="62" width="232" height="38" rx="9" fill="#fff" stroke="#dedee2"/>
+  <text x="31" y="87" font-family="Arial,sans-serif" font-size="14" fill="#88888f">Search sessions</text>
+  <rect x="9" y="120" width="242" height="64" rx="10" fill="#d9e9fa"/>
+  <circle cx="39" cy="152" r="18" fill="#f2c94c"/>
+  <text x="39" y="158" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#fff">J</text>
+  <text x="67" y="148" font-family="Arial,sans-serif" font-size="15" font-weight="700" fill="#25252a">Juniper</text>
+  <text x="67" y="168" font-family="Arial,sans-serif" font-size="12" fill="#64646b">Bot · Parent session</text>
+  <text x="22" y="222" font-family="Arial,sans-serif" font-size="14" fill="#55555c">Other sessions stay visible</text>
+  <rect x="280" y="18" width="744" height="48" fill="#fff"/>
+  <rect x="293" y="27" width="112" height="32" rx="8" fill="#f4f4f6" stroke="#dedee2"/>
+  <text x="307" y="48" font-family="Arial,sans-serif" font-size="13" fill="#34343a">Host: local⌄</text>
+  <rect x="414" y="27" width="140" height="32" rx="8" fill="#f4f4f6" stroke="#dedee2"/>
+  <text x="428" y="48" font-family="Arial,sans-serif" font-size="13" fill="#34343a">Model: Sonnet⌄</text>
+  <rect x="563" y="27" width="100" height="32" rx="8" fill="#f4f4f6" stroke="#dedee2"/>
+  <text x="577" y="48" font-family="Arial,sans-serif" font-size="13" fill="#34343a">Effort: high⌄</text>
+  <rect x="672" y="27" width="100" height="32" rx="8" fill="#f4f4f6" stroke="#dedee2"/>
+  <text x="686" y="48" font-family="Arial,sans-serif" font-size="13" fill="#34343a">Mode: chat⌄</text>
+  <path d="M280 76h744" stroke="#e8e8eb"/>
+  <text x="652" y="196" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#303036">New session with Juniper</text>
+  <text x="652" y="228" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" fill="#73737a">Choose settings in the regular header, then send your first message.</text>
+  <rect x="352" y="420" width="600" height="124" rx="16" fill="#fff" stroke="#cfcfd5" stroke-width="1.5"/>
+  <text x="376" y="458" font-family="Arial,sans-serif" font-size="15" fill="#92929a">Message Juniper…</text>
+  <circle cx="914" cy="510" r="20" fill="#e8e8eb"/>
+  <path d="M914 500v13m-6-6h12m-12 1 6 6 6-6" fill="none" stroke="#8d8d94" stroke-width="1.8"/>
+  <text x="352" y="568" font-family="Arial,sans-serif" font-size="12" fill="#85858c">Draft only · no child session exists until the first message is sent</text>
+</svg>

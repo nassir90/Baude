@@ -43,7 +43,7 @@
     },
     {
       "name": "groups",
-      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Databases (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js), Telemetry (line_profiler). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
+      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Antigravity CLI, Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Databases (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js), Telemetry (line_profiler). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
       "copy": [
         "deps.providers",
         "deps.git_github",
@@ -147,6 +147,16 @@
       "source": [
         {
           "issue": "BaudeInternal#271"
+        }
+      ]
+    },
+    {
+      "said": "Baude does not find agy in standard locations such as ~/.local/bin (paraphrased)",
+      "rule": "Every host finds Antigravity CLI (agy) where its installers put it as well as on PATH, since a host started by the OS or an app has a minimal PATH: ~/.local/bin, ~/.antigravity/antigravity/bin, ~/.antigravity/bin, /opt/homebrew/bin, /usr/local/bin and Antigravity.app on macOS (~/.local/bin, ~/.antigravity/antigravity/bin, ~/.antigravity/bin, /usr/local/bin, /usr/bin and /snap/bin on Linux), with BAUDE_ANTIGRAVITY taking precedence; every check and run of agy (Dependencies, Subscriptions, model discovery, Antigravity chats and sign-in) uses that single lookup",
+      "decided": "2026-11-28",
+      "source": [
+        {
+          "issue": "BaudeInternal#335"
         }
       ]
     }

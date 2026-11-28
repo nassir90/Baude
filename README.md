@@ -100,7 +100,8 @@ and Codex-specific approval requests without a Baude UI are outside its scope.
 
 Baude can run Google's official Antigravity ACP agent through the `agy` CLI, as T3 Code does.
 Install Antigravity CLI 1.5.1 or later using Settings → Dependencies. Baude finds `agy`
-on the chat host's `PATH`; set `BAUDE_ANTIGRAVITY` to its executable path if needed, then
+on the chat host's `PATH` or in standard locations such as `~/.local/bin`; set
+`BAUDE_ANTIGRAVITY` to its executable path if needed, then
 restart `baude-headless`. In Settings → Subscriptions, add an Antigravity account with
 Google sign-in or an existing signed-in Gemini directory on that host. Each added login
 uses its own directory, and a chat can select its account in the provider picker. The

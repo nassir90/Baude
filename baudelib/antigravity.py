@@ -16,7 +16,7 @@ import time
 import uuid
 
 from baudelib.claude import ClaudeProc
-from baudelib.models import antigravity_choices
+from baudelib.models import antigravity_choices, antigravity_exe
 from baudelib import accounts
 
 
@@ -79,7 +79,7 @@ class AntigravityProc(ClaudeProc):
         self.resume = resume
         self.config = []
         self.available_modes = []
-        args = [exe, "acp"]
+        args = [exe or antigravity_exe() or "agy", "acp"]
         home = accounts.antigravity_home(profile) if profile else os.environ.get("BAUDE_ANTIGRAVITY_HOME")
         if home:
             args += ["--gemini-dir", os.path.abspath(os.path.expanduser(home)),

@@ -86,7 +86,7 @@ def _path(way):
     """The program a way finds (env, which, glob), or None."""
     if "env" in way:
         exe = os.environ.get(way["env"])
-        return shutil.which(exe) if exe else None
+        return shutil.which(os.path.expanduser(exe)) if exe else None
     if "which" in way:
         exe = shutil.which(way["which"])
         return exe if exe != way.get("not") else None

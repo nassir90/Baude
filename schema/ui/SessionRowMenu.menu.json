@@ -2,7 +2,7 @@
   "description": "The menu on a session row in the sessions sidebar, opened by right-click (press and hold on touch) at the pointer. Its items depend on whether the session is on this machine or on a host, its state, and whether it can be a Bot. A Bot row has the same menu.",
   "apps": ["baude"],
   "opens": ["right-click a session row (not the open unsaved chat, not a ghost)", "key F2 (Rename… only)"],
-  "code": ["sidebarmenu.py:SidebarMenu.show_menu", "sidebarmenu.py:SidebarMenu.group_submenu", "sidebarmenu.py:SidebarMenu.on_key"],
+  "code": ["sidebarmenu.py:SidebarMenu.show_menu", "sidebarmenu.py:SidebarMenu.new_agent_session", "windowremote.py:WindowRemote.new_agent_session", "windowremote.py:WindowRemote.start_agent_draft", "sidebarmenu.py:SidebarMenu.group_submenu", "sidebarmenu.py:SidebarMenu.on_key"],
   "copy": ["common", "trash", "new_session", "sidebar"],
   "phone": {"does": "Opened by a long-press on a session or Bot row, at the finger; Move to Group's list opens in place of the items, with a back row first", "why": "Touch's right-click", "decided": "2026-11-21"},
   "parts": [
@@ -17,10 +17,10 @@
     },
     {
       "name": "New session",
-      "shows": "\"New session\", for a Bot on a host that's up and not deactivated, right after Rename…, before the other Bot items.",
-      "copy": ["sidebar.new_session"],
+      "shows": "\"New session\", for a Bot whose host is up (not deactivated, not gone): right after Rename…, before the Bot items. No dialog or form.",
+      "copy": ["sidebar.new_session", "new_session.host_refused"],
       "actions": [
-        {"by": "click", "does": "Opens a normal blank draft, in the open window, for a child chat of that Bot: no dialog and no setup step. The header says the host and its model, effort and mode as a new chat's do, and the status line shows the folder the Bot works in, on the Bot's host, whether that is this machine or another. Its row, \"New session\", is listed under the Bot once something is typed. Nothing is made on the host until the first message is sent; it is then made there as a child of the Bot, and the message goes to it once it is open. Until it is open, the text stays in the box, the send button is off, and the draft stays; leaving for another chat or a new one keeps the text in the box it goes to."}
+        {"by": "click", "does": "Opens a blank chat for a new chat of the Bot's, on the Bot's host, in the Bot's folder and group, on the Bot's model and effort, with the usual text box and header controls. It is nested under the Bot (spawned_by) once its host has it, and is a draft till something is sent in it: left empty, it leaves nothing behind. What is written in it goes only to that new chat, never to a plain one: the host starts the chat before its first message goes, and if the host doesn't start it the text stays in the box (on the phone the host starts the draft as it's opened, so nothing is written before it has) and \"<host> didn't start it: <why>\" is said in a toast. On the desktop the draft opens in the open window, its row \"New session\" is listed under the Bot once something is typed, and the status line shows the Bot's folder on its host, this machine or another. Until the chat is open, the text stays in the box, the send button is off, and the draft stays; leaving for another chat or a new one keeps the text in the box it goes to."}
       ],
       "decisions": [{"said": "The agent that built New session added a setup dialog the owner hadn't asked for; New session should open a normal lazy draft, with no modal (paraphrased, relayed by the coordinator, the owner's own message not found by owner_said.py)", "rule": "A Bot's New session opens a normal lazy draft for one of its child chats, on every app: no modal and no setup dialog; the host, model and folder are picked in the header like any new chat's, and the chat is made on its host only on the first send", "decided": "2026-11-28", "source": [{"relayed_by": "coordinator", "about": "nassir90/Baude#578"}]}]
     },
@@ -98,7 +98,7 @@
   ],
   "states": [
     {"name": "this machine's session (plain)", "shows": "Rename…, Move to Group ▸, Archive (or Unarchive), Move to Trash…. Order: Rename…, Move to Group, Archive, Move to Trash…."},
-    {"name": "host session, idle", "shows": "Rename…, [New session (a Bot's), Make Bot… | Bot Settings…, Rotate and Turn Back into a Chat], Move to Group ▸, Archive, Move to Trash…."},
+    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | New session, Bot Settings…, Rotate and Turn Back into a Chat], Move to Group ▸, Archive, Access…, Move to Trash…."},
     {"name": "host session, working or waiting", "shows": "Rename…, Move to Group ▸, Stop, Move to Trash… (no Archive; an archived one at a turn shows Unarchive)."},
     {"name": "host session, host gone", "shows": "Move to Group ▸, Delete. (Rename… is absent.)"},
     {"name": "host session, deactivated", "shows": "As gone: Move to Group ▸, Delete."}

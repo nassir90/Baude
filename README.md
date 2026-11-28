@@ -96,20 +96,25 @@ streaming text, command and file-change results, MCP tool results, basic approva
 prompts, and interruption. Claude slash commands, conversation forks and rewinds,
 and Codex-specific approval requests without a Baude UI are outside its scope.
 
-## Google Antigravity backend (draft)
+## Google Antigravity backend
 
 Baude can run Google's official Antigravity ACP agent through the `agy` CLI, as T3 Code does.
-Install Antigravity CLI 1.5.1 or later and sign in with `agy acp --login` on the machine
-hosting the chat. Baude finds `agy` on that host's `PATH`; set `BAUDE_ANTIGRAVITY` to its
-executable path if needed, then restart `baude-headless`. To keep Baude's login separate
-from another Antigravity installation, set `BAUDE_ANTIGRAVITY_HOME` to a directory and
-sign in with `agy acp --gemini-dir "$BAUDE_ANTIGRAVITY_HOME" --app-data-dir antigravity-acp --login`.
+Install Antigravity CLI 1.5.1 or later using Settings → Dependencies. Baude finds `agy`
+on the chat host's `PATH`; set `BAUDE_ANTIGRAVITY` to its executable path if needed, then
+restart `baude-headless`. In Settings → Subscriptions, add an Antigravity account with
+Google sign-in or an existing signed-in Gemini directory on that host. Each added login
+uses its own directory, and a chat can select its account in the provider picker. The
+CLI default uses the host's existing Antigravity sign-in; you can sign in to it with
+`agy acp --login` on the host. `BAUDE_ANTIGRAVITY_HOME` optionally selects a directory
+for that CLI default.
 
 The picker shows **Antigravity (default model)** as soon as `agy` is found. It discovers
 the account's available models from ACP and adds them to the picker after sign-in. The
 headless command also accepts `--model antigravity/default` or `antigravity/<model-id>`.
 Baude keeps display history and resumes the native Antigravity session by ID. Text,
 tool calls, permission requests, usage, cancellation, and image prompts are supported.
+Subscriptions shows the latest ACP context tokens and reported cost per account. The
+CLI does not expose subscription allowance limits through ACP, so no limit bars are shown.
 Manual and Bypass Permissions work; Auto is available when the Antigravity agent reports
 its native Auto mode. The CLI remains responsible for its own authentication, downloads,
 files, terminal, and model availability. Baude does not install or update `agy`.

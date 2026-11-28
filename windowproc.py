@@ -382,7 +382,7 @@ class WindowProc:
         runs under (None for a chat its host doesn't list yet: the one a new chat there takes); else None, as with no
         chat."""
         program = model_program(self.model or "default")
-        if program not in ("claude", "codex"):
+        if program not in ("claude", "codex", "antigravity"):
             return None
         if self.remote is not None:
             listed = self.remote.sessions.get(self.session_id) if self.session_id else None

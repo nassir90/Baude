@@ -76,9 +76,9 @@ class Server(ServerRunning, ServerSessions):
         self.codex_catalogs = {}
         self.codex_refresh_at = {}
         self.codex_refreshing = set()
-        self.antigravity_catalog = []
-        self.antigravity_refresh_at = 0
-        self.antigravity_refreshing = False
+        self.antigravity_catalogs = {}
+        self.antigravity_refresh_at = {}
+        self.antigravity_refreshing = set()
         me = os.path.join(self.state_dir, "server.json")
         try:
             with open(me, encoding="utf-8") as f:
@@ -207,35 +207,36 @@ class Server(ServerRunning, ServerSessions):
         codex_models = self.codex_models()
         return (claudes or self.me.get("claude_models") or []) + codex_models + self.antigravity_models() + models.runnable_models()
 
-    def antigravity_models(self):
+    def antigravity_models(self, profile=None):
         exe = models.antigravity_exe()
         if not exe:
             return []
+        profile = accounts.selected("antigravity") if profile is None else profile
         with self.lock:
-            if not self.antigravity_refreshing and time.monotonic() >= self.antigravity_refresh_at:
-                self.antigravity_refreshing = True
-                threading.Thread(target=self.refresh_antigravity_models, args=(exe,), daemon=True).start()
-            return self.antigravity_catalog or [models.ANTIGRAVITY_DEFAULT]
+            if profile not in self.antigravity_refreshing and time.monotonic() >= self.antigravity_refresh_at.get(profile, 0):
+                self.antigravity_refreshing.add(profile)
+                threading.Thread(target=self.refresh_antigravity_models, args=(exe, profile), daemon=True).start()
+            return self.antigravity_catalogs.get(profile) or [models.ANTIGRAVITY_DEFAULT]
 
-    def refresh_antigravity_models(self, exe):
+    def refresh_antigravity_models(self, exe, profile):
         try:
-            choices = antigravity.discover(exe, self.state_dir)
+            choices = antigravity.discover(exe, self.state_dir, profile)
         except Exception as exc:
             self.log(f"Antigravity model discovery: {exc}")
             choices = []
         with self.lock:
             # agy unpacks a large runtime on launch; a failed sign-in must not trigger a probe every minute.
-            self.antigravity_refresh_at = time.monotonic() + (300 if choices else 600)
-            self.antigravity_refreshing = False
-            if choices and choices != self.antigravity_catalog:
-                self.antigravity_catalog = choices
+            self.antigravity_refresh_at[profile] = time.monotonic() + (300 if choices else 600)
+            self.antigravity_refreshing.discard(profile)
+            if choices and choices != self.antigravity_catalogs.get(profile):
+                self.antigravity_catalogs[profile] = choices
                 self.changed()
 
-    def antigravity_model_update(self, choices):
+    def antigravity_model_update(self, choices, profile=""):
         with self.lock:
-            if choices and choices != self.antigravity_catalog:
-                self.antigravity_catalog = choices
-                self.antigravity_refresh_at = time.monotonic() + 300
+            if choices and choices != self.antigravity_catalogs.get(profile):
+                self.antigravity_catalogs[profile] = choices
+                self.antigravity_refresh_at[profile] = time.monotonic() + 300
                 self.changed()
 
     def codex_models(self, profile=None):

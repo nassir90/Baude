@@ -237,8 +237,8 @@ class ServerSessions:
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=resumed)
         program = models.model_program(s.meta.get("model"))
-        if program in ("claude", "codex") and (missing := deps.missing(program)) is not None:  # (its program isn't
-            raise deps.Missing(missing, "report.claude" if program == "claude" else "programs.codex")  # here at all)
+        if program in ("claude", "codex", "antigravity") and (missing := deps.missing(program)) is not None:
+            raise deps.Missing(missing, "report.claude" if program == "claude" else f"programs.{program}")
         if not self.can_run(s.meta.get("model")):
             raise OSError(wording.say("host_errors.cant_run", host=self.me["name"], model=s.meta.get("model")))
         extra = list(run["extra"])
@@ -298,10 +298,13 @@ class ServerSessions:
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
             agentproxy.PiSession.release(agentproxy.pi_sessions(), s.meta.get("cli_id") or s.id)  # elsewhere no more)
         if run["program"] == "antigravity":
+            profile = s.meta.get("profiles", {}).get("antigravity", "")
             s.proc = antigravity.AntigravityProc(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
                 s.meta["cwd"], s.meta["model"], resume=run["resume"], exe=run["exe"], mode=run["mode"],
-                env={**s.env, **(self.env or {})}, on_models=self.antigravity_model_update, instructions=told)
+                env={**s.env, **(self.env or {})},
+                on_models=lambda choices: self.antigravity_model_update(choices, profile),
+                instructions=told, profile=profile)
         elif run["program"] == "codex":
             profile = s.meta.get("profiles", {}).get("codex", "")
             # The server keeps the display history. Codex resumes its own thread using its native ID.
@@ -1204,6 +1207,8 @@ class ServerSessions:
                 self.account_kept(program, profile)
                 self.changed()
                 return
+            if program == "antigravity" and not s.meta.get("draft"):
+                raise ValueError(wording.say("subscriptions.antigravity_switch_existing"))
             s.account_to = profile
         self.switch_account(s)
 

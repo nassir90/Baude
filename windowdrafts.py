@@ -1466,7 +1466,7 @@ class WindowDrafts:
         host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
         that, picked, till another's picked."""
         program = model_program(shown or self.model)
-        if program not in ("claude", "codex") or not self.session_id:
+        if program not in ("claude", "codex", "antigravity") or not self.session_id:
             return
         if self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
             return

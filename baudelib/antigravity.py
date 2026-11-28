@@ -17,6 +17,7 @@ import uuid
 
 from baudelib.claude import ClaudeProc
 from baudelib.models import antigravity_choices
+from baudelib import accounts
 
 
 def content_blocks(content):
@@ -52,12 +53,13 @@ class AntigravityProc(ClaudeProc):
     """Translate ACP notifications and RPC responses to Baude's Claude-shaped host events."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, env=None, exe=None, mode="default",
-                 on_models=None, instructions=None):
+                 on_models=None, instructions=None, profile=""):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.dispatch = lambda fn: fn()
         self.cwd, self.model, self.mode = cwd, model, mode
         self.on_models = on_models
         self.instructions = instructions
+        self.profile = profile
         self.init_rid = "antigravity-initialize"
         self.req_ids = itertools.count(1)
         self.pending = {}
@@ -77,7 +79,8 @@ class AntigravityProc(ClaudeProc):
         self.config = []
         self.available_modes = []
         args = [exe, "acp"]
-        if home := os.environ.get("BAUDE_ANTIGRAVITY_HOME"):
+        home = accounts.antigravity_home(profile) if profile else os.environ.get("BAUDE_ANTIGRAVITY_HOME")
+        if home:
             args += ["--gemini-dir", os.path.abspath(os.path.expanduser(home)),
                      "--app-data-dir", "antigravity-acp"]
         self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -332,6 +335,12 @@ class AntigravityProc(ClaudeProc):
                 self.context_usage = {"totalTokens": update.get("used"), "maxTokens": update.get("size"),
                                       "showWithoutLimit": True}
                 self.emit("system", subtype="codex_context", usage=self.context_usage)
+                cost = update.get("cost") if isinstance(update.get("cost"), dict) else {}
+                try:
+                    accounts.note_antigravity_usage(self.profile, self.thread, update.get("used"),
+                                                    update.get("size"), cost.get("amount"), cost.get("currency"))
+                except OSError as exc:
+                    self.emit("_stderr", text=f"Antigravity usage could not be saved: {exc}")
         elif method == "session/request_permission" and "id" in message:
             rid = message["id"]
             tool = params.get("toolCall") or {}
@@ -413,7 +422,7 @@ class AntigravityProc(ClaudeProc):
                 self.p.kill()
 
 
-def discover(exe, cwd):
+def discover(exe, cwd, profile=""):
     """Ask a disposable ACP session for this account's available models."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="baude-antigravity-") as folder:
@@ -421,7 +430,7 @@ def discover(exe, cwd):
         ready = threading.Event()
         proc = AntigravityProc(lambda _p, msg: ready.set() if msg.get("type") == "control_response" else None,
                                lambda _code: ready.set(), folder, "antigravity/default", exe=exe,
-                               on_models=lambda choices: result.extend(choices))
+                               on_models=lambda choices: result.extend(choices), profile=profile)
         try:
             ready.wait(90)
             return result

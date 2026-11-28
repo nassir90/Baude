@@ -22,6 +22,7 @@
     "Deps.kt:DepRow",
     "subscriptionpage.py:CodexLogin",
     "subscriptionpage.py:add_codex",
+    "subscriptionpage.py:add_antigravity",
     "baudelib/hostaccounts.py:_sign_in",
     "Subscriptions.kt:CodexLogin",
     "Subscriptions.kt:CodexSignIn",
@@ -47,7 +48,7 @@
     },
     {
       "name": "provider group",
-      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account.",
+      "shows": "On Baude desktop, Claude, Codex, then Antigravity: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account. Antigravity cards show ACP context tokens and reported cost when available; ACP does not expose subscription allowance limits. Its Add account dialog signs in with Google in an isolated host directory or uses an existing Gemini directory. The phone currently shows Claude and Codex only.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",

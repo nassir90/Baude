@@ -3,7 +3,9 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
+from baudelib import accounts, wire
 from baudelib.antigravity import AntigravityProc, content_blocks, discover, model_options, supported_version
 
 
@@ -41,6 +43,23 @@ for line in sys.stdin:
 
 
 class AntigravityTests(unittest.TestCase):
+    def test_account_usage_is_isolated_and_valid_on_wire(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                patch("baudelib.accounts.settings_path", return_value=os.path.join(folder, "settings.json")):
+            accounts._cache.clear()
+            one = accounts.add("antigravity", "Work", os.path.join(folder, "work"))
+            two = accounts.add("antigravity", "Personal", os.path.join(folder, "personal"))
+            accounts.note_antigravity_usage(one, "same-native-id", 120, 1000, 0.02, "USD")
+            accounts.note_antigravity_usage(two, "same-native-id", 40, 1000, 0.01, "USD")
+            tracked = accounts.antigravity_usage(one)
+            self.assertEqual((tracked["context_used"], tracked["cost_usd"]), (120, 0.02))
+            self.assertEqual(accounts.antigravity_usage(two)["context_used"], 40)
+            self.assertFalse(wire.problems({"op": "accounts", "accounts": accounts.listing(),
+                                            "antigravity_usage": {one: tracked}}, ("reply",)))
+            accounts.remove(one)
+            self.assertIsNone(accounts.antigravity_usage(one))
+            accounts._cache.clear()
+
     def test_model_and_content_translation(self):
         self.assertEqual(model_options([{"id": "model", "type": "select", "options": [
             {"group": "g", "options": [{"value": "gemini-3", "name": "Gemini 3"}]}]}])[1]["value"],

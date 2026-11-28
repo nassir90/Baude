@@ -91,9 +91,11 @@ class WindowProc:
                 (wording.say("report.picked"), self.model if self.model and self.model != init.get("model") else ""),
                 (wording.say("meta_settings.effort"), self.effort or "default"),
                 (wording.say("report.mode"), self.mode),
-                (wording.say("new_session.host"), THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                (wording.say("new_session.host"), THIS_MACHINE if here else
+                 f"{remote_name(self.chat_remote())} ({self.chat_remote().host})"),
                 (wording.say("subscriptions.account"), self.chat_account() or wording.say("subscriptions.cli_default")),
-                (wording.say("common.folder"), self.cwd or ""), (wording.say("report.claude_code"), init.get("claude_code_version") or ""),
+                (wording.say("common.folder"),
+                 (self.agent_folder() if getattr(self, "agent_draft", None) is not None else self.cwd) or ""), (wording.say("report.claude_code"), init.get("claude_code_version") or ""),
                 (wording.say("report.context"),
                  (shown + (f" ({', '.join(tip)})" if tip else "")) if (shown := ctx.label.get_text()
                                                                        .removeprefix("context").strip(" :—"))
@@ -331,13 +333,13 @@ class WindowProc:
         self.working_dots.set_working(self.busy)
         here = self.chat_host() == HERE_HOST
         there = None if here else self.remote_folder()
-        self.status.set_text(f"{(remote_path(there, self.remote) if there else '') if not here else self.short_cwd()}"
+        self.status.set_text(f"{(remote_path(there, self.chat_remote()) if there else '') if not here else self.short_cwd()}"
                              f"   {getattr(self, 'status_extra', '')}")
         self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
-        self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
+        self.host_label.set_text(THIS_MACHINE if here else remote_name(self.chat_remote()))
         tip = wording.say("status_bar.host_tip") if here else wording.say("status_bar.host_tip_at",
-                                                                         address=self.remote.host)
+                                                                         address=self.chat_remote().host)
         account = self.chat_account()
         self.host_label.set_tooltip_text(tip + ("\n" + wording.say("subscriptions.account_line", name=account)
                                                 if account else ""))
@@ -403,7 +405,9 @@ class WindowProc:
     def remote_folder(self):
         """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it
         when the chat was attached to (RemoteProc's listing: a new chat it doesn't list yet), else as last said; None
-        till it's said."""
+        till it's said. A Bot's new session not made yet: the folder it'll be made in."""
+        if self.remote is None and getattr(self, "agent_draft", None) is not None:
+            return self.agent_folder()
         sid = self.session_id
         said = (self.remote.sessions.get(sid) or {}).get("cwd") or \
             ((getattr(self.proc, "listing", None) or {}).get("cwd") if isinstance(self.proc, RemoteProc) else None)
@@ -1121,7 +1125,7 @@ class WindowProc:
         self.completer.hide()
         if text in ("/clear", "/new"):
             if self.chat_host() != HERE_HOST:  # (another host's chat: a new one on it, in this chat's folder)
-                self.new_session_on(self.remote, (self.remote.sessions.get(self.session_id) or {}).get("cwd"), keep=False)
+                self.new_session_on(self.chat_remote(), self.remote_folder(), keep=False)
             else:
                 self.switch_to(self.new_session)
             return

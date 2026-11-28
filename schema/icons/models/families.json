@@ -1,5 +1,8 @@
 {
-  "description": "Each model's family, by what its name or value says: the first whose match finds a word of the model's name, else its value's last part (case ignored). Its icon (baude-model-<icon>-symbolic.svg here) is drawn beside the model in the model pickers, and its name heads its models there. A model that matches none is under \"Other\" (common.other), with no icon. A family's names say how its models' ids read as names where no host lists the model (every app's model names: a listed model goes by the name its host gives it): the first whose match is the whole id (case ignored) names it as its as says, each {n} its match's group n with - and _ read as spaces and its first letter a capital (an unmatched group: nothing).",
+  "description": "Each model's family, by what its name or value says: the first whose match finds a word of the model's name, else its value's last part (case ignored). Its icon (baude-model-<icon>-symbolic.svg here) is drawn beside the model in the model pickers, and its name heads its models there. A model that matches none is under \"Other\" (common.other), with no icon. A family's names say how its models' ids read as names where no host lists the model (every app's model names: a listed model goes by the name its host gives it): the first whose match is the whole id (case ignored) names it as its as says, each {n} its match's group n with - and _ read as spaces and its first letter a capital (an unmatched group: nothing). A program's family takes every model that program runs (models.model_program), whatever its name says, before any family above: its icon beside each, its copy (schema/copy) heading them.",
+  "programs": [
+    {"program": "antigravity", "icon": "gemini", "copy": "programs.antigravity"}
+  ],
   "families": [
     {"icon": "claude", "name": "Claude", "match": "claude|opus|sonnet|haiku|fable|^default$",
      "names": [

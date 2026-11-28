@@ -34,6 +34,14 @@ def model_families():
         return [(x["icon"], x["name"], x["match"]) for x in json.load(f)["families"]]
 
 
+def model_programs():
+    """{program: (icon, copy)}: schema/icons/models/families.json's programs' families, by the program
+    (models.model_program) whose every model is of it: its icon (baude-model-<icon>-symbolic), the copy (schema/copy)
+    its models are headed by."""
+    with open(os.path.join(folder("models"), "families.json"), encoding="utf-8") as f:
+        return {x["program"]: (x["icon"], x["copy"]) for x in json.load(f).get("programs", [])}
+
+
 def model_names():
     """[(match, as)]: how models' ids read as names (schema/icons/models/families.json's families' names, in its order):
     the pattern that's the whole id, the name it reads as ({n}: its group n, - and _ as spaces, a capital first)."""

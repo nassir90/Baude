@@ -309,14 +309,15 @@ def effort():
 def window(value, said=None):
     """How many tokens a model's session holds, till it says: its provider's say (Ollama's, an endpoint's, another
     host's), else what its last session said (modelslib.said_window, by said: its value, unless it's kept by
-    another key: Baude's chat on another host's), else WINDOWS'."""
+    another key: Baude's chat on another host's), else WINDOWS' (None for a program it has none for, Antigravity's:
+    its window is known only once its session says it)."""
     program = model_program(value)
     said = (modelslib.window_of(value) if program != "claude" else None) or modelslib.said_window(said or value)
     if said:
         return said
     if program == "claude":
         return 1_000_000 if "[1m]" in value else WINDOWS[program]
-    return WINDOWS[program]
+    return WINDOWS.get(program)
 
 
 def weight(text):

@@ -1849,6 +1849,18 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
         return rotated
     }
 
+    // (a new chat on workshop on Antigravity's model, nothing sent yet: its context meter says no window till its
+    // session says one)
+    @Test fun chatAntigravityFresh() {
+        val first = Mesh.sessions.getValue("h1").first()
+        val fresh = first.json().put("id", "g").put("model", "antigravity/default").put("prompts", 0).put("size", 0)
+        fresh.remove("title")
+        fresh.remove("context")
+        Mesh.sessions["h1"] = listOf(Msg.Session.from(fresh)) + Mesh.sessions.getValue("h1")
+        Mesh.openChat("h1", "g")
+        render("10g-chat-antigravity-fresh") { ChatShell("h1", "g", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
     @Test fun chat() = chatAt("10-chat", "chat")
     /** The chat with the phone's text at a size whose line is taller than the box's buttons. */

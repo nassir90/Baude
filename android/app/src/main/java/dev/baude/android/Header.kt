@@ -280,7 +280,7 @@ fun copiesOf(hostId: String, model: String?): List<Copy> {
 private const val GONE_ACCOUNT = "\u0000gone" // (the provider picker's value for an account since removed the chat's on)
 
 /** Each host's subscription accounts as it last listed them (accounts list; windowdrafts.host_accounts), listed
- * again once they're ACCOUNTS_MS old: what a chat's provider picker lists for a Claude or Codex model. */
+ * again once they're ACCOUNTS_MS old: what a chat's provider picker lists for a Claude, Codex or Antigravity model. */
 object HostSubscriptions {
     const val ACCOUNTS_MS = 30_000L
     val listed = mutableStateMapOf<String, List<Msg.Account>>()

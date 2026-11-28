@@ -69,6 +69,9 @@ class SidebarMenu:
             # (after Bot Settings…; not at a turn, as Archive isn't)
             at = next((i + 1 for i, (_label, action) in enumerate(items) if action == "make_bot"), 1)
             items.insert(at, (wording.say("sidebar.rotate"), "rotate"))
+        if info.get("bot") and info.get("remote") is not None and info["remote"].state == "alive" and \
+                not info["remote"].deactivated and not info.get("dead"):
+            items.insert(1, (wording.say("sidebar.new_session"), "new_session"))
         if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
                 info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
             items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
@@ -224,6 +227,11 @@ class SidebarMenu:
         if info is not None and info.get("remote") is not None:
             info["remote"].request({"op": "bot", "session": info["id"], "bot": None},
                                    lambda reply: self.bot_set(info, reply))
+
+    def new_agent_session(self, info):
+        """A Bot's right-click → New session: a blank child session, configured through the usual header controls."""
+        if info is not None and info.get("bot") and info.get("remote") is not None:
+            self.win.new_agent_session(info)
 
     def rotate(self, info):
         """Rotate: a Bot's conversation archived on its host as a past thread ("<Bot> / <its title>"), and the Bot
@@ -430,6 +438,9 @@ class SidebarMenu:
     def pick_host(self, key):
         """A host picked in New session's dropdown: new sessions made on it, and its chats listed (its name kept too,
         for while it isn't known: new_hosts)."""
+        if getattr(self.win, "agent_draft", None) is not None:
+            self.win.new_agent_host_changed(key)
+            return
         save_settings(new_session_host=key, new_session_host_name=dict(self.new_hosts()).get(key))
         self.show_host_state()
         self.fill()
@@ -437,8 +448,11 @@ class SidebarMenu:
     def fill_new_hosts(self):
         """New session's host, as the network has them now, on the one picked (shown_host)."""
         hosts = self.new_hosts()
+        agent = getattr(self.win, "agent_draft", None)
+        if agent is not None and agent["host_key"] not in dict(hosts):
+            hosts.append((agent["host_key"], agent.get("host_name") or agent["host_key"]))
         self.host_dd.set_choices(hosts)
-        self.host_dd.select(self.shown_host())
+        self.host_dd.select(agent["host_key"] if agent is not None else self.shown_host())
         self.host_dd.set_dimmed({key for key, _name, note in self.known_hosts() if note == "gone"})  # (out of reach:
         # greyed, and picked, why's said: show_host_state)
         (self.host_dd.add_css_class if len(hosts) == 1 else self.host_dd.remove_css_class)("one-provider")  # (dimmed:
@@ -478,6 +492,16 @@ class SidebarMenu:
         """Open folder…: a folder chooser here (pick_folder); with another host picked beside New session, a folder on
         it (ask_host_folder); if that host is gone, deactivated or not known, a toast says why."""
         key = self.host_dd.value() or HERE_HOST
+        agent = getattr(self.win, "agent_draft", None)
+        if agent is not None:
+            r = agent.get("host")
+            if key == HERE_HOST:
+                self.win.pick_agent_folder()
+            elif r is not None and r.state == "alive" and not r.deactivated:
+                self.win.ask_host_folder(r, agent_draft=True)
+            else:
+                toast(self, self.host_state(r))
+            return
         if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:
             toast(self, said)
         elif key != HERE_HOST and r is not None:

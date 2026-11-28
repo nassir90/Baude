@@ -1079,6 +1079,15 @@ class WindowDrafts:
                 self.sync_providers()
             return
         self.outgrown = False  # (another model's window: as its usage says)
+        if getattr(self, "agent_draft", None) is not None:
+            if getattr(self, "agent_starting", False):
+                self.sync_providers()
+                return
+            self.model = value
+            self.sync_providers()
+            self.sync_effort_choices()
+            self.sync_local()
+            return
         if self.remote is not None and model_program(value) != model_program(was) and self.bot_name() and \
                 baudelib.wire.takes(self.remote.info, "rotate"):
             if getattr(self, "busy", False) and self.proc is not None:  # (rotated once the turn's over)
@@ -1231,7 +1240,8 @@ class WindowDrafts:
     def host_lists(self, op):
         """Does this chat's host take op as claude's own modes and always-allow have it, whatever its model's program,
         as it says (its hello's ops: a phone's agents)? Not one that lists no ops: that's said by its program."""
-        ops = None if self.remote is None else self.remote.info.get("ops")
+        host = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
+        ops = None if host is None else (host.info or {}).get("ops")
         return isinstance(ops, list) and op in ops
 
     def sync_models(self, models):
@@ -1244,7 +1254,8 @@ class WindowDrafts:
         was chosen the entry it resolves to is selected instead.
         """
         models = [m for m in models or [] if m.get("value")]
-        if self.remote is not None:  # (a network session: what its server can run, not this machine)
+        agent = getattr(self, "agent_draft", None)
+        if self.remote is not None or agent is not None and agent.get("host") is not None:
             if not any(model_program(m["value"]) == "claude" for m in models):
                 models = [m for m in getattr(self, "claude_models", []) if model_program(m["value"]) == "claude"] + models
         elif models and all(model_program(m["value"]) != "claude" for m in models):
@@ -1252,7 +1263,7 @@ class WindowDrafts:
         else:
             self.claude_models = models
             meta.listed(models, seed=True)  # (what this machine's claude runs: Meta's Intelligence, till Meta's own lists)
-        if self.remote is None:
+        if self.remote is None and agent is None:
             models = [m for m in models if model_program(m["value"]) == "claude"] + \
                 modelslib.runnable_models(wait=self.PROVIDERS_WAIT)
         self.models_info = {m["value"]: m for m in models}
@@ -1284,7 +1295,9 @@ class WindowDrafts:
     def chat_host(self):
         """The host this chat lives on, its files and its agent's tools, as New session's hosts key it: this machine (its
         own claude, or its host process), or the server's."""
-        return HERE_HOST if self.remote is None or baudelib.client.is_here(self.remote.info) else self.remote.key
+        agent = getattr(self, "agent_draft", None)
+        host = self.remote or ((agent or {}).get("host"))
+        return HERE_HOST if host is None or baudelib.client.is_here(host.info) else host.key
 
     def provider_choices(self):
         """[(key, host name, provider name, models)], a host's together: the providers of the chat's host (this
@@ -1294,6 +1307,7 @@ class WindowDrafts:
         chat's host's (providers.elsewhere). Another host's Apple model is one too; the chat's host's own is in
         models_info (providers.group leaves it out)."""
         own, out = self.chat_host(), []
+        chat_remote = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
 
         def add(host, name, models):
             for pid, pname, ms in providerslib.group(models):
@@ -1302,10 +1316,10 @@ class WindowDrafts:
             add(own, THIS_MACHINE, modelslib.runnable_models(wait=False))
             theirs = set()
         else:  # (its own, as it lists them: not those of other hosts' it runs, which are kept beside them)
-            add(own, remote_name(self.remote), [m for m in self.models_info.values() if m["value"] != "default" and
+            add(own, remote_name(chat_remote), [m for m in self.models_info.values() if m["value"] != "default" and
                                                 not modelslib.proxied(m["value"]) and
                                                 not m["value"].startswith("openai/mesh-")])
-            theirs = {self.remote.info.get("id"), own}
+            theirs = {(chat_remote.info or {}).get("id"), own}
         if self.runs_here():  # (Baude's own claude runs it: no host process here to reach another host's from)
             return out
         for p in network().providers():
@@ -1322,7 +1336,7 @@ class WindowDrafts:
 
     def merge_codex_models(self):
         """Use the chat host's current Codex model catalog, independent of Claude initialization."""
-        host = self.remote or local_host()
+        host = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host")) or local_host()
         if host is None or "models" not in host.info:
             return False
         catalog = {m["value"]: m for m in host.info["models"] if model_program(m["value"]) == "codex"}
@@ -1398,7 +1412,8 @@ class WindowDrafts:
         if pick:
             self.model_dd.select(pick)
 
-        here = THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(self.remote)
+        agent_host = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
+        here = THIS_MACHINE if self.chat_host() == HERE_HOST else remote_name(agent_host)
         copies = next((ms for _lead, ms in kinds if any(m["value"] == shown for m in ms)), []) if pid else []
         hosts, picked, self.alike_keys = {}, None, {}
         for m in copies:
@@ -1437,7 +1452,7 @@ class WindowDrafts:
     def host_accounts(self):
         """The subscription accounts of the chat's host, as it last listed them ([] till it has), listed again once
         they're ACCOUNTS_S old; the pickers synced as an answer changes them."""
-        host = self.remote
+        host = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
         if host is None:
             from baudelib import accounts
             try:
@@ -1455,7 +1470,9 @@ class WindowDrafts:
                     return
                 listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
                 host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed)
-                if (was or (0, []))[1] != listed and self.remote is host and self.get_application() is not None:
+                if (was or (0, []))[1] != listed and (self.remote is host or
+                        (getattr(self, "agent_draft", None) or {}).get("host") is host) and \
+                        self.get_application() is not None:
                     self.sync_providers()
             host.request({"op": "accounts", "what": "list"}, answered)
         return said[1] if said else []
@@ -1466,14 +1483,17 @@ class WindowDrafts:
         host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
         that, picked, till another's picked."""
         program = model_program(shown or self.model)
-        if program not in ("claude", "codex", "antigravity") or not self.session_id:
+        if program not in ("claude", "codex", "antigravity") or \
+                (not self.session_id and getattr(self, "agent_draft", None) is None):
             return
-        if self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
+        if self.remote is not None and self.session_id and \
+                (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
             return
         mine = [a for a in self.host_accounts() if a.get("provider") == program]
         if not mine:  # (the CLI's own sign-in alone: nothing else to pick)
             return
-        on = (self.chat_account_info() or {}).get("id") or ""
+        on = ((getattr(self, "agent_draft", None) or {}).get("account") if getattr(self, "agent_draft", None)
+              is not None else (self.chat_account_info() or {}).get("id")) or ""
         choices = [(self.ACCOUNT, wording.say("subscriptions.cli_default"))] + \
             [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
         if self.chat_account_gone():
@@ -1501,6 +1521,10 @@ class WindowDrafts:
         """The chat goes on under another of its host's accounts (profile; "": the CLI's own sign-in)."""
         name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
             wording.say("subscriptions.cli_default")
+        if getattr(self, "agent_draft", None) is not None:
+            self.agent_draft["account"] = profile
+            self.sync_providers()
+            return
         if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it,
             self.account_to = profile  # once its turn's over)
             if getattr(self, "busy", False) and self.proc is not None:

@@ -424,6 +424,13 @@ class WindowProc:
         return bool(self.session_id) and (r := local_host()) is not None and self.session_id in r.sessions
 
     def start_proc(self):
+        if getattr(self, "agent_draft", None) is not None:
+            self.proc = None
+            target = self.agent_draft.get("host")
+            if target is not None:
+                self.sync_models((target.info or {}).get("models", []))
+            self.update_status()
+            return
         if self.remote is not None:
             return self.start_remote_proc()
         if not self.runs_here() and self.session_id is None and not self.resume_pending:
@@ -883,12 +890,18 @@ class WindowProc:
         """The chat's tab shown (from the Feedback tab, a file's code)."""
         self.tabs.show("chat")
 
-    def new_session(self, run_in=None, group=None, carry=False):
-        """A new chat in this folder; run_in: the folder claude runs in, if not this one (a worktree picked with
+    def new_session(self, run_in=None, group=None, carry=False, agent=False):
+        """A new chat in this folder; agent: keep the unstarted Bot child draft; run_in: the folder claude runs in, if not this one (a worktree picked with
         Open folder…). A worktree's chat's folder is its repository, so a new one from there starts in that. group:
         the group it's started in (New session with one group picked in ⋮), kept while it's a draft (another folder or
         model) and dropped once another chat's opened; None: the new chat's before it, if it was one, else none.
         carry: the open chat's gone (carry_on)."""
+        if not agent:
+            self.agent_draft = None
+            self.agent_starting = False
+            self.agent_start_attempt = None
+            self.agent_send_pending = None
+            self.composer_box.gate("agent-starting", False)
         if group is not None or self.remote is None or not (self.remote.sessions.get(self.session_id) or {}).get(
                 "draft"):
             self.draft_group = group or ""
@@ -1404,6 +1417,8 @@ class WindowProc:
         by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's).
         again: the attachments of a turn sent again (a sign-in card's Send again), in place of what's attached now."""
         self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
+        if getattr(self, "agent_draft", None) is not None:
+            return self.start_agent_draft(text, again)
         going = getattr(self, "cut_continuing", False) and text == CUT_CONTINUE  # (Continue's: not the box's to keep)
         if not going:
             self.cut_continuing = False

@@ -31,6 +31,24 @@
     {
       "name": "Ask cards",
       "shows": "One card per ask (no heading over them), newest first, as wide as the tab with the chat's side gutters.",
+      "phone": {
+        "does": "The list sits on the frame (baude.frame, the grey behind the side panel's Tasks, Subagents and Side questions pages) and each ask is an inset card in the inside colour (baude.inside, as Hosts' groups are), its cut fading into that colour",
+        "why": "The owner asked for the side panel pages' grey under the Inbox and the dark inset under each message",
+        "decided": "2026-11-28"
+      },
+      "decisions": [
+        {
+          "said": "Also on mobile, inbox should sit on a gray background (similar to tasks, subagents, isde questisons .etc) and the messages themselves should have the dark inset background.",
+          "rule": "Every app's Inbox on a phone puts its list on the frame colour its side panel pages use and draws each ask as a card in the inside colour, with no card colour of its own.",
+          "decided": "2026-11-28",
+          "source": [
+            {
+              "session": "25de5738-9230-40a5-be10-70c78dae3bab",
+              "message": "9ce0edc4-86b9-4597-b333-286fa9180d83"
+            }
+          ]
+        }
+      ],
       "parts": [
         {
           "name": "Head",

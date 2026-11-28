@@ -60,7 +60,7 @@
     },
     {
       "name": "provider picker",
-      "shows": "Left of the model picker, a drop-down button with an arrow showing where the chat's model runs, written \"<host> / <provider>\" (for example \"local / MLX\"), cut with … in the middle past 24 characters. Only shown while the chat's model is one that runs on a provider (Ollama, MLX, Apple, an OpenAI-compatible server), never for Claude's own models. For a Claude or Codex model whose chat's host keeps a subscription account for it (Settings → Subscriptions), it lists the chat's host's subscriptions for it instead: the CLI's own sign-in (\"CLI default\", itself a subscription, so one added account makes two) first, then each account, each by its name alone (no \"<host> / \": an account is its host's), with no heading, the chat's own picked; an account since removed that the chat is on is listed last as \"Removed subscription\", picked, till another is picked. Not shown for a Claude Desktop chat its host only lists. Its tooltip is \"Subscription this chat runs on\".",
+      "shows": "Left of the model picker, a drop-down button with an arrow showing where the chat's model runs, written \"<host> / <provider>\" (for example \"local / MLX\"), cut with … in the middle past 24 characters. Only shown while the chat's model is one that runs on a provider (Ollama, MLX, Apple, an OpenAI-compatible server), never for Claude's own models. For a Claude, Codex or Antigravity model whose chat's host keeps a subscription account for it (Settings → Subscriptions), it lists the chat's host's subscriptions for it instead: the CLI's own sign-in (\"CLI default\", itself a subscription, so one added account makes two) first, then each account, each by its name alone (no \"<host> / \": an account is its host's), with no heading, the chat's own picked; any subscription disabled on its host is shown slightly greyed out (dimmed, still selectable); an account since removed that the chat is on is listed last as \"Removed subscription\", picked, till another is picked. Not shown for a Claude Desktop chat its host only lists. Its tooltip is \"Subscription this chat runs on\".",
       "copy": [
         "chat_header.provider_tip",
         "chat_header.provider_tip_only"
@@ -103,6 +103,16 @@
           "source": [
             {
               "issue": "BaudeInternal#278"
+            }
+          ]
+        },
+        {
+          "said": "(BaudeInternal#313, paraphrased) disabled providers should be slightly grayed out in the top bar's dropdown",
+          "rule": "Every app's top-bar provider dropdown dims any disabled subscription (the CLI default or an added account disabled on its host) using the app's dim text colour in both light and dark themes, while keeping it selectable",
+          "decided": "2026-11-28",
+          "source": [
+            {
+              "issue": "BaudeInternal#313"
             }
           ]
         }

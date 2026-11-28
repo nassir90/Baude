@@ -231,6 +231,28 @@ class Page(Adw.PreferencesPage):
             self.fill()
         if self.get_mapped():
             self.read_usage([p for p in self.usage_ids() if p not in self.usage])
+        self._sync_windows(reply)
+
+    def _sync_windows(self, reply):
+        """Sync open Baude windows showing this host's chats so their provider dropdown reflects the latest accounts
+        and disabled state immediately."""
+        win = self.get_root()
+        app = win.get_application() if win is not None else None
+        if app is None:
+            return
+        listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
+        disabled = set(reply.get("disabled") or ())
+        now = GLib.get_monotonic_time() / 1e6
+        for w in app.get_windows():
+            if not hasattr(w, "sync_providers"):
+                continue
+            host = getattr(w, "remote", None) or ((getattr(w, "agent_draft", None) or {}).get("host"))
+            if host is None:
+                if self.here:
+                    w.sync_providers()
+            elif getattr(host, "where", None) == self.where or (self.here and wire.is_local(getattr(host, "where", None))):
+                host.accounts_said = (now, listed, disabled)
+                w.sync_providers()
 
     def toast(self, text):
         dialog = self.get_ancestor(Adw.PreferencesDialog)

@@ -1323,6 +1323,12 @@ class WindowRemote:
         missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
         apart = self.host_apart_said()  # (this Mac's host process on other code: said when nothing of the chat's is)
         off = self.subscription_off()
+        prev_off = getattr(self, "shown_subscription_off", None)
+        self.shown_subscription_off = off
+        if prev_off is not None and prev_off != off:
+            if self.remote is not None:
+                self.remote.accounts_said = None
+            self.sync_providers()
         kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
             "disabled" if off else "retry" if self.retrying is not None else "apart" if apart is not None else None
         self.banner_kind = kind

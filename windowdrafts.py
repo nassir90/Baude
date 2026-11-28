@@ -1462,13 +1462,17 @@ class WindowDrafts:
     def host_accounts(self):
         """The subscription accounts of the chat's host, as it last listed them ([] till it has), listed again once
         they're ACCOUNTS_S old; the pickers synced as an answer changes them."""
+        return self._host_accounts_state()[0]
+
+    def _host_accounts_state(self):
+        """(accounts, disabled usage keys) of the chat's host, as it last listed them."""
         host = self.remote or ((getattr(self, "agent_draft", None) or {}).get("host"))
         if host is None:
             from baudelib import accounts
             try:
-                return accounts.listing()
+                return accounts.listing(), {k for k, v in accounts.switches().items() if v["disabled"]}
             except OSError:
-                return []
+                return [], set()
         said = getattr(host, "accounts_said", None)
         if (said is None or GLib.get_monotonic_time() / 1e6 - said[0] >= self.ACCOUNTS_S) and \
                 not getattr(host, "accounts_asking", False):
@@ -1479,18 +1483,20 @@ class WindowDrafts:
                 if reply.get("op") != "accounts":
                     return
                 listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
-                host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed)
-                if (was or (0, []))[1] != listed and (self.remote is host or
+                disabled = set(reply.get("disabled") or ())
+                host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed, disabled)
+                old = (was[1], was[2] if len(was) > 2 else set()) if was else ([], set())
+                if old != (listed, disabled) and (self.remote is host or
                         (getattr(self, "agent_draft", None) or {}).get("host") is host) and \
                         self.get_application() is not None:
                     self.sync_providers()
             host.request({"op": "accounts", "what": "list"}, answered)
-        return said[1] if said else []
+        return (said[1], said[2] if len(said) > 2 else set()) if said else ([], set())
 
     def sync_accounts(self, shown):
         """The provider picker as the chat's subscriptions, the CLI's own sign-in and each account: shown (its model)
         Claude's or Codex's, and its host keeping an account for it; else left as sync_providers left it. Not for a Claude Desktop chat its
-        host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
+        host only lists (nothing of it runs there to move). Disabled subscriptions are dimmed in the menu. An account since removed that the chat's on: listed as
         that, picked, till another's picked."""
         program = model_program(shown or self.model)
         if program not in ("claude", "codex", "antigravity") or \
@@ -1499,7 +1505,8 @@ class WindowDrafts:
         if self.remote is not None and self.session_id and \
                 (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
             return
-        mine = [a for a in self.host_accounts() if a.get("provider") == program]
+        listed, disabled = self._host_accounts_state()
+        mine = [a for a in listed if a.get("provider") == program]
         if not mine:  # (the CLI's own sign-in alone: nothing else to pick)
             return
         on = ((getattr(self, "agent_draft", None) or {}).get("account") if getattr(self, "agent_draft", None)
@@ -1509,7 +1516,10 @@ class WindowDrafts:
         if self.chat_account_gone():
             on = self.ACCOUNT_GONE
             choices.append((on, wording.say("subscriptions.removed_account")))
-        self.provider_dd.set_choices([(None, choices)])
+        from baudelib import accounts as accountslib
+        dimmed = {self.ACCOUNT + profile for profile in ("", *(a["id"] for a in mine))
+                  if accountslib.usage_key(program, profile) in disabled}
+        self.provider_dd.set_choices([(None, choices)], dimmed=dimmed)
         self.provider_dd.select(on if on == self.ACCOUNT_GONE else self.ACCOUNT + on)
         self.provider_dd.set_sensitive(True)
         self.provider_dd.set_visible(True)
@@ -1547,6 +1557,10 @@ class WindowDrafts:
             return
 
         def answered(reply):
+            if reply.get("op") == "accounts" and self.remote is not None and "accounts" in reply:
+                listed_accounts = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
+                self.remote.accounts_said = (GLib.get_monotonic_time() / 1e6, listed_accounts,
+                                             set(reply.get("disabled") or ()))
             if reply.get("error") or reply.get("op") == "error":
                 self.note(reply.get("error") or wording.say("subscriptions.gone"))
             else:

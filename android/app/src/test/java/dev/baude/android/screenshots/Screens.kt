@@ -1052,7 +1052,8 @@ abstract class Screens(private val theme: String) {
             } ?: org.json.JSONObject().put("op", "dir").put("path", m.optString("path")).put("error", "No such folder")
             if (m.optString("op") != "start") return@up null
             val id = if (made++ == 0) "n" else "n$made"
-            println("start ${m.optString("cwd")}: $id") // (where it was asked to start: the run's output says)
+            println("start ${m.optString("cwd")}: $id, model ${m.opt("model")}, effort ${m.opt("effort")}, spawned_by " +
+                "${m.opt("spawned_by")}") // (where and how it was asked to start: the run's output says)
             val s = Msg.Session(id = id, cwd = m.optString("cwd"), created = now, updated = now, state = "idle",
                 mode = "auto", draft = true, group = m.optString("group"), model = m.optString("model").ifBlank { null },
                 effort = m.optString("effort").ifBlank { null }, spawnedBy = m.optString("spawned_by").ifBlank { null })
@@ -1738,6 +1739,26 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
             tap("Juniper", long = true)
             layOut()
             tap("New session", nth = 1)
+        }
+    }
+
+    // (that Bot's new chat, Codex picked in its header before anything's sent: a new draft on it, still under the Bot)
+    @Test fun homeBotNewSessionCodex() {
+        workshopBot()
+        newChat("09h-home-bot-new-session-codex") {
+            val conn = Mesh.conn("h1")!!
+            val init = org.json.JSONObject(conn.info!!.init!!.toString())
+            init.getJSONArray("models").put(org.json.JSONObject().put("value", "codex/gpt-5.4").put("displayName", "GPT-5.4")
+                .put("supportsEffort", true).put("supportedEffortLevels", org.json.JSONArray(listOf("low", "medium", "high"))))
+            conn.info = Msg.Info(id = "h1", name = "workshop", home = "/home/dev", init = init,
+                models = (0 until init.getJSONArray("models").length()).map { init.getJSONArray("models").getJSONObject(it) })
+            tap("Juniper", long = true)
+            layOut()
+            tap("New session", nth = 1)
+            laidOut()
+            tap("Opus 5.5")
+            laidOut()
+            tap("GPT-5.4")
         }
     }
 

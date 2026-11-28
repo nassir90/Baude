@@ -301,7 +301,7 @@ class ServerSessions:
             profile = s.meta.get("profiles", {}).get("antigravity", "")
             s.proc = antigravity.AntigravityProc(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
-                s.meta["cwd"], s.meta["model"], resume=run["resume"], exe=run["exe"], mode=run["mode"],
+                s.meta["cwd"], s.meta["model"], resume=s.meta.get("cli_id"), exe=run["exe"], mode=run["mode"],
                 env={**s.env, **(self.env or {})},
                 on_models=lambda choices: self.antigravity_model_update(choices, profile),
                 instructions=told, profile=profile)
@@ -1285,6 +1285,8 @@ class ServerSessions:
                         accounts.carry_seen(seen) != seen:
                     continue  # (picked again, or written or sent to as it was copied: looked at again)
                 s.meta.setdefault("profiles", {})[program] = to
+                if program == "antigravity":
+                    s.meta.pop("cli_id", None)  # (each account's agy has its own sessions: a new one on it)
                 s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
                 s.account_to, s.account_after_turn = None, False
                 self.account_kept(program, to)

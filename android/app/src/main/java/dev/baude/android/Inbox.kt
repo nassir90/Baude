@@ -306,6 +306,7 @@ fun InboxScreen(back: () -> Unit, open: (String, String) -> Unit, ask: (String, 
     val pending = chatsWhere { !it.asks.isNullOrEmpty() }
     val running = chatsWhere { it.state == "working" && it.asks.isNullOrEmpty() }
     AskPictures {
+    CompositionLocalProvider(LocalOpenChat provides open) {
     Box(Modifier.fillMaxSize().background(c.frame)) {
         Column(Modifier.fillMaxSize()) {
             Bar(Wording.Inbox.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
@@ -339,6 +340,7 @@ fun InboxScreen(back: () -> Unit, open: (String, String) -> Unit, ask: (String, 
             }
         }
         ViewerOverlay()
+    }
     }
     }
 }

@@ -435,8 +435,10 @@ def _read(reply):
 
 
 def usage_lines(box, read, narrow=None, as_of=None):
-    """read (a subscription's limits [(key, name, percent, resets)], or what to say instead) drawn into box: a line for
-    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's); as_of (where
+    """read (a subscription's limits [(key, name, percent, resets)], an Antigravity subscription's tracked usage
+    {context_used, context_size, cost_usd}, or what to say instead) drawn into box: a line for each limit, its name and
+    percentage, its bar under it (Antigravity's: Latest Context, its tokens of its window's and its bar, then its
+    reported cost dim) (a Subscriptions card's, and ☰'s usage row's); as_of (where
     they're as its chats' turns last said them: when), Last update <how long ago> dim under them. narrow (☰'s:
     its width in characters, MenuUsage.fit's): no word asks for more width than the row's, a limit's name cut with …
     where it doesn't fit, what's said instead wrapped within it."""
@@ -444,9 +446,10 @@ def usage_lines(box, read, narrow=None, as_of=None):
         box.remove(child)
     if isinstance(read, dict):
         used, size = read.get("context_used"), read.get("context_size")
-        if isinstance(used, int) and isinstance(size, int):
-            box.append(Gtk.Label(label=wording.say("subscriptions.antigravity_context", used=f"{used:,}",
-                                                    size=f"{size:,}"), xalign=0, wrap=True))
+        if isinstance(used, int) and isinstance(size, int) and size > 0:
+            _bar(box, wording.say("subscriptions.antigravity_context"),
+                 wording.say("subscriptions.antigravity_tokens", used=f"{used:,}", size=f"{size:,}"), used / size,
+                 narrow)
         if isinstance(read.get("cost_usd"), (int, float)):
             box.append(Gtk.Label(label=wording.say("subscriptions.antigravity_cost",
                                                     cost=f"{read['cost_usd']:.4f}"), xalign=0, wrap=True,
@@ -457,18 +460,24 @@ def usage_lines(box, read, narrow=None, as_of=None):
                              css_classes=["dim-label"], **({"max_width_chars": narrow} if narrow else {})))
         return
     for key, name, percent, resets in read:
-        line = Gtk.Box(spacing=8)
-        line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True,
-                              **({"ellipsize": 3, "max_width_chars": 1} if narrow else {"wrap": True})))
-        line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
-                              css_classes=["dim-label", "numeric"]))
-        box.append(line)
-        box.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, percent / 100))))
+        _bar(box, limit_label(key, name, resets), wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
+             percent / 100, narrow)
     if as_of is not None:
         from widgets import say_time
         before, _, after = wording.say("subscriptions.last_update", ago="\0").partition("\0")
         box.append(say_time(Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
                                       **({"max_width_chars": narrow} if narrow else {})), as_of, before, after))
+
+
+def _bar(box, name, amount, fraction, narrow):
+    """A line of name and amount (dim, at its end) with a bar under it filled fraction of the way: a limit's, or an
+    Antigravity subscription's latest context (its tokens of its window's)."""
+    line = Gtk.Box(spacing=8)
+    line.append(Gtk.Label(label=name, xalign=0, hexpand=True,
+                          **({"ellipsize": 3, "max_width_chars": 1} if narrow else {"wrap": True})))
+    line.append(Gtk.Label(label=amount, css_classes=["dim-label", "numeric"]))
+    box.append(line)
+    box.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, fraction))))
 
 
 def open_subscriptions(win):

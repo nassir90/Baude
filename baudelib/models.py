@@ -377,6 +377,8 @@ def codex_exe():
 
 def model_program(value):
     """The program a model runs on: Claude Code, Codex, apple-claude, or pi-claude."""
+    if not isinstance(value, str) or value in ("opus", "sonnet", "haiku", "fable") or value.startswith("claude-"):
+        return "claude"  # common session models need no scan of the downloaded MLX models
     if (agent := proxied(value)) is not None:  # (only a model with no API is run so: Apple's, else MLX's)
         return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
     if isinstance(value, str) and value.startswith("codex/"):

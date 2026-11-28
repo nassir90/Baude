@@ -422,6 +422,44 @@
       ]
     },
     {
+      "name": "Add Antigravity account dialog",
+      "shows": "Heading \"Add Antigravity account\"; \"Account name\"; a two-way switcher, Login (picked) and Folder; under Folder only, \"Existing Gemini directory on this host\" and the accent button Use signed-in folder; under Login, the accent button Sign in; Close. Sign in runs agy acp --login on the host with an isolated Gemini directory of the account's own, shown as a sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Antigravity…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed) and Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again. Cancel stops it and gives back the fields and button; Close stops it.",
+      "copy": [
+        "subscriptions.add_antigravity",
+        "subscriptions.antigravity_signing_in",
+        "subscriptions.name_hint",
+        "subscriptions.new_login",
+        "common.folder",
+        "subscriptions.antigravity_folder_hint",
+        "subscriptions.use_folder",
+        "sign_in.sign_in",
+        "sign_in.starting",
+        "sign_in.page_there",
+        "sign_in.open_page_there",
+        "sign_in.code_hint",
+        "sign_in.checking_code",
+        "sign_in.failed",
+        "subscriptions.antigravity_failed",
+        "subscriptions.not_antigravity_home",
+        "common.continue",
+        "common.cancel",
+        "common.try_again",
+        "common.close"
+      ],
+      "decisions": [
+        {
+          "said": "(BaudeInternal#333, paraphrased) the Add Antigravity account sign-in flow said it was signing in to Claude instead of Antigravity",
+          "rule": "Every app's subscription sign-in card names the provider being signed in to (\"Signing in to Claude…\", \"Signing in to Codex…\", \"Signing in to Antigravity…\") in both Add account and Sign In Again, never reusing another provider's wording",
+          "decided": "2026-11-28",
+          "source": [
+            {
+              "issue": "BaudeInternal#333"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Rename dialog",
       "shows": "Heading \"Rename <name>\", the name to edit, Rename, Close.",
       "copy": [
@@ -439,9 +477,10 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the Claude sign-in card, as Add Claude account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the Claude sign-in card, as Add Claude account's. An Antigravity account's: Sign in, then the Antigravity sign-in card (\"Signing in to Antigravity…\"), as Add Antigravity account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
       "copy": [
         "subscriptions.sign_in_heading",
+        "subscriptions.antigravity_signing_in",
         "deps.copied"
       ]
     },

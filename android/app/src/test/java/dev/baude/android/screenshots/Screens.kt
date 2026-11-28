@@ -245,7 +245,7 @@ abstract class Screens(private val theme: String) {
     }
 
     // (Settings → Subscriptions scrolled to Antigravity: its CLI default's and Studio's latest context as a bar with
-    // its reported cost, Lab's with no chat yet; then Studio's ⋮;
+    // its reported cost, Lab's with no chat yet; then the CLI default's ⋮ (Disable alone);
     // then Add account, Login and Folder)
     @Test fun subscriptionsAntigravity() {
         antigravityFixture()

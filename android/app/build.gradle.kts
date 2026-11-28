@@ -1023,7 +1023,7 @@ abstract class BaudeIcons : DefaultTask() {
         val where = "models/families.json"
         @Suppress("UNCHECKED_CAST")
         val doc = groovy.json.JsonSlurper().parse(dir.resolve("families.json")) as Map<String, Any?>
-        if (doc.keys != setOf("description", "families")) throw GradleException("schema/icons/$where: a description and families, and nothing else")
+        if (doc.keys != setOf("description", "families", "programs")) throw GradleException("schema/icons/$where: a description, families and programs, and nothing else")
         val out = StringBuilder()
         out.append("// Made from schema/icons/models as the app's built (build.gradle.kts's baudeIcons): never edited, never kept.\n")
         out.append("package dev.baude.android\n\n")
@@ -1048,6 +1048,21 @@ abstract class BaudeIcons : DefaultTask() {
             }
             out.append("            Family(${quoted(x["name"] as String)}, Regex(${quoted(x["match"] as String)}), Adwaita.$member")
             out.append(if (names.isEmpty()) "),\n" else ", listOf(${names.joinToString(", ")})),\n")
+        }
+        out.append("        )\n    }\n\n")
+        out.append("    /** Each program's family (its models', whatever they're called: pickers.MODEL_PROGRAMS), by the program. */\n")
+        out.append("    val programs: Map<String, Family> by lazy {\n        mapOf(\n")
+        for (x in doc["programs"] as List<Map<String, Any?>>) {
+            val program = x["program"] as? String ?: throw GradleException("schema/icons/$where: a program's family with no program")
+            val icon = x["icon"] as? String ?: throw GradleException("schema/icons/$where: $program's family with no icon")
+            val member = pascal("model-$icon")
+            if (drawn[member] != "models/baude-model-$icon-symbolic.svg")
+                throw GradleException("schema/icons/$where: no baude-model-$icon-symbolic.svg for $program")
+            val copy = (x["copy"] as? String)?.split(".")?.takeIf { it.size == 2 }
+                ?: throw GradleException("schema/icons/$where: $program's family's copy isn't <group>.<message>")
+            val words = { s: String -> s.split("_").mapIndexed { i, w -> if (i == 0) w else w.replaceFirstChar { it.uppercase() } }.joinToString("") }
+            val name = "Wording.${words(copy[0]).replaceFirstChar { it.uppercase() }}.${words(copy[1])}"
+            out.append("            ${quoted(program)} to Family($name, Regex(\"(?!)\"), Adwaita.$member),\n")
         }
         return out.append("        )\n    }\n}\n").toString()
     }

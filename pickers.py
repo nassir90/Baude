@@ -16,6 +16,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import icons  # noqa: E402  (schema/icons: every app's icons, the Android app's too)
+from baudelib import models  # noqa: E402
 from baudelib import providers  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402
 from widgets import RefIcon, WorkingDots, find_label, insert_actions, time_tip, walk  # noqa: E402
@@ -232,15 +233,20 @@ class ChoiceDropDown(Gtk.DropDown):
         return self.strings.get_string(i) if i < len(self.values) else ""
 
 
-# Each model's family, by what its value or name says (the first that matches): the monotone icon its row in a model
-# picker shows (schema/icons/models) and the heading it's listed under. The phone reads the same file.
+# Each model's family, by the program that runs it (Antigravity's: whatever its models are called), else by what its
+# value or name says (the first that matches): the monotone icon its row in a model picker shows (schema/icons/models)
+# and the heading it's listed under. The phone reads the same file.
 MODEL_FAMILIES = icons.model_families()
+MODEL_PROGRAMS = icons.model_programs()
 MODEL_ICONS = icons.folder("models")
 
 
 def model_family(value, label=""):
-    """(key, name) of the family value (labelled label) is of, or (None, "Other"): by its name, else by its value's
-    last part (not what serves it: ollama/…'s "llama", openai/<endpoint>/…'s "openai")."""
+    """(key, name) of the family value (labelled label) is of, or (None, "Other"): its program's (MODEL_PROGRAMS), else
+    by its name, else by its value's last part (not what serves it otherwise: ollama/…'s "llama",
+    openai/<endpoint>/…'s "openai")."""
+    if (program := MODEL_PROGRAMS.get(models.model_program(value))) is not None:
+        return program[0], wording.say(program[1])
     for said in ((label or "").lower().split(), [(value or "").lower().rsplit("/", 1)[-1]]):
         for key, name, pattern in MODEL_FAMILIES:
             if any(re.search(pattern, s) for s in said):

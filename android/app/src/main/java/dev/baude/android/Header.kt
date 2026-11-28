@@ -139,10 +139,12 @@ fun defaultModel(hostId: String): String? = Mesh.conn(hostId)?.info?.init?.optJS
 fun chosen(choices: List<ModelChoice>, model: String?): ModelChoice? =
     choices.firstOrNull { it.value == model } ?: choices.firstOrNull { it.resolved != null && it.resolved == model }
 
-/** The family a model (its value, its name) is of (pickers.model_family: schema/icons/models/families.json): the
- * first that matches a word of its name, else its value's last part (not what serves it: ollama/…'s "llama"); null:
- * none. */
+/** The family a model (its value, its name) is of (pickers.model_family: schema/icons/models/families.json): its
+ * program's (Antigravity's: whatever its models are called), else the first that matches a word of its name, else its
+ * value's last part (not what serves it otherwise: ollama/…'s "llama"); null: none. */
 fun modelFamily(value: String, name: String): ModelFamilies.Family? {
+    // (models.model_program's antigravity: its models' values are antigravity/<id>)
+    ModelFamilies.programs.entries.firstOrNull { value.startsWith("${it.key}/") }?.let { return it.value }
     for (said in listOf(name.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }, listOf(value.lowercase().substringAfterLast('/'))))
         ModelFamilies.all.firstOrNull { f -> said.any { f.match.containsMatchIn(it) } }?.let { return it }
     return null

@@ -1998,6 +1998,29 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
         withMenus("21-chat-model-picker-end")
     }
 
+    // (a chat on Antigravity's Claude Opus 5.5, its model button pressed: Claude's models, Codex's and Antigravity's, every
+    // Antigravity one under Antigravity with its logo, whatever it's called)
+    @Test fun chatModelPickerAntigravity() {
+        val conn = Mesh.conn("h1")!!
+        val init = org.json.JSONObject(conn.info!!.init!!.toString())
+        val listed = init.getJSONArray("models")
+        for ((value, name) in listOf("codex/gpt-5.4-codex" to "GPT 5.4 Codex", "codex/gpt-5.4" to "GPT 5.4",
+                "antigravity/default" to "Antigravity (default model)", "antigravity/gemini-4-hydrogen" to "Gemini 4 Hydrogen",
+                "antigravity/gemini-3.8-flash" to "Gemini 3.8 Flash", "antigravity/gemini-pro-orchestrator" to "Gemini Pro Orchestrator",
+                "antigravity/claude-opus-5-5" to "Claude Opus 5.5"))
+            listed.put(org.json.JSONObject().put("value", value).put("displayName", name))
+        conn.info = Msg.Info(id = "h1", name = "workshop", home = "/home/dev", init = init,
+            models = (0 until listed.length()).map { listed.getJSONObject(it) })
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("model", "antigravity/claude-opus-5-5")) else it }
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        tap("Claude Opus 5.5")
+        laidOut()
+        withMenus("20a-chat-model-picker-antigravity")
+    }
+
     // (a chat on Claude's model whose host keeps two Claude subscriptions, Personal (the chat's) and Work: the provider
     // picker beside the model lists them by name, pressed)
     @Test fun chatSubscriptions() {

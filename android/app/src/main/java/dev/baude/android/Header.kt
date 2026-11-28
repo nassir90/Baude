@@ -62,11 +62,12 @@ val MODES = listOf("default" to Wording.ModeEffort.manual, "acceptEdits" to Word
 val CODEX_MODES = listOf("default" to Wording.ModeEffort.manual, "auto" to Wording.ModeEffort.auto,
     "bypassPermissions" to Wording.ModeEffort.codexBypass)
 
-/** The program a model runs on, as models.model_program says: claude, codex, apple or pi. */
+/** The program a model runs on, as models.model_program says: claude, codex, antigravity, apple or pi. */
 fun program(model: String?): String = when {
     model == null -> "claude"
     model.startsWith("agent/") -> if (model.endsWith("/apple")) "apple" else "pi"
     model.startsWith("codex/") -> "codex"
+    model.startsWith("antigravity/") -> "antigravity"
     model == "apple" -> "apple"
     model.startsWith("ollama/") || model.startsWith("openai/") || model.startsWith("mlx-") -> "pi"
     else -> "claude"
@@ -295,6 +296,9 @@ object HostSubscriptions {
     }
 }
 
+/** The programs a host keeps subscription accounts for (accounts.PROVIDERS): a chat on one picks its account. */
+val SUBSCRIBED = listOf("claude", "codex", "antigravity")
+
 /** Model changes waiting for a turn's end (Baude's move_after_turn): (host, session) -> the value to move to, and
  * how that chat moves (its own). Made once its turn ends, or, its host back after a drop, at once if it's not at one. */
 object Moves {
@@ -387,12 +391,12 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
     val now = chosen(choices, model ?: defaultModel(hostId))
     val prog = program(now?.value ?: model)
     androidx.compose.runtime.LaunchedEffect(hostId, prog) { // (listed again as they age, as Baude's host_accounts does)
-        while (prog == "claude" || prog == "codex") { HostSubscriptions.ask(hostId); kotlinx.coroutines.delay(HostSubscriptions.ACCOUNTS_MS + 500) }
+        while (prog in SUBSCRIBED) { HostSubscriptions.ask(hostId); kotlinx.coroutines.delay(HostSubscriptions.ACCOUNTS_MS + 500) }
     }
     ControlsRow(inBar) {
         val copies = copiesOf(hostId, model)
         val mine = HostSubscriptions.listed[hostId].orEmpty().filter { it.provider == prog }
-        if (copies.isEmpty() && (prog == "claude" || prog == "codex") && mine.isNotEmpty() && s.takenUp != false) { // (its
+        if (copies.isEmpty() && prog in SUBSCRIBED && mine.isNotEmpty() && s.takenUp != false) { // (its
             // host's subscriptions for its model's provider, the CLI's own sign-in first: each a provider, by its name
             // alone, as Baude's sync_accounts lists them; not for a Claude Desktop chat its host only lists: nothing
             // of it runs there)
@@ -445,7 +449,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 if (e != null) { asked.remove("effort"); said("Couldn't change the effort: $e") }
             }
         }
-        if (prog == "claude" || prog == "codex" || lists(hostId, "set_permission_mode")) { // (a host that keeps
+        if (prog in SUBSCRIBED || lists(hostId, "set_permission_mode")) { // (a host that keeps
             // claude's modes whatever the program: a phone's agents)
             val modes = if (prog == "codex") CODEX_MODES else MODES
             val mode = asked["mode"] ?: listed("mode") ?: "default"

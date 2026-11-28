@@ -1187,7 +1187,8 @@ def _(app):
     win = app.window(opts())
     T.wait_for(lambda: win.model_dd.values, "models")
     win.model_dd.set_choices([
-        ("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-4-6", "Sonnet 4.6"), ("claude-haiku-4-5", "Haiku 4.5"),
+        ("default", "Default (recommended)"), ("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-4-6", "Sonnet 4.6"),
+        ("claude-haiku-4-5", "Haiku 4.5"), ("codex/default", "Codex (default model)"),
         ("codex/gpt-5.4-codex", "GPT 5.4 Codex"), ("codex/gpt-5.4", "GPT 5.4"),
         ("antigravity/default", "Antigravity (default model)"), ("antigravity/gemini-4-hydrogen", "Gemini 4 Hydrogen"),
         ("antigravity/gemini-3.8-flash", "Gemini 3.8 Flash"), ("antigravity/gemini-pro-orchestrator", "Gemini Pro Orchestrator"),

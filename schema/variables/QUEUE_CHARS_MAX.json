@@ -1,0 +1,4 @@
+{
+  "description": "A chat's queue, as its host keeps it, at most, in characters of JSON (its messages' pictures and documents too): a message that would take it past this is refused, and stays the head's own.",
+  "const": 8000000
+}

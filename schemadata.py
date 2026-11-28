@@ -168,6 +168,33 @@ def pg_rows(server, database, schema, table, limit=50):
     return pg_mask(json.loads(pg_query(server, database, sql) or "[]"))
 
 
+PG_REFUSED = re.compile(  # (a query's calls refused: the server's files, other backends, its config and WAL,
+    # other connections (dblink), what runs SQL from a string; and identifiers spelled with escapes (U&"…"): any)
+    r"\b(pg_read_\w*file|pg_ls_\w+|pg_stat_file|pg_file_\w+|pg_logdir_ls|lo_import|lo_export|"
+    r"pg_terminate_backend|pg_cancel_backend|pg_signal_backend|pg_log_backend_memory_contexts|pg_reload_conf|"
+    r"pg_rotate_logfile|pg_promote|pg_switch_wal|pg_wal_replay_\w+|pg_create_\w+|pg_drop_\w+|pg_copy_\w+|"
+    r"pg_replication_\w+|pg_logical_\w+|pg_backup_\w+|pg_start_backup|pg_stop_backup|pg_stat_reset\w*|"
+    r"pg_import_system_collations|binary_upgrade_\w+|set_config|dblink(?:_\w+)?|query_to_xml\w*|cursor_to_xml\w*|"
+    r"ts_stat|ts_rewrite)\b|\bu&\"", re.I)
+
+
+def pg_select(server, database, sql, limit):
+    """A query's rows ([{column: value}], limit of them at most), read-only as pg_query runs it; values of
+    secret-looking columns hidden. One statement that reads: it's run as a subquery, so another kind fails, and
+    one with a ; in it (two statements, or one hidden in a string) is refused, as are calls PG_REFUSED names."""
+    if server.get("engine") == "arango":
+        raise ValueError(wording.say("databases.query_postgres"))
+    sql = (sql or "").strip().rstrip(";").strip()
+    if not sql:
+        raise ValueError(wording.say("databases.query_empty"))
+    if ";" in sql:
+        raise ValueError(wording.say("databases.query_one"))
+    if m := PG_REFUSED.search(sql):
+        raise ValueError(wording.say("databases.query_refused", name=m[0]))
+    wrapped = f"select coalesce(json_agg(r), '[]') from (select * from (\n{sql}\n) q limit {int(limit)}) r"
+    return pg_mask(json.loads(pg_query(server, database, wrapped) or "[]"))
+
+
 def pg_mask(rows):
     """Rows with the values of secret-looking columns (password, token, api_key, hash...) hidden."""
     return [{k: ("•••" if PG_SECRET.search(k) and v is not None else v) for k, v in row.items()} for row in rows]

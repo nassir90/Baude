@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a person wrote in an ask's box, sent the asking task's Bot as a message (with the ask): it may answer the ask or put a new version of it.",
+  "properties": {
+    "op": {
+      "const": "inbox_say",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "text": {
+      "type": "string",
+      "description": "What they wrote."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "text"
+  ],
+  "additionalProperties": false
+}

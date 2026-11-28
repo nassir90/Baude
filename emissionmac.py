@@ -9,6 +9,8 @@ import time
 
 import macos  # noqa: E402  (no GTK: before it's loaded)
 from gi.repository import GLib  # noqa: E402
+from baudelib import errorbook  # noqa: E402
+from baudelib.emissionlink import blocks_tracking  # noqa: E402
 from emissioncore import AGENT, CONSOLE_JS, download_path, failure_page, for_bots, objc_sel, once  # noqa: E402
 from emissionpointer import (  # noqa: E402
     ARROW_EDGE, ARROW_SHADOW, GLOW_REACH, HINT_EDGE, RING_EDGE, arrow_at, chevrons, glow_pixels, hint_at,
@@ -119,7 +121,45 @@ class MacWeb:
         if not cls.loaded:
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/WebKit.framework/WebKit")
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Foundation.framework/Foundation")
+            cls.allow_http()
             cls.loaded = True
+
+    @staticmethod
+    def allow_http():
+        """Plain http opens as in any browser (a dev server on app.localhost, a box on the LAN, any address typed):
+        App Transport Security, which WebKit's network process takes from this process's bundle (Python's, which
+        says nothing of it), is told in memory, before WebKit's first asked, that a web view's loads are anyone's
+        (NSAllowsArbitraryLoadsInWebContent: what's meant for a browser; local networking alone leaves *.localhost
+        out)."""
+        send = macos.objc_send
+        ats = send(b"NSDictionary", b"dictionaryWithObject:forKey:",
+                   send(b"NSNumber", b"numberWithBool:", True, types=(ctypes.c_bool,)),
+                   macos.ns_string("NSAllowsArbitraryLoadsInWebContent"), types=(ctypes.c_void_p, ctypes.c_void_p))
+        if info := send(send(b"NSBundle", b"mainBundle"), b"infoDictionary"):
+            send(info, b"setObject:forKey:", ats, macos.ns_string("NSAppTransportSecurity"),
+                 types=(ctypes.c_void_p, ctypes.c_void_p))
+
+    @classmethod
+    def block_tracking(cls, profile, on):
+        """profile's pages from now on blocking cross-site cookies and storage (on), or not (Emission's setting)."""
+        cls.load_kit()
+        send = macos.objc_send
+        nsuuid = send(send(b"NSUUID", b"alloc"), b"initWithUUIDString:", macos.ns_string(profile),
+                      types=(ctypes.c_void_p,))
+        store = send(b"WKWebsiteDataStore", b"dataStoreForIdentifier:", nsuuid, types=(ctypes.c_void_p,))
+        send(nsuuid, b"release")
+        if store:
+            cls.cross_site(store, not on)
+
+    @staticmethod
+    def cross_site(store, allowed):
+        """store's cookies and storage under another site's page (an app's preview on another host signing in, an
+        embedded sign-in) kept as a browser without tracking prevention keeps them (allowed), or blocked as Safari
+        blocks them."""
+        send = macos.objc_send
+        sel = b"_setResourceLoadStatisticsEnabled:"
+        if send(store, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(store, sel, not allowed, types=(ctypes.c_bool,))
 
     @classmethod
     def make_delegate(cls):
@@ -187,7 +227,9 @@ class MacWeb:
         info = send(error, b"userInfo")
         url = cls._text(send(info, b"objectForKey:", macos.ns_string("NSErrorFailingURLStringKey"),
                              types=(ctypes.c_void_p,))) or web.asked
-        web.show_failure(url, cls._text(send(error, b"localizedDescription")))
+        why = cls._text(send(error, b"localizedDescription"))
+        errorbook.note("page_load", domain, why, key=f"{domain}:{code}", code=code)
+        web.show_failure(url, why)
 
     # (each of these answers WebKit on every path: a completion handler never called aborts the app)
 
@@ -348,6 +390,7 @@ class MacWeb:
             send(nsuuid, b"release")
             if not store:
                 raise RuntimeError("WebKit gave no store for this profile")
+            self.cross_site(store, not blocks_tracking(profile))
             send(config, b"setWebsiteDataStore:", store, types=(ctypes.c_void_p,))
             send(config, b"setApplicationNameForUserAgent:", macos.ns_string(self.user_agent()),
                  types=(ctypes.c_void_p,))
@@ -380,6 +423,9 @@ class MacWeb:
         send(self.view, b"setUIDelegate:", delegate, types=(ctypes.c_void_p,))
         self.views[self.view] = self
         self.attached = self.attached_root = self.blocker = None
+        self.holes, self.holes_in_view, self.hole_views = [], [], []  # (where GTK draws over it, cut out: cut_holes)
+        self.holes_frame = None  # (the page's frame as its holes were cut)
+        self.hole_tick, self.hole_frames, self.toasts_seen = None, 0, []  # (watch_toasts)
         self.overlay, self.tab_id = None, None  # (overlay: what's drawn over it, hosted: MacOverlay)
 
     @staticmethod
@@ -514,9 +560,11 @@ class MacWeb:
     def take_event(cls, event):
         """A wheel's turn or a trackpad's gesture over a page (in Emission's window, or hosted in Baude's; not
         read-only), given to its view as it comes, momentum and all: GTK keeps these for its own surface, so the page
-        would never see them. True if it's taken (macos.route_events)."""
+        would never see them; a key, to a page that has the keys (take_key). True if it's taken (macos.route_events)."""
         send = macos.objc_send
         kind = send(event, b"type", ret=ctypes.c_ulong)
+        if kind in cls.KEY_EVENTS:
+            return cls.take_key(event, kind)
         sel = cls.GESTURES.get(kind)
         if sel is None:
             return False
@@ -557,6 +605,8 @@ class MacWeb:
                 continue
             p = g(view, objc_sel(b"convertPoint:fromView:"), at, None)
             box = send(view, b"bounds", ret=R)
+            if any(h.x <= p.x <= h.x + h.w and h.y <= p.y <= h.y + h.h for h in web.holes_in_view):
+                continue  # (a toast's over it there: GTK's)
             if box.x <= p.x <= box.x + box.w and box.y <= p.y <= box.y + box.h:
                 if getattr(web.window, "blocked", False):  # (read-only: not the page's, nor GTK's)
                     if began:
@@ -569,6 +619,73 @@ class MacWeb:
         if began:
             cls.gesture_to = "gtk"
         return False
+
+    KEY_NAMES = {chars: name for name, (_code, chars) in MAC_KEYS.items() if len(chars) == 1}  # (a key's name, by what it types)
+    EDITING = {b"selectAll:", b"copy:", b"cut:", b"paste:", b"undo:", b"redo:"}  # (what ⌘A, C, X, V, Z and ⇧⌘Z run)
+    MOVING = {"Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete"}  # (with ⌘, the page's)
+    KEY_EVENTS = (10, 11, 12)  # (an NSEvent's type: a key's press, its release, a modifier's change)
+    HOLD_JS = ("window.__emission_held = null; addEventListener('keydown', e => setTimeout(() => {"
+               " window.__emission_held = e.defaultPrevented; }), {capture: true, once: true}); return true")
+    HELD_JS = ("for (let i = 0; i < 20 && window.__emission_held === null; i++)"
+               " await new Promise(r => setTimeout(r, 5)); return window.__emission_held === true")
+
+    @classmethod
+    def page_with_keys(cls, ns):
+        """The page whose view its window's keys go to (clicked into, or given them), unless it's read-only or out of
+        sight; None if GTK's widgets have them."""
+        web = cls.views.get(macos.objc_send(ns, b"firstResponder")) if ns else None
+        if web is None or web.attached_root in (None, "parked") or getattr(web.window, "blocked", False):
+            return None
+        return web
+
+    @classmethod
+    def take_key(cls, event, kind):
+        """A key over a window whose page has the keys, given to the page as it comes off AppKit's queue (GTK would
+        keep it for its own widgets: Baude's hold off every key a page has, guard_keys). ⌘C, ⌘X, ⌘V, ⌘A, ⌘Z and ⇧⌘Z
+        go to the page as a key first, then run as its editing unless the page took the key itself (as an Edit menu's
+        would: GTK's menu bar has none). ⌥ and ⌃ keys (option characters, dead keys, ⌥←, ⌃A…) and ⌘ with a movement
+        or deletion key go to the page as they are. Other keys with ⌘ are left to GTK, Baude's and the window's
+        shortcuts first, as Safari's menu's come before its page. True if it's taken."""
+        send = macos.objc_send
+        ns = send(event, b"window")
+        if (web := cls.page_with_keys(ns)) is None:
+            return False
+        flags = send(event, b"modifierFlags", ret=ctypes.c_ulong)
+        mods = tuple(sorted(m for m, bit in MAC_MODS.items() if flags & bit))
+        if kind != 12 and set(mods) - {"shift"}:
+            chars = cls._text(send(event, b"charactersIgnoringModifiers")).lower()
+            name = cls.KEY_NAMES.get(chars, chars)
+            command = MAC_COMMANDS.get((name, mods)) if "cmd" in mods else None
+            if command in cls.EDITING:
+                if kind == 10:
+                    web.edit_after_key(event, command)
+                return True
+            if "cmd" in mods and (name not in cls.MOVING or {"alt", "ctrl"} & set(mods)):
+                return False  # (Baude's or the window's own shortcut: GTK's, which come first)
+            if "ctrl" in mods and name == "Tab":
+                return False
+        send(ns, b"sendEvent:", event, types=(ctypes.c_void_p,))
+        return True
+
+    def edit_after_key(self, event, command):
+        """event (a key press with ⌘) given the page as AppKit gives a key equivalent, then command (copy:, paste:…)
+        run in it, unless the page's own handler for the key prevented its default."""
+        send = macos.objc_send
+
+        def edit(held, _error=None):
+            if not self.view or held == "true":
+                return
+            if command in (b"undo:", b"redo:"):  # (WebKit's editing undone in the window's undo manager, as Edit's
+                undo = send(self.view, b"undoManager")  # Undo does: the view has no undo: of its own)
+                can, do = (b"canUndo", b"undo") if command == b"undo:" else (b"canRedo", b"redo")
+                if undo and send(undo, can, ret=ctypes.c_bool):
+                    send(undo, do)
+            elif send(self.view, b"respondsToSelector:", objc_sel(command), types=(ctypes.c_void_p,),
+                      ret=ctypes.c_bool):
+                send(self.view, command, None, types=(ctypes.c_void_p,))
+        self.run_js(self.HOLD_JS, lambda *_: None)
+        send(self.view, b"performKeyEquivalent:", event, types=(ctypes.c_void_p,), ret=ctypes.c_bool)
+        self.run_js(self.HELD_JS, edit)
 
     @classmethod
     def parking(cls):
@@ -615,6 +732,7 @@ class MacWeb:
         if ns and macos.objc_send(ns, b"firstResponder") == self.view:
             macos.objc_send(ns, b"makeFirstResponder:", macos.objc_send(ns, b"contentView"), types=(ctypes.c_void_p,))
         self.block(False)
+        self.cut_holes([])
         macos.objc_send(self.view, b"removeFromSuperview")
         self.attached = self.attached_root = None
 
@@ -647,6 +765,7 @@ class MacWeb:
             if self.attached is not None:
                 macos.objc_send(self.view, b"setHidden:", True, types=(ctypes.c_bool,))
                 self.block(False)
+                self.cut_holes([])
             return
         if self.attached is not None and root is not self.attached_root:  # (shown again, or in another window)
             self.detach()
@@ -670,8 +789,115 @@ class MacWeb:
         self.block(bool(getattr(self.window, "blocked", False)) and not hidden)
         if self.blocker is not None:
             send(self.blocker, b"setFrame:", frame, types=(R,))
+        self.cut_holes([] if hidden else [(x, y if flipped else cbox.h - y - h, w, h, r)
+                                          for x, y, w, h, r in self.over(root, b)])
+        if not hosted:  # (its own window's: followed each frame while something's over it, a toast moving in or out)
+            self.watch_toasts()
         if hosted and not hidden:
             self.draw_over()
+
+    def over(self, root, page):
+        """What GTK draws over the page, whose place is at page in root: a later child of anything its place is in
+        (an Adw.ToastOverlay's toasts, a Gtk.Overlay's overlays: Baude's lightbox, its terminal) that's shown, takes
+        clicks and overlaps it, as (x, y, w, h, corner radius) in root. A toast's a pill: its ends rounded."""
+        out = []
+        px, py, pw, ph = page.get_x(), page.get_y(), page.get_width(), page.get_height()
+        child = self.place
+        while (parent := child.get_parent()) is not None:
+            above = child.get_next_sibling()
+            while above is not None:
+                if above.get_mapped() and above.get_can_target() and above.get_opacity() > 0:
+                    ok, b = above.compute_bounds(root)
+                    x, y, w, h = (b.get_x(), b.get_y(), b.get_width(), b.get_height()) if ok else (0, 0, 0, 0)
+                    if min(x + w, px + pw) > max(x, px) and min(y + h, py + ph) > max(y, py):
+                        out.append((x, y, w, h, h / 2 if above.get_css_name() == "toast" else 0))
+                above = above.get_next_sibling()
+            child = parent
+        return out
+
+    def cut_holes(self, holes):
+        """GTK's drawing over the page (holes: (x, y, w, h, corner radius) in the content view) shown through it: those
+        cut out of its layer (a mask), and a view over each that takes their clicks and gives them to GTK's, under it
+        (as block's), so a toast's button is pressed, not the page under it. [] for none."""
+        if self.view is None:
+            return
+        send, R = macos.objc_send, macos._rect()
+        f = send(self.view, b"frame", ret=R)
+        frame = (f.x, f.y, f.w, f.h)  # (the page moved or resized under a toast that stayed: cut again, where it is now)
+        if holes == self.holes and frame == self.holes_frame:
+            return
+        self.holes_frame = frame
+        for v in self.hole_views:
+            send(v, b"removeFromSuperview")
+            send(v, b"release")
+        self.hole_views, self.holes, self.holes_in_view = [], holes, []
+        layer = send(self.view, b"layer")
+        send(b"CATransaction", b"begin")
+        send(b"CATransaction", b"setDisableActions:", True, types=(ctypes.c_bool,))  # (cut at once, as GTK draws them)
+        if not holes or self.attached is None:
+            if layer:
+                send(layer, b"setMask:", None, types=(ctypes.c_void_p,))
+            send(b"CATransaction", b"commit")
+            return
+        cg = self.hole_graphics()
+        path = cg.CGPathCreateMutable()
+        cg.CGPathAddRect(path, None, send(self.view, b"bounds", ret=R))
+        for x, y, w, h, r in holes:
+            v = send(send(b"NSView", b"alloc"), b"initWithFrame:", R(x, y, w, h), types=(R,))
+            send(self.attached, b"addSubview:positioned:relativeTo:", v, 1, self.view,
+                 types=(ctypes.c_void_p, ctypes.c_long, ctypes.c_void_p))  # (1: NSWindowAbove)
+            self.hole_views.append(v)
+            box = send(self.view, b"convertRect:fromView:", R(x, y, w, h), self.attached, types=(R, ctypes.c_void_p),
+                       ret=R)
+            self.holes_in_view.append(box)
+            r = min(r, box.w / 2, box.h / 2)
+            cg.CGPathAddRoundedRect(path, None, box, r, r)
+        mask = send(send(b"CAShapeLayer", b"alloc"), b"init")
+        send(mask, b"setFrame:", send(layer, b"bounds", ret=R), types=(R,))
+        send(mask, b"setFillRule:", macos.ns_string("even-odd"), types=(ctypes.c_void_p,))  # (kCAFillRuleEvenOdd: the
+        send(mask, b"setPath:", path, types=(ctypes.c_void_p,))                             # holes left out)
+        send(layer, b"setMask:", mask, types=(ctypes.c_void_p,))
+        send(mask, b"release")
+        cg.CGPathRelease(path)
+        send(b"CATransaction", b"commit")
+
+    @staticmethod
+    def hole_graphics():
+        cg = MacOverlay.graphics()
+        if not getattr(cg, "holes_ready", False):
+            R = macos._rect()
+            cg.CGPathAddRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, R]
+            cg.CGPathAddRoundedRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p, R, ctypes.c_double, ctypes.c_double]
+            cg.holes_ready = True
+        return cg
+
+    def watch_toasts(self):
+        """In its own window (not followed each frame, as a hosted page is): followed each frame from a toast's coming
+        or going (its toast overlays' children changing) till nothing's over it."""
+        if not self.toasts_seen:
+            w = self.place.get_parent()
+            while w is not None:
+                if w.__gtype__.name == "AdwToastOverlay":
+                    kids = w.observe_children()
+                    self.toasts_seen.append((kids, kids.connect("items-changed", lambda *_: self.toast_moved())))
+                w = w.get_parent()
+            if not self.toasts_seen:
+                self.toasts_seen.append((None, None))
+        if self.holes and self.hole_tick is None:
+            self.toast_moved()
+
+    def toast_moved(self):
+        self.hole_frames = 30  # (followed a while whatever's over it: a toast's laid out after it's added)
+        if self.hole_tick is None and self.view is not None:
+            self.hole_tick = self.place.add_tick_callback(self.hole_ticked)
+
+    def hole_ticked(self, *_):
+        self.hole_frames -= 1
+        self.follow()
+        if self.view is not None and (self.holes or self.hole_frames > 0):
+            return True
+        self.hole_tick = None
+        return False
 
     ON_TOP = 1000.0
 
@@ -694,8 +920,9 @@ class MacWeb:
                 return
             self.overlay = MacOverlay(self.view)
         accent = getattr(self.window, "accent", None) or (0.21, 0.52, 0.89)
-        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent:
-            return  # (nothing's moved, and the accent's as it was drawn in)
+        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent and \
+                self.overlay.drawn[2:] == self.overlay.size():
+            return  # (nothing's moved, the accent's as it was drawn in, and the page's the size it was drawn at)
         look = pointer.look()
         self.overlay.draw(look, accent, mine=look["tab"] in (None, self.tab_id))
 
@@ -963,12 +1190,15 @@ class MacWeb:
             send(ns, b"makeFirstResponder:", before, types=(ctypes.c_void_p,))
 
     @staticmethod
-    def page_has_keys(window, when, keyval):
-        """Whether a key GTK hears (at when: its event's time, ms; keyval its key) isn't its own: a page has the keys
-        (clicked into), it's a Bot's key a page handed back, or text a Bot's key made, come with no key of its own
-        (VoidSymbol, at 0) while the Bot types. Your own keys come with theirs, and at their own times."""
-        if when in MacWeb.bot_times or not MacWeb.gtk_has_keys(window):
+    def page_has_keys(window, when, keyval, state=0):
+        """Whether a key GTK hears (at when: its event's time, ms; keyval its key; state its modifiers) isn't its
+        own: it's a Bot's key a page handed back, or text a Bot's key made, come with no key of its own (VoidSymbol,
+        at 0) while the Bot types; or a page has the keys (clicked into) and it's no ⌘ or Ctrl key, which are the
+        window's shortcuts'. Your own keys come with theirs, and at their own times."""
+        if when in MacWeb.bot_times:
             return True
+        if not MacWeb.gtk_has_keys(window):
+            return not state & (1 << 28 | 1 << 2)  # (GDK's META_MASK and CONTROL_MASK)
         return keyval == 0xffffff and not when and time.monotonic() < MacWeb.bot_text_until
 
     def keyed(self):
@@ -1092,6 +1322,14 @@ class MacWeb:
     def close(self):
         if self.view:
             self.block(False)
+            self.cut_holes([])
+            for kids, handler in self.toasts_seen:
+                if kids is not None:
+                    kids.disconnect(handler)
+            self.toasts_seen = []
+            if self.hole_tick is not None:
+                self.place.remove_tick_callback(self.hole_tick)
+                self.hole_tick = None
             if self.overlay is not None:
                 self.overlay.close()
                 self.overlay = None
@@ -1260,12 +1498,17 @@ class MacOverlay:
         send(self.arrow, b"setShadowOffset:", MacPoint(*ARROW_SHADOW), types=(MacPoint,))
         self.drawn = None
 
+    def size(self):
+        """Its width and height now (the page's: it's resized with it)."""
+        box = macos.objc_send(self.view, b"bounds", ret=macos._rect())
+        return box.w, box.h
+
     def draw(self, look, rgb, mine=True):
         """look (BotPointer's) drawn now; mine False: the pointer's in another tab (only the glow drawn here)."""
         send, R = macos.objc_send, macos._rect()
         self.colours(rgb)
         box = send(self.view, b"bounds", ret=R)
-        key = (repr(look), mine, box.w, box.h)
+        key = (repr(look), mine, box.w, box.h)  # (its last two: size()'s)
         if key == self.drawn:
             return
         self.drawn = key

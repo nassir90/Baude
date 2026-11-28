@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A namespace's or a node's part of the stack's totals, a row of its table.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The namespace or node."
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's text."
+    },
+    "keys": {
+      "type": "array",
+      "items": {},
+      "description": "Each column's number (the name's, its text in lower case), or null where there's none (no limit set, nothing requested, no metrics API): what it's sorted by, and what an \"Other (n)\" row adds up."
+    }
+  },
+  "additionalProperties": false
+}

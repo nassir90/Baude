@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's queue changed by another head (queue), or by its host as it sends it: told every head attached to it that may write it, as attach's answer tells one attaching.",
+  "properties": {
+    "op": {
+      "const": "queue_changed",
+      "description": "What it is."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "queue": {
+      "$ref": "ChatQueue.json",
+      "description": "Its queue now."
+    }
+  },
+  "required": ["op", "session", "queue"],
+  "additionalProperties": false
+}

@@ -5,6 +5,7 @@
     "running_in_background": "running in background",
     "denied": "denied",
     "mcp": "MCP",
+    "answered_task": "Answered {$task}",
     "image_not_decoded": "[image could not be decoded]",
     "cut_chars": "… ({$n} chars)",
     "all_occurrences": "all occurrences",
@@ -19,6 +20,10 @@
     "interrupted": ", {$n} interrupted",
     "view_tip": "Open this subagent in the side panel",
     "denied_tool": "Denied {$tool}",
-    "not_answered_tool": "Not answered {$tool}"
+    "not_answered_tool": "Not answered {$tool}",
+    "to_background": "Background",
+    "to_background_tip": "Send to background: it keeps running, and the turn goes on, so a message you send reaches the agent",
+    "not_moved": "Couldn't send {$what} to the background: it isn't running in the foreground",
+    "not_moved_why": "Couldn't send it to the background: {$why}"
   }
 }

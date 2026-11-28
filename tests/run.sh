@@ -13,4 +13,4 @@ fi
 # and the cairo renderer since Xvfb has no GPU.
 exec env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GSK_RENDERER=cairo \
     xvfb-run --auto-servernum --server-args="-screen 0 1280x900x24" \
-    sh -c 'python3 tests/test_baude.py "$@"; baude=$?; python3 tests/test_record.py; exit $((baude || $?))' sh "$@"
+    sh -c 'python3 tests/test_baude.py "$@"; baude=$?; python3 tests/test_record.py; record=$?; python3 tests/test_access.py; exit $((baude || record || $?))' sh "$@"

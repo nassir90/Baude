@@ -30,7 +30,8 @@ private val widthCache = android.util.LruCache<List<Any?>, Dp>(2048)
 
 /** A markdown table as Baude draws one (md-table): a frame with a ruled grid, its first row the head (bold, raised).
  * Short columns are as wide as their text; the long ones (a cell over 40 characters) share what's left of the
- * column, never under 40 characters, and wrap; wider than the column even so, it scrolls sideways. */
+ * column and wrap, within the bubble or column it's in, never under 12 characters; wider than that even so, it
+ * scrolls sideways. */
 @Composable
 fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
     val c = LocalBaude.current
@@ -39,6 +40,8 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
     val density = LocalDensity.current
     val bold = Type.body.copy(fontWeight = FontWeight.Bold)
     val cells = rows.mapIndexed { r, row -> List(columns) { col -> rememberInline(row.getOrElse(col) { "" }) } }
+    val pics = LocalMarkdownPictures.current // (a cell that's only a picture: the picture, where an ask's body has them)
+    val shown = rows.map { row -> List(columns) { col -> pics?.let { imageOnly(row.getOrElse(col) { "" }) } } }
     BoxWithConstraints(Modifier.padding(vertical = 2.dp)) {
         val available = maxWidth
         fun natural(text: AnnotatedString, head: Boolean): Dp {
@@ -48,8 +51,9 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
             }.also { widthCache.put(key, it) }
         }
         val long = (0 until columns).filter { col -> rows.any { it.getOrElse(col) { "" }.length > Tokens.Markdown.tableWrapChars } }
-        val widths = (0 until columns).map { col -> cells.indices.maxOf { r -> natural(cells[r][col], r == 0) } }
-        val char = with(density) { measure.measure("0".repeat(Tokens.Markdown.tableWrapChars), Type.body).size.width.toDp() }
+        val widths = (0 until columns).map { col -> cells.indices.maxOf { r ->
+            shown[r][col]?.let { pics!!.cellWidth(it.second) } ?: natural(cells[r][col], r == 0) } }
+        val least = with(density) { measure.measure("0".repeat(12), Type.body).size.width.toDp() }
         val shortSum = (0 until columns).filter { it !in long }.sumOf { widths[it].value.toDouble() }.dp
         val share = if (long.isEmpty()) 0.dp else (available - 4.dp - shortSum) / long.size - 26.dp
         val shape = RoundedCornerShape(Tokens.Markdown.tableRadius)
@@ -58,13 +62,16 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
                 cells.forEachIndexed { r, row ->
                     val head = r == 0
                     val total = row.indices.fold(0.dp) { sum, col ->
-                        sum + (if (col in long) maxOf(char, minOf(share, widths[col])) else widths[col]) + 24.dp
+                        sum + (if (col in long) maxOf(least, minOf(share, widths[col])) else widths[col]) + 24.dp
                     }
                     Column {
                         Row(Modifier.background(if (head) c.raised.compositeOver(under) else Color.Transparent)) {
                             row.forEachIndexed { col, text ->
-                                val w = if (col in long) maxOf(char, minOf(share, widths[col])) else widths[col]
-                                Text(text, style = if (head) bold else Type.body, color = color, inlineContent = RefIcons.inline,
+                                val w = if (col in long) maxOf(least, minOf(share, widths[col])) else widths[col]
+                                val pic = shown[r][col]
+                                if (pic != null) Box(Modifier.width(w + 24.dp).padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                    pics!!.Cell(pic.first, pic.second)
+                                } else Text(text, style = if (head) bold else Type.body, color = color, inlineContent = RefIcons.inline,
                                     modifier = Modifier.width(w + 24.dp).padding(horizontal = 12.dp, vertical = if (head) 5.dp else 4.dp))
                             }
                         }

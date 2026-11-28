@@ -24,6 +24,7 @@ from pickers import _data_home  # noqa: E402,F401
 
 from baudelib import applist  # noqa: E402  (the logo's PNGs and .icns, and its launcher's drawn again: Record's too)
 from baudelib import bins  # noqa: E402  (the commands in ~/.local/bin the launchers start)
+from baudelib import notifier  # noqa: E402  (Baude's notifications on macOS, posted by an app of its own)
 from baudelib.applist import exec_quote as _exec_quote  # noqa: E402  (Record's and Emission's entries quoted so too)
 
 
@@ -171,9 +172,11 @@ def redraw_logo():
 
 def launcher_logo():
     """The launchers' logos that take the accent (Baude's and Record's, those installed) drawn again in it on a worker
-    thread, where they aren't already."""
+    thread, where they aren't already; on macOS Baude's notifier too (built again with it: notifier.build)."""
     where, accent = LAUNCHER.folder, widgets.load_settings().get("accent")
     theming.off_main("launcher", lambda: applist.redraw_logos(accent, where))
+    if sys.platform == "darwin":
+        theming.off_main("notifier", lambda: notifier.build("Baude", applist.app_logo("Baude", accent)))
     return False
 
 

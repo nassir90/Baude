@@ -46,6 +46,8 @@ from pickers import PALETTE_KEY, HostPicker  # noqa: E402,F401
 from theming import settings_size, settings_switch  # noqa: E402,F401
 from codeview import find_in_focus  # noqa: E402,F401
 from kubeview import KubeView  # noqa: E402,F401
+from dockerview import DockerView  # noqa: E402
+import menufamily  # noqa: E402
 import terminalpane  # noqa: E402  (☰ → Terminal: Record's too)
 from schemaview import SchemaView  # noqa: E402,F401
 from startup import LAUNCHER, apply_scales, record_item, take_restart_state  # noqa: E402
@@ -72,7 +74,7 @@ class SettingsDialog(Adw.PreferencesDialog):
     too, so the two agree; the handlers are given the row, never a closure over this dialog: see discard)"""
 
     def __init__(self, win):
-        super().__init__(title=wording.say("window.settings_title"))
+        super().__init__(title=wording.say("window.settings_title"), content_width=820)  # (its five pages named in full)
         page = widgets.settings_page()
         page.add(meta.settings_group(win.panel.meta))  # (Record's too, and the same settings)
         group = Adw.PreferencesGroup()
@@ -115,6 +117,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
+        import accessview
+        self.add(accessview.Page(win))
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)
@@ -174,6 +178,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.total_cost = 0.0
         self.always_allowed = {}  # (a chat's session id, None for a new one till it has one: the tools always allowed
         # in it, here and on its host)
+        self.host_allowed = {}  # (a chat's session id: the tools its host said it allows always, as it was attached)
         self.attachments = []
         self.chat_sent, self.listed_begun = False, None  # (the sidebar lists the open chat once it's begun)
         self.pending = {}          # control request id -> (callback(response), refused(error) or None) (request)
@@ -253,11 +258,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         view = Gio.Menu()
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
-        tools = Gio.Menu()
-        tools.append(wording.say("window.kubernetes"), "win.kube")
-        tools.append(wording.say("window.database_schemas"), "win.dbschema")
-        tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
+        tools = Gio.Menu()  # (Kubernetes, Docker, Databases, Terminal, Browser: menufamily.attach)
         menu.append_section(None, tools)
+        usage = Gio.Menu()  # (the usage of the subscription the chat runs under: subscriptionpage.attach_menu_usage)
+        menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
@@ -274,6 +278,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.main_menu = menu
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                                   tooltip_text=wording.say("chat_header.menu"))
+        import subscriptionpage
+        menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Record's too)
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the chat's subscription's usage, Record's too)
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
                                          popover=self.signal_menu())
         header.pack_end(menu_btn)
@@ -303,6 +310,12 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         kube = Gio.SimpleAction.new("kube", None)
         kube.connect("activate", lambda *_: self.kube.open())
         self.add_action(kube)
+        docker = Gio.SimpleAction.new("docker", None)
+        docker.connect("activate", lambda *_: self.docker.open())
+        self.add_action(docker)
+        browser = Gio.SimpleAction.new("browser", None)  # (Emission's window on the host picked in the sidebar)
+        browser.connect("activate", lambda *_: menufamily.open_browser(self))
+        self.add_action(browser)
         terminal = Gio.SimpleAction.new("terminal", None)  # (a terminal on the host picked in the sidebar)
         terminal.connect("activate", lambda *_: self.terminal.open())
         self.add_action(terminal)
@@ -373,7 +386,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", lambda *_: setattr(self, "keyed_at", time.monotonic()) or False)
         self.scroller.add_controller(keys)
-        self.connect("realize", lambda *_: self.get_frame_clock().connect_after("layout", self.on_layout))
+        self.connect("realize", lambda *_: (self.get_frame_clock().connect_after("layout", self.on_layout),
+                                            self.get_frame_clock().connect_after("layout", self.place_earlier_spin)))
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
         self.moved_at, self.still_timer, self.cull_at = 0.0, None, None
         self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
@@ -461,6 +475,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.chat_find.drawn = lambda: None if self.history is None else (
             self.history.shown, sum(len(job.items) + len(job.hidden) for job in self.fill_jobs))
         root.append(self.chat_find.wrap())
+        # (over the part of the chat in view that's still to come above, while it's read or drawn: place_earlier_spin)
+        self.earlier_spin, self.earlier_spin_y = widgets.Spinner(can_target=False, visible=False), None
+        self.scroller.get_parent().add_overlay(self.earlier_spin)
+        self.scroller.get_parent().connect("get-child-position", self.earlier_spin_position)
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
@@ -526,10 +544,12 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.lightbox = lightbox.Lightbox(self)
         self.schema = SchemaView(self)
         self.kube = KubeView(self)
+        self.docker = DockerView(self)
         self.terminal = terminalpane.TerminalView(self, self.terminal_host)  # (☰ → Terminal: over it, as Kubernetes)
         host = Gtk.Overlay(child=self.toasts)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.docker)
         host.add_overlay(self.terminal)
         host.add_overlay(self.lightbox)
         self.repaint, self.repaint_wait = Repaint(), None
@@ -570,7 +590,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         # too; and past those, the chat the focus is in (Meta, a side question, a subagent), else the main chat
         widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS),
-                                   lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
+                                   lambda: find_in_focus(self) or self.kube.find() or self.docker.find() or
+                                   self.schema.start_find() or
                                    self.find_in_chat())))
         import telemetryview
         telemetryview.watch(self, "baude", network())  # (its chats' activity, told to this machine's host)
@@ -591,6 +612,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
+                                                  self.drop_draft_retry(),
                                                   self.panel.memory.stop(),  # (what's written in a Bot's memory saved)
                                                   self.panel.browser.stop(),  # (its watch let go of)
                                                   self.drop_signal(), GLib.idle_add(self.let_go)) and False)
@@ -608,6 +630,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.connect("notify::is-active", lambda *_: self.is_active() and self.links_on_focus())
         self.connect("notify::is-active", lambda *_: self.is_active() and self.seen_chat())
         self.tabs.view.connect("notify::selected-page", lambda *_: self.seen_chat())
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (a key, wherever: you're here)
+        keys.connect("key-pressed", lambda *_: (self.acted(), False)[1])
+        self.add_controller(keys)
+        self.scroller.get_vadjustment().connect("value-changed", lambda *_: self.scrolled_chat())
         meshui.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
         self.signal_run_handler = self.signal_run.connect("notify::active", lambda sw, _p: self.set_signal(on=sw.get_active()))
         self.signal_show_handler = self.signal_show.connect("notify::active",
@@ -636,13 +662,16 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
     # ---- feedback (Menu → Send Feedback…)
     def terminal_host(self):
         """(where, name): the host picked in the sidebar's dropdown, for ☰ → Terminal (this machine's, if none)."""
-        r = self.sidebar.shown_remote()
+        r = self.view_remote()
         if r is None:
             return {"via": "local"}, THIS_MACHINE
         return r.where, remote_name(r)
 
     def view_remote(self):
-        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked); while
+        ☰ opens one on another host from its caret, that host's (family_host: menufamily.open_family)."""
+        if getattr(self, "family_host", None) is not None:
+            return menufamily.remote_of(self, self.family_host) or None
         return self.sidebar.shown_remote()
 
     def open_record(self):
@@ -668,7 +697,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """The window's parts, by name, for the text a capture records."""
         return {self.sidebar: "sidebar", self.scroller: "chat", self.panel: "side panel",
                 self.composer_box: "input box", self.status.get_parent(): "status bar", self.header_bar: "header",
-                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                self.banner: "banner", self.kube: "Kubernetes", self.docker: "Docker",
+                self.schema: "databases", self.lightbox: "image",
                 self.terminal: "terminal"}
 
     def restart_state(self):
@@ -677,6 +707,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         aside, the Feedback tab's reply. The other chats' drafts are every window's: BaudeApp.restart's."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
+        dirty = self.flush_host_draft()  # (a host's chat's typing: to its host, and kept dirty till it's taken)
         return {
             "cwd": self.run_cwd, "session_id": self.session_id, "viewing": self.resume_pending,
             "cut": bool(self.busy and self.remote is None and self.proc is not None),  # (Baude's claude: cut here)
@@ -684,7 +715,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             "at_bottom": self.stick_bottom,
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
             "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
-            "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
+            "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input), "draft_dirty": dirty,
             "btw_draft": widgets.typed_text(self.panel.btw_ask.input),  # (a side question typed, not yet asked)
             "attachments": [a.state() for a in self.attachments],
             "queue": self.queue_saved(q) if (q := self.queue_state()) else None,  # (the open chat's: put_queue)
@@ -702,15 +733,20 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             self.cut_pending = time.time()
         for sid, place in (state.get("places") or {}).items():
             self.PLACES.setdefault(sid, place)
-        if widgets.typed_text(self.input) or self.attachments:  # (one its chat took as it opened, another window's:
-            self.keep_draft(self.draft_key())                   # kept for it, this window's own put back below)
+        hosts = self.remote is not None and self.hd_open() and bool(self.draft_key())  # (a host's chat: its text
+        # its host's, put in as it opened, what this window had taken there before the restart; typing its host
+        # hadn't taken yet put back over it below, and saved)
+        if (widgets.typed_text(self.input) or self.attachments) and not hosts:  # (one its chat took as it opened,
+            self.keep_draft(self.draft_key())                   # another window's: kept for it, this window's own
+            # put back below)
         if state.get("size") and not state.get("maximized"):
             self.set_default_size(*state["size"])
         theming.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
         if state.get("panel"):
             self.show_panel(True)
-        if state.get("draft"):
+        if state.get("draft") and (not hosts or state.get("draft_dirty")):
             self.input.get_buffer().set_text(state["draft"])
+        if state.get("draft"):
             widgets.put_caret(self.input, state.get("caret"))
         if state.get("btw_draft"):
             self.panel.btw_ask.input.get_buffer().set_text(state["btw_draft"])
@@ -787,7 +823,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.get_parent().remove(row)
         self.cut_row = None
         if not cut:
-            return
+            return self.show_resume(self.resume_state())
         row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
         row.add_css_class("cut-note")
         going = getattr(self, "cut_continuing", False)  # (Continue pressed, the turn not started yet: said, not asked)
@@ -797,12 +833,58 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             row.append(widgets.Spinner())
             row.append(said)
         else:
-            go = Gtk.Button(label=wording.say("cut_short.button"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
+            go = Gtk.Button(label=wording.say("common.continue"), tooltip_text=wording.say("cut_short.tip", message=CUT_CONTINUE))
             go.connect("clicked", lambda *_: self.continue_cut())
             row.append(said)
             row.append(go)
         self.transcript.append(row)
         self.cut_row = row
+        self.show_resume(self.resume_state())  # (after it: last)
+
+    # ---- a turn a usage limit stopped, resumed by the chat's host once the limit resets (hostresume): said at the
+    # chat's end, with Cancel, till it's sent or cancelled
+    def resume_state(self):
+        """When this chat's host will carry it on after a usage limit (its listing's resume_at), or None."""
+        if self.remote is None:
+            return None
+        return (self.remote.sessions.get(self.session_id) or {}).get("resume_at")
+
+    def show_resume(self, at=None):
+        """The line at the chat's end that says when its host resumes it ("Resumes at 3:20 PM"), and its Cancel (at:
+        when, as resume_state; None, gone), put last again if it's there already."""
+        row = getattr(self, "resume_row", None)
+        if row is not None and row.get_parent() is not None:
+            row.get_parent().remove(row)
+        self.resume_row, self.resume_shown = None, at
+        if not at:
+            return
+        import subscriptionpage
+        row = Gtk.Box(spacing=8, halign=Gtk.Align.START)
+        row.add_css_class("cut-note")
+        said = Gtk.Label(label=subscriptionpage.resume_line(at), xalign=0)
+        said.add_css_class("dim-label")
+        cancel = Gtk.Button(label=wording.say("common.cancel"))
+        cancel.connect("clicked", lambda *_: self.cancel_resume())
+        row.append(said)
+        row.append(cancel)
+        self.transcript.append(row)
+        self.resume_row = row
+
+    def cancel_resume(self):
+        """Cancel: the chat's host told not to resume it; the line gone as its listing says so."""
+        sid, r = self.session_id, self.remote
+        if r is None or not sid:
+            return
+        self.show_resume(None)
+
+        def done(answer):
+            from baudelib import wire
+            if answer.get("op") == "error":
+                widgets.toast(self, wording.say("limit_resume.not_cancelled",
+                                                why=wire.said(answer) or wording.say("bot_browser.host_said_no")))
+                if self.session_id == sid:
+                    self.show_resume(self.resume_state())
+        r.request({"op": "resume_cancel", "session": sid}, done)
 
     def continue_cut(self):
         """Continue: the chat told to carry on, as you'd tell it (what's attached and typed left for what you send)."""

@@ -27,6 +27,10 @@
       "type": ["string", "null"],
       "description": "Its effort."
     },
+    "account": {
+      "type": "string",
+      "description": "The subscription its agent runs under, one of the host's accounts for its model's provider (Claude's or Codex's: Account's id or name; \"\" for the CLI's own sign-in), in place of the one it would take (the chat's that starts it, else the host's default for that provider). Refused for a model that runs on no subscription, or one that isn't an account there; a disabled one's refused as its chats are. Asks subscriptions_read of a member besides spawn."
+    },
     "mode": {
       "type": ["string", "null"],
       "description": "Its permission mode."
@@ -50,6 +54,16 @@
     "spawned_by": {
       "type": "string",
       "description": "The id of the chat here whose mesh tools start it."
+    },
+    "task_run": {
+      "type": "object",
+      "description": "A task's run going here that starts it, as the run's environment names it (BAUDE_TASK_RUN, BAUDE_TASK_TOKEN): nested under its Bot (spawned_by), kept in the run's chats, judged as the member that ran it, and its first turn's end told its Bot. Refused if no run's going with that token.",
+      "properties": {
+        "run": {"type": "string", "description": "The run's id."},
+        "token": {"type": "string", "description": "The run's token."}
+      },
+      "required": ["run", "token"],
+      "additionalProperties": false
     },
     "system": {
       "type": "string",

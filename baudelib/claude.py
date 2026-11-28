@@ -8,11 +8,12 @@ import os
 import re
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
 
-from baudelib import accounts, wording
+from baudelib import accounts, hostresume, wording
 
 # what a claude started from inside another one inherits (from a Claude Desktop or terminal session) and must not:
 # claude_env leaves it out (fixes.py's claude runs too)
@@ -150,6 +151,9 @@ class ClaudeProc:
 
     dispatch = staticmethod(lambda fn: fn())
     env_of = None  # (a subclass's own environment for claude, in place of claude_env's: Record's, its child_env)
+    limits_folder = None  # (where its rate_limit_events are kept: its host's state folder; None, this machine's)
+    on_disabled = None  # (its subscription auto-disabled as a turn said it's exhausted: its host's, on_disabled(key, reset))
+    limit_reset = None  # (when the usage limit that refused its turn resets, as it said: its host's, hostresume)
 
     def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None, profile=None):
         self.on_msg, self.on_exit = on_msg, on_exit
@@ -172,6 +176,7 @@ class ClaudeProc:
         child_env = (self.env_of() if self.env_of is not None else claude_env()) | (env or {})
         self.profile = ""
         self.remember_profile = False
+        self.says_limits = models.model_program(model) == "claude"  # (its rate_limit_events: its account's usage)
         if models.model_program(model) == "claude":
             self.profile = accounts.claude_session_profile(resume) if profile is None else profile
             self.remember_profile = bool(self.profile and "--no-session-persistence" not in args)
@@ -205,6 +210,19 @@ class ClaudeProc:
             if self.remember_profile and msg.get("type") == "system" and msg.get("subtype") == "init" and msg.get("session_id"):
                 accounts.remember_claude_session(msg["session_id"], self.profile)
                 self.remember_profile = False
+            if self.says_limits and (reset := hostresume.claude_limit(msg)) is not None:
+                self.limit_reset = reset  # (a usage limit refused its turn: till when, for hostresume)
+            if self.says_limits and msg.get("type") == "rate_limit_event":
+                from baudelib.serverstate import state_home
+                key = accounts.usage_key("claude", self.profile)
+                try:
+                    reset = self.limit_reset
+                    if accounts.note_limits(self.limits_folder or state_home(), key, msg.get("rate_limit_info")) and \
+                            accounts.exhausted(key, hostresume.after(reset) if reset is not None else None) and \
+                            self.on_disabled is not None:
+                        self.on_disabled(key, reset)  # (auto-disabled: its host's chats on it stopped)
+                except (OSError, sqlite3.Error):
+                    pass
             # (its handler looked up as it's delivered, not as it's read: a chat left mid-turn, or opened again, in between
             # gets what's after from its new one, BaudeWindow.detach_proc and attach_proc)
             self.dispatch(lambda m=msg: self.on_msg(self, m))
@@ -228,11 +246,21 @@ class ClaudeProc:
         except (BrokenPipeError, OSError, ValueError):
             pass  # close() still closes the file when its final flush fails
 
-    def user(self, content, uuid=None):
+    def user(self, content, uuid=None, done=None):
         """content: a string, or a list of content blocks (text / image / document). uuid: the message's, as claude
-        keeps it (what a revert names: rewind_conversation's target), else claude's own."""
-        self.send({"type": "user", "message": {"role": "user", "content": content},
-                   "parent_tool_use_id": None, "session_id": ""} | ({"uuid": uuid} if uuid else {}))
+        keeps it (what a revert names: rewind_conversation's target), else claude's own. done(answer): called once it's
+        taken (op accepted) or refused (op error, why), on the main loop."""
+        msg = {"type": "user", "message": {"role": "user", "content": content},
+               "parent_tool_use_id": None, "session_id": ""} | ({"uuid": uuid} if uuid else {})
+        if done is None:
+            self.send(msg)
+        else:
+            self.send_taken(msg, done)
+
+    def send_taken(self, obj, done):
+        """obj sent, and done told it's taken: a claude of this process takes it as it's written."""
+        self.send(obj)
+        done({"op": "accepted"})
 
     def control(self, request):
         rid = f"baude_{next(self.req_ids)}"

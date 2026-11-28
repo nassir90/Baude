@@ -15,6 +15,10 @@
       "$ref": "BotRef.json",
       "description": "The Bot."
     },
+    "default": {
+      "type": "boolean",
+      "description": "The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt, copy, paste), nothing else."
+    },
     "call": {
       "type": "object",
       "description": "The tool's request."

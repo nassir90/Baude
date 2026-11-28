@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One version of an ask: as its task raised it, or as it (or its Bot) put it anew.",
+  "properties": {
+    "n": {
+      "type": "integer",
+      "description": "Its number among the ask's versions, from 1, kept as older ones go."
+    },
+    "at": {
+      "type": "number",
+      "description": "When it came (seconds since the epoch)."
+    },
+    "by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A Bot's name, if a Bot put it; none: the task."
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's called in the Inbox's list."
+    },
+    "body": {
+      "type": "string",
+      "description": "What it says (Markdown)."
+    },
+    "pictures": {
+      "type": "array",
+      "items": {
+        "$ref": "InboxPicture.json"
+      },
+      "description": "Its pictures."
+    },
+    "buttons": {
+      "type": "array",
+      "items": {
+        "$ref": "InboxButton.json"
+      },
+      "description": "Its buttons."
+    },
+    "form": {
+      "type": "array",
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Its form's fields."
+    }
+  },
+  "required": [
+    "at",
+    "body",
+    "pictures",
+    "buttons",
+    "form"
+  ],
+  "additionalProperties": false
+}

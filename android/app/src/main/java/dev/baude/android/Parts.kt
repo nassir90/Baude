@@ -99,13 +99,17 @@ private fun gaussTail(x: Float): Float {
     return if (x >= 0) (1f - erf) / 2 else (1f + erf) / 2
 }
 
-/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow); nothing between turns. */
+private val DONE = androidx.compose.ui.graphics.Color(0xFF3584E4) // (Baude's .status-dot.done)
+
+/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow), done (blue: where it's
+ * said, a run's Started); nothing between turns. */
 @Composable
 fun StatusDot(state: String, asking: Boolean) {
     val c = LocalBaude.current
     val colour = when {
         asking -> c.warning
         state == "working" -> c.fg.copy(alpha = 0.45f)
+        state == "done" -> DONE
         else -> return
     }
     val pulse by rememberInfiniteTransition(label = "dot").animateFloat(
@@ -152,7 +156,7 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
             horizontalArrangement = if (lead == null && !left) Arrangement.Center else Arrangement.Start) {
             if (lead != null) {
                 lead()
-                Spacer(Modifier.width(Gap.avatarGap))
+                Spacer(Modifier.width(Tokens.Gap.avatarGap))
             }
             Column(horizontalAlignment = if (lead == null && !left) Alignment.CenterHorizontally else Alignment.Start) {
                 Text(title, style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -173,7 +177,7 @@ fun IconButton(icon: ImageVector, label: String, enabled: Boolean = true, tint: 
     Box(
         Modifier.size(side).clip(RoundedCornerShape(8.dp))
             .then(if (background != null) Modifier.background(background) else Modifier)
-            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick() } else Modifier.clickable(enabled = enabled, onClick = onClick)),
+            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick.tapping(label, tip)() } else Modifier.clickable(enabled = enabled, onClick = onClick.tapping(label))),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(16.dp.icon))
@@ -194,12 +198,13 @@ fun GreyBanner(text: String, onClick: (() -> Unit)? = null) {
 
 /** A button as libadwaita's pill-less ones: suggested (the accent), or plain (raised). */
 @Composable
-fun Button(label: String, suggested: Boolean = false, destructive: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+fun Button(label: String, suggested: Boolean = false, destructive: Boolean = false, enabled: Boolean = true,
+           modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = LocalBaude.current
     Box(
-        Modifier.clip(RoundedCornerShape(8.dp))
+        modifier.clip(RoundedCornerShape(8.dp))
             .background((if (suggested) c.accentBg else c.fg.copy(alpha = 0.10f)).let { if (enabled) it else it.copy(alpha = it.alpha * 0.4f) })
-            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 9.dp),
+            .clickable(enabled = enabled, onClick = onClick.tapping(label)).padding(horizontal = 16.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = Type.bold, color = when {

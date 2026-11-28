@@ -5732,11 +5732,11 @@ def test_status_bar_dots_say_its_working(app):
     try:
         pump(0.3)
         assert win.status.get_text().startswith(win.short_cwd()), win.status.get_text()
-        assert dots.shown == 0 and dots.source is None and not dots.get_visible() and not dots.get_tooltip_text()
+        assert dots.shown == 0 and dots not in baude.Ticker.dotting and not dots.get_visible() and not dots.get_tooltip_text()
         idle = where()
         win.set_busy(True)
         pump(0.2)
-        assert dots.get_visible() and dots.shown >= 1 and dots.source is not None and dots.get_tooltip_text()
+        assert dots.get_visible() and dots.shown >= 1 and dots in baude.Ticker.dotting and dots.get_tooltip_text()
         at, room = where(), dots.get_width()
         assert at > idle and dots.get_text() == "•••" and 'alpha="1">' in dots.get_label(), (at, idle, dots.get_label())
         assert "working" not in win.status.get_text() and "idle" not in win.status.get_text()
@@ -5757,18 +5757,18 @@ def test_status_bar_dots_say_its_working(app):
         assert dots.shown == still, "a window you aren't looking at holds still"
         win.set_busy(False)
         pump(0.2)
-        assert dots.shown == 0 and dots.source is None and not dots.get_visible() and not dots.get_tooltip_text(), "no timer"
+        assert dots.shown == 0 and dots not in baude.Ticker.dotting and not dots.get_visible() and not dots.get_tooltip_text(), "no timer"
         assert where() == idle, "the folder back at the start"
         win.set_busy(True)
         pump(0.2)
-        assert dots.source is not None
+        assert dots in baude.Ticker.dotting
         bar = dots.get_parent()
         bar.set_visible(False)
         pump(0.1)
-        assert dots.source is None, "out of the window: no timer"
+        assert dots not in baude.Ticker.dotting, "out of the window: no timer"
         bar.set_visible(True)
         pump(0.1)
-        assert dots.source is not None, "back"
+        assert dots in baude.Ticker.dotting, "back"
     finally:
         baude.Ticker.seen = seen
         win.set_busy(False)
@@ -8075,12 +8075,11 @@ def test_kube_view(app):
         f.write("x = 1\n")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         assert isinstance(kv.get_first_child(), Gtk.WindowHandle), "its bar moves the window, as the header bar does"
         win.activate_action("win.kube", None)
         assert kv.get_visible() and kv.context == "k3d-dev", "your kubeconfig's current context"
-        model = kv.context_dd.get_model()
-        assert [model.get_string(i) for i in range(model.get_n_items())] == ["k3d-dev", "prod"], \
-            "the contexts by name, no (current) after one, as in Freelens"
+        assert kv.context_pick.names() == ["k3d-dev", "prod"], "the contexts by name, no (current) after one, as in Freelens"
         def label_of(row):
             return next(w for w in find(row, Gtk.Label)).get_label()
         heads = [label_of(r) for r in side_rows() if not hasattr(r, "page") and r.get_visible()]
@@ -8200,29 +8199,34 @@ def test_kube_view(app):
         assert kv.ns_label.get_label() == "jobs" and "3 pods of 7 in jobs" in kv.status.get_label()
         assert kv.ns_checks["jobs"].get_active() and not kv.ns_all.get_active()
         assert list(kv.ns_checks) == ["default", "jobs", "shop"], "every namespace the cluster has, a check each"
-        # more namespaces at once, toggled in the list: named on its button, up to two; then counted
+        # more namespaces at once, toggled in the list: named on its button, up to two; every one checked is all of them
         kv.ns_checks["shop"].set_active(True)
         wait_for(lambda: len(rows()) == 7, "jobs' and shop's pods")
         assert kv.ns_label.get_label() == "jobs, shop" and "7 pods in jobs, shop" in kv.status.get_label()
         kv.ns_checks["default"].set_active(True)
-        assert kv.ns_label.get_label() == "3 namespaces" and kv.ns_shown == ["jobs", "shop", "default"]
+        assert kv.ns_label.get_label() == "All namespaces" and kv.ns_shown is None and kv.ns_all.get_active()
         kv.ns_checks["jobs"].set_active(False)
         wait_for(lambda: sorted(r.obj["name"] for r in rows()) == ["api-6f7c-mnopq", "old-web-pqrst", "web-7d9f-abcde",
                                                                    "web-7d9f-fghij"], "shop's (default has none)")
-        assert kv.ns_label.get_label() == "shop, default" and "4 pods of 7 in shop, default" in kv.status.get_label()
+        assert kv.ns_label.get_label() == "default, shop" and "4 pods of 7 in default, shop" in kv.status.get_label()
         # a pod's namespace, clicked: only that one again, whatever was shown
         pump(0.3)
         links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "shop"]
         links[0].emit("clicked")
         wait_for(lambda: kv.ns_shown == ["shop"] and len(rows()) == 4, "only shop's")
         assert kv.ns_label.get_label() == "shop" and not kv.ns_checks["default"].get_active()
-        kv.ns_all.set_active(True)  # (All namespaces: the list unchecked)
+        kv.ns_all.set_active(True)  # (All namespaces: every one checked)
         wait_for(lambda: len(rows()) == 7, "every namespace's pods")
-        assert kv.ns_label.get_label() == "All namespaces" and not any(c.get_active() for c in kv.ns_checks.values())
-        kv.ns_all.set_active(False)  # (it can't be unchecked: something is always shown)
-        assert kv.ns_all.get_active() and kv.ns_shown == []
+        assert kv.ns_label.get_label() == "All namespaces" and all(c.get_active() for c in kv.ns_checks.values())
         links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "jobs"]
         links[0].emit("clicked")
+        wait_for(lambda: len(rows()) == 3, "only jobs' pods")
+        kv.ns_all.set_active(True)
+        wait_for(lambda: len(rows()) == 7, "every namespace's pods, again")
+        kv.ns_all.set_active(False)  # (unchecked: every one unchecked, none shown)
+        wait_for(lambda: len(rows()) == 0, "no namespace's pods")
+        assert kv.ns_shown == [] and not any(c.get_active() for c in kv.ns_checks.values())
+        kv.ns_checks["jobs"].set_active(True)
         wait_for(lambda: len(rows()) == 3, "only jobs' pods")
         # Ctrl+F: the filter, focused, its text selected to type over; not the find bar of the Code page under the view
         assert win.show_code(code_file, 1) and win.tabs.current() is win.code_page
@@ -8292,7 +8296,7 @@ def test_kube_view(app):
         assert sorted(r.obj["name"] for r in rows()) == ["api-6f7c-mnopq", "old-web-pqrst", "web-7d9f-abcde",
                                                          "web-7d9f-fghij"]
         # another context, with no metrics API: CPU and memory N/A, and said so
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.store.get_n_items() == 2, "prod's pods")
         assert kv.ns_label.get_label() == "All namespaces", "the namespaces shown are each context's own"
         assert all(cell(r, "CPU") == "N/A" and cell(r, "Memory") == "N/A" for r in rows())
@@ -8304,7 +8308,7 @@ def test_kube_view(app):
         wait_for(lambda: kv.table_page is baude.KUBE_NODES and kv.store.get_n_items() == 3, "prod's nodes")
         assert [cell(r, "Roles") for r in rows()] == ["control-plane", "worker", "worker"]
         # back on k3d-dev, Nodes stays while it's the page shown, and goes once another is
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("k3d-dev"))
+        kv.pick_context("k3d-dev")
         wait_for(lambda: kv.context == "k3d-dev" and kv.node_count == 1 and kv.store.get_n_items() == 1, "its node")
         assert kv.page_rows[id(baude.KUBE_NODES)].get_visible()
         assert kv.ns_shown == ["shop"] and kv.ns_label.get_label() == "shop", "k3d-dev's namespace, as it was left"
@@ -8392,7 +8396,7 @@ def test_kube_keda(app):
         return next(c for c in kv.columns if c.get_title() == title)
 
     def pick(name):
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index(name))
+        kv.pick_context(name)
 
     def show(page, n):
         kv.side.select_row(kv.page_rows[id(page)])
@@ -8403,6 +8407,7 @@ def test_kube_keda(app):
     rollouts = next(p for p in known if p["resource"] == "rollouts.argoproj.io")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None and kv.store.get_n_items() == 7, "the pods")
         assert not any(kv.page_rows[id(p)].get_visible() for p in known), "k3d-dev has no KEDA, nor any of the others"
@@ -8496,10 +8501,11 @@ def test_kube_kind_picked_while_connecting(app):
     deployments = next(p for _s, ps in baude.KUBE_SECTIONS for p in ps if p["resource"] == "deployments")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None, "k3d-dev")
         baude.kube_api_resources = lambda name: (held.wait(10), orig(name))[1]
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.resources is None, "prod connecting")
         kv.side.select_row(kv.page_rows[id(deployments)])  # (picked while it connects)
         held.set()
@@ -8528,6 +8534,7 @@ def test_kube_custom_columns(app):
         return next(c for c in kv.columns if c.get_title() == title)
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None and kv.store.get_n_items() == 7, "the pods")
         kv.side.select_row(kv.page_rows[id(baude.KUBE_SECTIONS[-1][1][0])])
@@ -8586,13 +8593,14 @@ def test_kube_switch_fade(app):
             os.remove(path)
 
     def pick(name):
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index(name))
+        kv.pick_context(name)
         wait_for(lambda: kv.context == name, f"{name} picked")
 
     def rows():
         return [kv.selection.get_item(i) for i in range(kv.selection.get_n_items())]
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         faded = lambda: kv.table_scroll.has_css_class("switching")  # noqa: E731
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not faded(), "k3d-dev's pods")
@@ -8601,8 +8609,8 @@ def test_kube_switch_fade(app):
         pick("prod")
         assert faded() and kv.store.get_n_items() == 7, "k3d-dev's pods, faded, while prod is read"
         assert kv.status.get_label() == "Connecting to prod…"
-        assert not any(w.has_css_class("switching") for w in (kv.context_dd, kv.ns_btn, kv.search, kv.side, kv.status))
-        assert kv.context_dd.is_sensitive() and kv.side.is_sensitive()
+        assert not any(w.has_css_class("switching") for w in (kv.context_pick, kv.ns_btn, kv.search, kv.side, kv.status))
+        assert kv.context_pick.is_sensitive() and kv.side.is_sensitive()
         pump(0.5)
         assert faded(), "still faded: prod hasn't answered"
         # picked again meanwhile: still faded, the same fade, and only the last one shown
@@ -8629,6 +8637,8 @@ def test_kube_switch_fade(app):
         # another namespace: no read (the list is every namespace's), but the same fade, swapped once faded
         kv.side.select_row(kv.page_rows[id(baude.KUBE_PODS)])
         wait_for(lambda: kv.table_page is baude.KUBE_PODS and not faded(), "the pods again")
+        kv.ns_all.set_active(False)
+        wait_for(lambda: len(rows()) == 0, "none shown")
         seen, refilter = [], kv.refilter
         kv.refilter = lambda: (seen.append(faded()), refilter())
         kv.ns_checks["jobs"].set_active(True)
@@ -8683,10 +8693,10 @@ def test_kube_watch(app):
         return [c for c in (json.loads(line) for line in open(log)) if c[3:4] == ["get"] and all(a in c for a in args)]
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         kv.open()
         wait_for(lambda: kv.selection is not None and len(rows()) == 7 and kv.watch is not None, "pods, watched")
         wait_for(lambda: gets("pods", "--watch", "--output-watch-events"), "kubectl watching")
-        assert "live" in kv.status.get_label(), kv.status.get_label()
         listed = len([c for c in gets("pods") if "--watch" not in c])
         with open(state, "w") as f:  # (deleted by someone else: nothing in baude asked)
             json.dump({"shop/web-7d9f-abcde": "grace"}, f)
@@ -8802,6 +8812,7 @@ def test_kube_pod_actions(app):
         pump(0.3)
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         kv.open()
         wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods")
         pump(0.3)
@@ -8933,7 +8944,6 @@ def test_kube_pod_actions(app):
         kv.open()
         wait_for(lambda: kv.store.get_n_items() == 7 and not kv.loading, "the pods again")
         assert not kv.dock.get_visible()
-        assert "read-only but for the deletes you confirm" in kv.status.get_label()
         # Delete: asked first, naming it, its namespace and context; Cancel runs nothing
         dlg = ask("jobs/worker-5c4b-klmno", "kube.delete")
         body = dlg.get_body()
@@ -8964,7 +8974,7 @@ def test_kube_pod_actions(app):
         wait_for(lambda: "web-7d9f-abcde" not in [r.obj["name"] for r in rows()], "read again: gone")
         assert kv.status.get_label().startswith('pod "web-7d9f-abcde" force deleted · ')
         # a remote cluster's: said plainly
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.store.get_n_items() == 2 and not kv.loading, "prod's pods")
         for action in ("kube.delete", "kube.force-delete"):
             dlg = ask("shop/web-7d9f-fghij", action)

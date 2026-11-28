@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "task's answer.",
+  "properties": {
+    "op": {
+      "const": "task",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "task": {
+      "$ref": "Task.json",
+      "description": "The task, with its script."
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "$ref": "TaskRun.json"
+      },
+      "description": "Its latest runs, newest first."
+    },
+    "clock": {
+      "$ref": "Clock.json",
+      "description": "The host's clock."
+    }
+  },
+  "required": [
+    "op",
+    "session"
+  ],
+  "additionalProperties": false
+}

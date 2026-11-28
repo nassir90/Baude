@@ -41,10 +41,7 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Adwaita.PackageXGeneric, null, tint = c.dim, modifier = Modifier.size(32.dp.icon))
-        val name = feature.removeSuffix("…")
-        Text(if (name.equals(dep.name, ignoreCase = true)) Wording.Deps.notInstalled(dep = dep.name.orEmpty())
-            else Wording.Deps.needs(feature = name, dep = dep.name.orEmpty()), style = Type.title,
-            color = c.fg, textAlign = TextAlign.Center)
+        Text(depTitle(dep, feature), style = Type.title, color = c.fg, textAlign = TextAlign.Center)
         val fix = dep.fix
         val link = dep.link
         if (!fix.isNullOrBlank()) Row(Modifier.clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
@@ -60,14 +57,22 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
     }
 }
 
-/** A dependency's row (depsview.row): its name, then what's said of it while it's there (Installed, Signed in,
+/** What a feature without dep says of it (deps.title): "Kubernetes needs kubectl", or "Codex CLI isn't installed" where
+ * the feature's name is in the dependency's. feature: the feature's name. */
+fun depTitle(dep: Msg.Dep, feature: String): String {
+    val name = feature.removeSuffix("…")
+    return if (dep.name.orEmpty().contains(name, ignoreCase = true)) Wording.Deps.notInstalled(dep = dep.name.orEmpty())
+    else Wording.Deps.needs(feature = name, dep = dep.name.orEmpty())
+}
+
+/** A dependency's row (depsview.row): its name (or title, where a feature's page lists it), then what's said of it while it's there (Installed, Signed in,
  * Running, 3 models), or the command that installs or readies it with Copy (else its install page; a check with no command, its status only). */
 @Composable
-fun DepRow(dep: Msg.Dep) {
+fun DepRow(dep: Msg.Dep, title: String? = null) {
     val c = LocalBaude.current
     val clip = LocalClipboardManager.current
     val uri = LocalUriHandler.current
-    ActionRow(dep.name.orEmpty(), null, suffix = {
+    ActionRow(title ?: dep.name.orEmpty(), null, titleLines = if (title != null) 2 else 1, suffix = {
         val fix = dep.fix
         val link = dep.link
         if (dep.present == true) Text(dep.ready ?: Wording.Deps.installed, style = Type.body, color = c.dim)
@@ -76,7 +81,7 @@ fun DepRow(dep: Msg.Dep) {
                 modifier = Modifier.widthIn(max = 160.dp))
             IconButton(Adwaita.EditCopy, Wording.Common.copy) {
                 clip.setText(AnnotatedString(fix))
-                toast(Wording.Kube.copiedTryAgain)
+                toast(Wording.Deps.copied)
             }
         } else if (!dep.ready.isNullOrBlank()) Text(dep.ready.orEmpty(), style = Type.body, color = c.dim)
         else if (!link.isNullOrBlank() && dep.check != true) Button(Wording.Deps.installPage) {
@@ -87,7 +92,8 @@ fun DepRow(dep: Msg.Dep) {
 
 /** Settings → Dependencies (depsview.Page), Settings' third page: the host picked beside New session (a computer host:
  * the phone runs none of them), then what its features and its machine's apps need and whether it's there, under a
- * heading for each thing that needs them (Providers, Git and GitHub, Kubernetes, …), as its deps answer says. */
+ * heading for each thing that needs them (Providers, Git and GitHub, Kubernetes, …), as its deps answer says, then its
+ * deciders (DecidersGroup). */
 @Composable
 fun DepsPage() {
     val c = LocalBaude.current
@@ -114,5 +120,6 @@ fun DepsPage() {
             if (group.isNotEmpty()) Heading(Wording.byKey[group] ?: group)
             BoxedList(deps, "") { DepRow(it) }
         }
+        if (hostId != null) DecidersGroup(hostId)
     }
 }

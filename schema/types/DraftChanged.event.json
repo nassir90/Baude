@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's draft written by a head (draft_save): told every other head attached to it that may write it, as attach's answer tells one attaching.",
+  "properties": {
+    "op": {
+      "const": "draft_changed",
+      "description": "What it is."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "draft": {
+      "$ref": "ChatDraft.json",
+      "description": "Its draft now."
+    }
+  },
+  "required": ["op", "session", "draft"],
+  "additionalProperties": false
+}

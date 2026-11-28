@@ -94,7 +94,7 @@
     },
     {
       "name": "+ button (add capture)",
-      "shows": "A flat + button at the box's bottom right. Tooltip \"Add a screen capture: go to it, then press Capture\"; when something sits over the window (a dialog, the large image viewer, Kubernetes or Database Schemas), \"Capture what's open now\".",
+      "shows": "A flat + button at the box's bottom right. Tooltip \"Add a screen capture: go to it, then press Capture\"; when something sits over the window (a dialog, the large image viewer, Kubernetes or Databases), \"Capture what's open now\".",
       "copy": [
         "feedback.add_capture",
         "feedback.capture_open"

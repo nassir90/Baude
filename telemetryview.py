@@ -1,29 +1,47 @@
 """What Baude and Record tell their machine's host of chats as it happens (baudelib.telemetry, the telemetry op; the
 phone's Telemetry.kt the same), and Settings → Telemetry, which shows what a host keeps. Recorder, one an app: while
 that host's telemetry is on (its Info's telemetry, followed as it changes), each chat opened, coming in front or
-leaving it, each turn sent and each turn's end (how long it took, its model and effort, its tokens), by its host's id
-and its session's id, told at once with its own time; and line profiles of what the host says this app profiles
-(lineprofile), every PROFILE_S. While it's off nothing is looked at or sent. Nothing is sent anywhere but this
-machine's host. watch(win, app, network) is the one hook a window needs; look, turn_sent and turn_ended are the
-chat's."""
+leaving it and each turn sent (a turn's end is its host's to keep: one source for it), by its host's id and its
+session's id, told at once with its own time; its errors and its counts (uitrack's); and line profiles of what the host says this app profiles
+(lineprofile), every PROFILE_S, while its line profiling is on too. While it's off nothing is looked at or sent.
+Nothing is sent anywhere but this machine's host. watch(win, app, network) is the one hook a window needs; look and
+turn_sent are the chat's."""
 import datetime
 import os
 import time
 import weakref
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk, Pango
 
-from baudelib import lineprofile, wording
+from baudelib import counters, errorbook, funccount, lineprofile, providers, telemetry, uiindex, wire, wording
+import uitrack
+import widgets
 
 PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
-APP_NAMES = {"baude": "mesh_versions.baude", "record": "mesh_versions.record", "phone": "mesh_versions.baude",
-             "host": "telemetry.host_process"}
+FRONT_IDLE_S = 300  # (no input for this long, or the screen locked, or the display asleep: nobody's at the chat in front)
+AWAY_LOOK_S = 5  # (how often whether anyone's still at the chat in front is looked at)
+APP_NAMES = {"host": "telemetry.host_process", "baude": "mesh_versions.baude", "record": "mesh_versions.record",
+             "emission": "mesh_versions.emission", "multiplex": "deps.multiplex", "phone": "mesh_versions.baude"}
+APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission", "multiplex": "multiplex",
+             "phone": "baude"}  # (each process's app's logo: schema/icons/baude's baude-app-<logo>-symbolic)
+LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
-EVENTS_SHOWN = 12
 LINES_SHOWN = 10
+GROUPS = ("error", "tokens", "models", "machine", "processes", "used", "slowest", "errors", "profiling", "lines")  # (the page's, in
+# this order)
+ERRORS_SHOWN = 20  # (the latest to happen)
+COUNTS_SHOWN = 10  # (Most Used's and Slowest's rows)
+COUNTS_DAYS = 7
+USED_KINDS = ("part", "menu", "screen")  # (what the user used: Most Used)
+TIMED_KINDS = ("part", "menu", "op", "callback")  # (what's run for them: Slowest, by its time each)
+ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
+PROCS_HISTORY_S = 600  # (how far back each process's CPU and memory are drawn; the page first reads this far back,
+# farther than the 2 minutes processes may be apart with nobody at the machine)
+PROCS_GAP_S = 300  # (samples of a process further apart than this: a gap in its line)
+SPARK_W, SPARK_H = 150, 26
 _RECORDER = []
 
 
@@ -72,8 +90,12 @@ class Recorder:
         self.windows = weakref.WeakSet()
         self.opened = weakref.WeakKeyDictionary()  # (a window: the chats open in it, as last looked)
         self.front = None  # (the chat in front, in which window: (win ref, chat))
-        self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
+        self.picked = []  # (the counts that picked what's profiled now)
+        self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
+        self.count_timer = None  # (what's counted told every counters.FLUSH_S, while it's on)
+        self.errors_due, self.known = False, False  # (this process's errors to be told in a moment; whether its
+        # host's telemetry is known: errors before it held, not dropped)
         network.listen(self.heard)
         app.connect("shutdown", lambda *_: self.quit())
         self.heard()
@@ -100,27 +122,47 @@ class Recorder:
         if here is None:
             return
         self.host_id = here.info.get("id") or self.host_id
+        self.known = True
         t = here.info.get("telemetry") or {}
         on, pid = bool(t.get("on")), here.info.get("pid")
         if on != self.on:
             self.on = on
             if on:
+                uitrack.counts_now()  # (what was counted till now: not kept)
                 self.hello()
+                self.errors_soon()
                 for win in list(self.windows):
                     self.look(win)
+                self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
+                self.count_timer = GLib.timeout_add_seconds(counters.FLUSH_S, self.tell_counts)
             else:
                 self.queue.clear()
+                errorbook.BOOK.take()
                 self.opened.clear()
-                self.front, self.sent_at = None, {}
+                self.front = None
+                if self.away_timer is not None:
+                    GLib.source_remove(self.away_timer)
+                    self.away_timer = None
+                if self.count_timer is not None:
+                    GLib.source_remove(self.count_timer)
+                    self.count_timer = None
+                uitrack.counts_now()  # (what was counted till now: not kept)
         elif on and pid != self.host_pid:
             self.hello()  # (a host started again: its samples of this process begin again)
+            if self.host_pid is not None:  # (and the chat in front told it again: it knows none)
+                self.front = None
+                for win in list(self.windows):
+                    self.look(win)
         self.host_pid = pid
-        functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name), [])
+        mine = next((p for p in t.get("profiling") or [] if p.get("app") == self.name), {})
+        functions = (mine.get("functions") or []) if on and t.get("line_profiling") else []
+        funccount.switch(bool(on and t.get("line_profiling")))  # (counted only to aim line profiling)
         if functions != self.profiler.functions:
-            self.profile(functions)
+            self.profile(functions, mine.get("picked") or [])
 
     def watch(self, win):
         self.windows.add(win)
+        uitrack.watch(win)
         GLib.idle_add(lambda: self.look(win) and False)
         win.connect("notify::is-active", lambda w, _p: self.look(w))
         if (tabs := getattr(win, "tabs", None)) is not None:
@@ -131,10 +173,14 @@ class Recorder:
 
     # ---- chats
     def look(self, win, gone=False):
-        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told."""
+        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told. In front
+        means with someone at the machine (widgets.user_present, within FRONT_IDLE_S): what its host tells every head
+        of the mesh, which notifies of no chat in front anywhere (Info's front)."""
         if not self.on:
             return
         open_, front = (set(), None) if gone else chats_in(win)
+        if front is not None and widgets.user_present(FRONT_IDLE_S) is False:
+            front = None
         before = self.opened.get(win, set())
         for chat in open_ - before:
             self.event("chat_opened", chat)
@@ -150,35 +196,49 @@ class Recorder:
             self.event("chat_left", was[1])
             self.front = None
 
+    def look_away(self):
+        """Every AWAY_LOOK_S while it's on: the window in front looked at again, for whether anyone's still at it."""
+        if not self.on:
+            self.away_timer = None
+            return False
+        held = self.front[0]() if self.front is not None else None
+        for win in list(self.windows):
+            if win is held or win.is_active():
+                self.look(win)
+        return True
+
     def turn_sent(self, win):
         if not self.on:
             return
         self.look(win)
         if (chat := chat_of(win)) is not None:
-            self.sent_at[chat] = time.time()
             self.event("turn_sent", chat)
-        else:
-            self.sent_at[("", id(win))] = time.time()  # (a new chat's: its id comes with its first message)
 
-    def turn_ended(self, win, msg, model=None, effort=None):
-        """A turn's result: how long it took (from its sending here, else as it says), its model and effort, its
-        tokens."""
-        if not self.on or (chat := chat_of(win)) is None:
-            return
-        self.look(win)
-        sent = self.sent_at.pop(chat, None) or self.sent_at.pop(("", id(win)), None)
-        r = getattr(win, "remote", None)
-        model = model or ((r.sessions.get(chat[1]) or {}).get("model") if r is not None else None)  # (its default's,
-        # as its host lists it)
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
-        took = time.time() - sent if sent else (msg["duration_ms"] / 1000 if isinstance(
-            msg.get("duration_ms"), (int, float)) else None)
-        self.event("turn_ended", chat, seconds=round(took, 3) if took is not None else None,
-                   turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
-                   model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
-                   tokens_in=sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                              "cache_creation_input_tokens")),
-                   tokens_out=int(u.get("output_tokens") or 0))
+    def tell_counts(self):
+        """Every counters.FLUSH_S: what this process counted since, told as a row."""
+        if not self.on:
+            self.count_timer = None
+            return False
+        uitrack.look()
+        if (row := uitrack.counts_now()) is not None:
+            self.send({"counters": {**row, "app": self.name}}, lambda ok: ok or counters.COUNTERS.give_back(row))
+        return True
+
+    def errors_soon(self):
+        """(any thread) This process has an error: told in a moment, with any meanwhile."""
+        if not self.errors_due:
+            self.errors_due = True
+            GLib.timeout_add(1000, self.tell_errors)
+
+    def tell_errors(self):
+        self.errors_due = False
+        if not self.on:
+            if self.known:
+                errorbook.BOOK.take()
+        elif not self.sending:
+            self.sending = True
+            self.tell()
+        return False
 
     def event(self, kind, chat, **more):
         e = {"at": round(time.time(), 3), "kind": kind, "host": chat[0], "session": chat[1],
@@ -195,22 +255,25 @@ class Recorder:
 
     def tell(self):
         events, self.queue = self.queue, []
-        if not events:
+        errors = errorbook.BOOK.take()
+        if not events and not errors:
             self.sending = False
             return False
 
         def done(ok):
             if not ok:  # (kept, for when the host's there)
                 self.queue = (events + self.queue)[-QUEUE_MAX:]
+                errorbook.BOOK.give_back(errors)
             self.sending = False
             if ok and self.queue:
                 self.sending = True
                 GLib.idle_add(self.tell)
-        self.send({"events": events}, done)
+        self.send({"events": events, **({"errors": errors} if errors else {})}, done)
         return False
 
     def send(self, more, done, wait=False):
-        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), **more}
+        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), "commit": (wire.HEAD_COMMIT or "")[:12] or None,
+               "wire": wire.VERSION, **more}
         if self.profiler.error != self.told_error:
             msg["profile_error"] = self.told_error = self.profiler.error
         here = self.network.here_alive()
@@ -221,8 +284,12 @@ class Recorder:
         here.request(msg, lambda r: done(r.get("op") == "telemetry_kept"))
 
     # ---- profiling
-    def profile(self, functions):
+    def profile(self, functions, picked=()):
+        """Profiling these from now (picked: the counts that picked them, aim's), what was profiled till now told."""
         last = self.profiler.set(functions)
+        if last:
+            last["picked"] = self.picked
+        self.picked = list(picked)
         if self.profile_timer is not None:
             GLib.source_remove(self.profile_timer)
             self.profile_timer = None
@@ -231,7 +298,9 @@ class Recorder:
         self.send({"profile": last} if last else {}, lambda _ok: None)
 
     def profiled(self):
-        if (p := self.profiler.snapshot()) is not None or self.profiler.error != self.told_error:
+        if (p := self.profiler.snapshot()) is not None:
+            p["picked"] = self.picked
+        if p is not None or self.profiler.error != self.told_error:
             self.send({"profile": p} if p else {}, lambda _ok: None)
         return True
 
@@ -241,9 +310,13 @@ class Recorder:
             self.look(win, gone=True)
         last = self.profiler.set([])
         events, self.queue = self.queue, []
-        if self.on and (events or last):
+        errors = errorbook.BOOK.take()
+        counted = uitrack.counts_now() if self.on else None
+        if self.on and (events or last or errors or counted):
             try:
-                self.send({"events": events, **({"profile": last} if last else {})}, lambda _ok: None, wait=True)
+                self.send({"events": events, **({"profile": last} if last else {}),
+                           **({"errors": errors} if errors else {}), **({"counters": {**counted, "app": self.name}} if counted else {})},
+                          lambda _ok: None, wait=True)
             except (OSError, ValueError):
                 pass
 
@@ -252,6 +325,7 @@ def watch(win, name, network):
     """win's chats told to this machine's host (name: the app's, "baude" or "record"; network: its hosts)."""
     if not _RECORDER:
         _RECORDER.append(Recorder(win.get_application(), name, network))
+        uitrack.install(name, _RECORDER[0].errors_soon)
     _RECORDER[0].watch(win)
 
 
@@ -265,21 +339,7 @@ def turn_sent(win):
         _RECORDER[0].turn_sent(win)
 
 
-def turn_ended(win, msg, model=None, effort=None):
-    if _RECORDER:
-        _RECORDER[0].turn_ended(win, msg, model, effort)
-
-
 # ---- Settings → Telemetry
-def said_time(seconds):
-    s = int(round(seconds))
-    if s < 60:
-        return wording.say("time.seconds", seconds=s)
-    if s < 3600:
-        return wording.say("time.minutes_seconds", minutes=s // 60, seconds=s % 60)
-    return wording.say("time.hours_minutes", hours=s // 3600, minutes=s % 3600 // 60)
-
-
 def said_size(n):
     if n is None:
         return "–"
@@ -288,15 +348,36 @@ def said_size(n):
     return wording.say("images.size_mb", mb=f"{n / (1 << 20):.0f}")
 
 
-def said_event(e):
-    if e.get("kind") == "turn_ended" and isinstance(e.get("seconds"), (int, float)):
-        return wording.say("telemetry.turn_ended_in", time=said_time(e["seconds"]))
-    return wording.say(f"telemetry.{e.get('kind')}")
+def said_pressure(s):
+    if s.get("memory_pressure"):
+        key = f"telemetry.pressure_{s['memory_pressure']}"
+        return wording.say(key) if wording.has(key) else str(s["memory_pressure"])
+    return wording.say("telemetry.stalled", percent=f"{s['memory_stall']:.1f}")
 
 
 def tokens(n):
     from chatparts import fmt_tokens
     return fmt_tokens(int(n))
+
+
+KINDS = {"input": "meta.input", "cache_write": "telemetry.cache_write", "cache_read": "telemetry.cache_read",
+         "output": "meta.output", "input_with_cache": "telemetry.input_with_cache"}  # (usage's tokens, each kind apart,
+# in the order they're shown, and their names)
+
+
+def said_tokens(t):
+    """A day's or a model's tokens, each kind apart ("1.2M In · 30M Cache Reads · 50k Out"): those it has; an older
+    turn's input, cache among it, as that."""
+    return " · ".join(wording.say(f"telemetry.day_{k}", tokens=tokens(t[k]))
+                      for k in ("input_with_cache", "input", "cache_write", "cache_read", "output")
+                      if t.get(k) or k == "output")
+
+
+def token_rows(t):
+    """A row each kind of token, t's count of it after its name: input, cache writes, cache reads, output, and (only
+    where there are some) older turns' input with their cache in it."""
+    return [row(wording.say(name), tokens(t.get(k) or 0)) for k, name in KINDS.items()
+            if k != "input_with_cache" or t.get(k)]
 
 
 def levels(days):
@@ -361,8 +442,8 @@ class TokenGrid(Gtk.DrawingArea):
         day = self.first() + datetime.timedelta(days=col * 7 + row)
         if day > datetime.date.today():
             return False
-        d = self.days.get(day.isoformat()) or {"tokens": 0}
-        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=tokens(d["tokens"])))
+        d = self.days.get(day.isoformat()) or {}
+        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=said_tokens(d)))
         return True
 
 
@@ -371,24 +452,264 @@ def effort_said(effort):
     return wording.say(key) if effort and wording.has(key) else effort or "–"
 
 
-def model_name(value, models):
-    return next((m.get("displayName") for m in models if m.get("value") == value and m.get("displayName")), value)
+def model_expander(m, models):
+    """A model's row, named as every app names it (providers.model_name), its slug on hover, its turns after it;
+    opened, its tokens, a row each kind (token_rows)."""
+    value = m["model"]
+    r = Adw.ExpanderRow(title=GLib.markup_escape_text(providers.model_name(value, models) or "–"))
+    r.set_tooltip_text(providers.model_slug(value, models) if isinstance(value, str) else None)
+    r.add_suffix(Gtk.Label(label=wording.say("telemetry.turns", turns=m["turns"]), css_classes=["dim-label", "numeric"]))
+    for t in token_rows(m):
+        r.add_row(t)
+    return r
 
 
-def row(title, *values, sensitive=True, mono=False):
-    r = Adw.ActionRow(title=GLib.markup_escape_text(title), sensitive=sensitive)
+def logo(app):
+    """The logo of a process's app (APP_LOGOS), LOGO_PX square, in the row's text colour as the model logos are."""
+    import widgets
+    widgets.ensure_icons()
+    return Gtk.Image(icon_name=f"baude-app-{APP_LOGOS.get(app, 'baude')}-symbolic", pixel_size=LOGO_PX)
+
+
+def proc_names(procs):
+    """(proc, name) for each of procs, in APP_NAMES' order, those of one app by pid and numbered where the app has
+    several ("Emission (2)"), so a process keeps its name however the table is sorted."""
+    procs = sorted(procs, key=lambda p: (list(APP_NAMES).index(p["app"]) if p.get("app") in APP_NAMES else 99,
+                                         p.get("pid") or 0))
+    count, seen, out = {}, {}, []
+    for p in procs:
+        count[p.get("app")] = count.get(p.get("app"), 0) + 1
+    for p in procs:
+        app = p.get("app")
+        name = wording.say(APP_NAMES[app]) if app in APP_NAMES else str(app)
+        if count[app] > 1:
+            seen[app] = seen.get(app, 0) + 1
+            name = wording.say("telemetry.process_n", name=name, n=seen[app])
+        out.append((p, name))
+    return out
+
+
+def proc_sorted(named, key):
+    """named (proc_names') busiest first by key ("cpu" or "rss"), a process that gave none last."""
+    return sorted(named, key=lambda pn: pn[0].get(key) is None and 1 or -pn[0][key])
+
+
+def said_cpu(cpu):
+    return wording.say("telemetry.cpu_percent", cpu="–" if cpu is None else f"{cpu:.1f}")
+
+
+class ProcSpark(Gtk.Widget):
+    """How one process's CPU or memory went over the last PROCS_HISTORY_S (to end): a line in the Kubernetes history's
+    colour, each sample at its time, on a scale shared with the other processes' (top), so the busiest stands out; a
+    gap where samples are PROCS_GAP_S apart. Nothing is drawn with fewer than two samples."""
+
+    def __init__(self, points, end, top):
+        super().__init__(width_request=SPARK_W, height_request=SPARK_H, valign=Gtk.Align.CENTER)
+        self.add_css_class("proc-spark")
+        self.points, self.end, self.top = points, end, top or 1
+
+    def do_snapshot(self, snap):
+        w, h = self.get_width(), self.get_height()
+        if len(self.points) < 2 or w <= 2:
+            return
+        from gi.repository import Graphene
+        cr = snap.append_cairo(Graphene.Rect().init(0, 0, w, h))
+        color = self.get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
+        cr.set_line_width(1.5)
+        before = None
+        for at, v in self.points:
+            x = 1 + (w - 2) * (1 - (self.end - at) / PROCS_HISTORY_S)
+            y = h - 2 - (h - 4) * min(v / self.top, 1)
+            cr.line_to(x, y) if before is not None and at - before <= PROCS_GAP_S else cr.move_to(x, y)
+            before = at
+        cr.stroke()
+
+
+def proc_table(procs, history, sort, resort):
+    """Processes as a table in a card: a line each of procs, busiest first by sort ("cpu" or "rss"): its app's logo and
+    its name, then its CPU over the last PROCS_HISTORY_S (history: pid -> [(at, cpu, rss)]) and now, then its memory
+    the same; under a rule, a bold Total, the processes' CPU and memory added up (one that gave none left out). The
+    CPU and Memory headings sort by theirs: resort(key)."""
+    grid = Gtk.Grid(column_spacing=12, hexpand=True, margin_start=12, margin_end=12, margin_top=6, margin_bottom=8)
+    frame = Gtk.Frame(child=grid, css_classes=["card", "proc-table"])
+    grid.attach(Gtk.Label(label=wording.say("telemetry.process"), xalign=0, hexpand=True,
+                          css_classes=["dim-label", "proc-head"]), 0, 0, 1, 1)
+    for col, key, title in ((1, "cpu", "telemetry.cpu_history"), (3, "rss", "telemetry.memory_history")):
+        box = Gtk.Box(spacing=2)
+        box.append(Gtk.Label(label=wording.say(title), css_classes=["proc-head"]))
+        if key == sort:
+            box.append(Gtk.Image(icon_name="pan-down-symbolic", pixel_size=12))
+        b = Gtk.Button(child=box, css_classes=["flat", "dim-label", "proc-sort"], halign=Gtk.Align.START)
+        b.connect("clicked", lambda _b, key=key: resort(key))
+        grid.attach(b, col, 0, 2, 1)
+    points = {k: [x for pid in history for x in history[pid]] for k in ("cpu", "rss")}
+    end = max((x[0] for x in points["cpu"]), default=time.time())
+    top_cpu = max((x[1] for x in points["cpu"] if x[1] is not None), default=0) * 1.05
+    top_rss = max((x[2] for x in points["rss"] if x[2] is not None), default=0) * 1.05
+    y = 1
+    for p, name in proc_sorted(proc_names(procs), sort):
+        cell = Gtk.Box(spacing=10, margin_top=4, margin_bottom=4)
+        cell.append(logo(p.get("app")))
+        cell.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
+        grid.attach(cell, 0, y, 1, 1)
+        hist = history.get(p.get("pid")) or []
+        grid.attach(ProcSpark([(a, c) for a, c, _r in hist if c is not None], end, top_cpu), 1, y, 1, 1)
+        grid.attach(Gtk.Label(label=said_cpu(p.get("cpu")), xalign=1, css_classes=["numeric"]), 2, y, 1, 1)
+        grid.attach(ProcSpark([(a, r) for a, _c, r in hist if r is not None], end, top_rss), 3, y, 1, 1)
+        grid.attach(Gtk.Label(label=said_size(p.get("rss")), xalign=1, css_classes=["numeric"]), 4, y, 1, 1)
+        y += 1
+    grid.attach(Gtk.Separator(margin_top=4, margin_bottom=4), 0, y, 5, 1)
+    cpus = [p["cpu"] for p in procs if p.get("cpu") is not None]
+    rsses = [p["rss"] for p in procs if p.get("rss") is not None]
+    grid.attach(Gtk.Label(label=wording.say("telemetry.total"), xalign=0, css_classes=["heading"], margin_top=4,
+                          margin_bottom=4), 0, y + 1, 1, 1)
+    grid.attach(Gtk.Label(label=said_cpu(sum(cpus) if cpus else None), xalign=1, css_classes=["heading", "numeric"]),
+                2, y + 1, 1, 1)
+    grid.attach(Gtk.Label(label=said_size(sum(rsses) if rsses else None), xalign=1,
+                          css_classes=["heading", "numeric"]), 4, y + 1, 1, 1)
+    return frame
+
+
+def where_said(screen, part):
+    """A schema/ui entity and its part, as an error's screen and part say them."""
+    return " · ".join(x for x in (screen, part) if x) or "–"
+
+
+def most_used(rows):
+    """What the user used most (USED_KINDS, in the apps), the most times first."""
+    return sorted((c for c in rows if c.get("kind") in USED_KINDS and c.get("app") != "host" and c.get("count")),
+                  key=lambda c: (-c["count"], -c["seconds"]))[:COUNTS_SHOWN]
+
+
+def slowest(rows):
+    """What took longest each time it ran (TIMED_KINDS), the longest first."""
+    return sorted((c for c in rows if c.get("kind") in TIMED_KINDS and c.get("count")),
+                  key=lambda c: -c["seconds"] / c["count"])[:COUNTS_SHOWN]
+
+
+def count_title(c):
+    """A count's name as a row says it: a part's entity and part ("Composer.region · send button"), else its name."""
+    name = c.get("name") or ""
+    if c.get("kind") in ("part", "menu") and "|copy:" in name:  # (the phone's, where it knows no part: its words' key)
+        entity, _, key = name.partition("|copy:")
+        try:
+            part = uiindex.part_by_copy(entity, key) or wording.say(key)
+        except (KeyError, ValueError, TypeError):
+            part = key
+        return f"{entity} · {part}"
+    if c.get("kind") in ("part", "menu") and "/" in name:
+        entity, _, part = name.partition("/")
+        return f"{entity} · {part}"
+    return name
+
+
+def said_span(seconds):
+    s = int(seconds)
+    if s >= 3600:
+        return wording.say("time.hours_minutes", hours=s // 3600, minutes=s % 3600 // 60)
+    if s >= 60:
+        return wording.say("time.minutes_seconds", minutes=s // 60, seconds=s % 60)
+    return wording.say("time.seconds", seconds=s)
+
+
+def count_row(c, slow=False):
+    """A count: its process's logo, its name, how many times (and a screen's time in front; slow: its time each)."""
+    values = [wording.say("telemetry.error_times", count=c["count"])]
+    if slow:
+        values.insert(0, wording.say("telemetry.average_ms", ms=f"{1000 * c['seconds'] / c['count']:.1f}"))
+    elif c.get("kind") == "screen" and c.get("seconds"):
+        values.insert(0, said_span(c["seconds"]))
+    r = fit_row(count_title(c), *values, mono=c.get("kind") in ("op", "callback", "function", "subprocess"))
+    r.add_prefix(logo(c.get("app")))
+    r.set_tooltip_text(f"{c.get('kind')}: {c.get('name')}")
+    return r
+
+
+def fit_row(title, *values, **kw):
+    return row(title, *values, fit=True, **kw)
+
+
+class ErrorRow(Adw.ExpanderRow):
+    """An error: its process's logo, its type and message, how long ago it last happened and how many times; opened,
+    where it was raised, what was on screen, the user's last actions before it, and the code it ran. set(e) brings it
+    up to date where it is (opened stays opened)."""
+
+    def __init__(self, e):
+        super().__init__()
+        self.set_title_lines(1)
+        self.add_prefix(logo(e.get("app")))
+        self.ago, self.times = (Gtk.Label(css_classes=["dim-label", "numeric"]) for _ in range(2))
+        self.add_suffix(self.ago)
+        self.add_suffix(self.times)
+        self.details, self.shown = [], None
+        self.set(e)
+
+    def set(self, e):
+        self.set_title(GLib.markup_escape_text(f"{e['type']}: {e['message']}" if e.get("message") and
+                                               e["message"] != e["type"] else e["type"]))
+        self.ago.set_label(widgets.time_ago(e.get("last") or 0))
+        self.times.set_label(wording.say("telemetry.error_times", count=e.get("count") or 1))
+        self.set_tooltip_text(e.get("message") or None)
+        lines = error_lines(e)
+        if lines != self.shown:
+            self.shown = lines
+            for r in self.details:
+                self.remove(r)
+            self.details = [fit_row(*line, mono=mono) for *line, mono in lines]
+            for r in self.details:
+                self.add_row(r)
+
+
+def error_lines(e):
+    """What an error says of itself opened: ([title, values...], monospace) for each row."""
+    out = []
+    if e.get("file"):
+        out.append((wording.say("telemetry.error_where"),
+                    f"{e['file']}:{e.get('line')}" + (f" {e['function']}" if e.get("function") else ""), True))
+    if e.get("wire_op"):
+        out.append((wording.say("telemetry.error_op"), str(e["wire_op"]) + (
+            f" · {e['code']}" if e.get("code") is not None else ""), False))
+    elif e.get("code") is not None:
+        out.append((wording.say("telemetry.error_code"), str(e["code"]), False))
+    if e.get("screen") or e.get("part"):
+        out.append((wording.say("telemetry.error_screen"), where_said(e.get("screen"), e.get("part")), False))
+    for c in reversed(e.get("crumbs") or []):
+        key = f"telemetry.action_{c.get('action')}"
+        out.append((wording.say(key) if wording.has(key) else str(c.get("action")),
+                    where_said(c.get("screen"), c.get("part") or c.get("widget")), widgets.time_ago(c["at"]), False))
+    if e.get("commit") or e.get("wire") is not None:
+        out.append((wording.say("telemetry.error_version"), wording.say(
+            "telemetry.version_of", commit=e.get("commit") or "–", wire=str(e.get("wire") or "–")), True))
+    if (first := e.get("first")) and e.get("count", 1) > 1:
+        out.append((wording.say("telemetry.error_first"), widgets.time_ago(first), False))
+    return out
+
+
+def row(title, *values, sensitive=True, mono=False, bold=False, visible=True, fit=False):
+    """A row: its title, its values after it (dim); fit: each value cut short with … where the row hasn't room."""
+    esc = GLib.markup_escape_text(title)
+    r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive, visible=visible)
     if mono:
         r.add_css_class("monospace")
     for v in values:
         if v:
-            r.add_suffix(Gtk.Label(label=v, css_classes=["dim-label", "numeric"]))
+            label = Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"])
+            if fit:
+                label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                label.set_max_width_chars(60)
+                label.set_tooltip_text(v)
+            r.add_suffix(label)
     return r
 
 
 class Page(Adw.PreferencesPage):
     """Settings → Telemetry: the host picked beside New session (as Dependencies has it), Collect Telemetry, then what
     that host keeps: its tokens by day over a year with the most used model and effort and each model's, its machine
-    now, its chats' latest activity, and line profiling (which process, what's profiled, its top lines)."""
+    now, its processes now (a table: each with its app's logo, its CPU and memory over the last minutes and now), and
+    line profiling (switched on or off; what
+    each process profiles is Baude's own pick, lineprofile.DEFAULTS, or what telemetry_set named for it) with every
+    process's top lines."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("telemetry.title"), icon_name="document-open-recent-symbolic")
@@ -407,8 +728,16 @@ class Page(Adw.PreferencesPage):
         self.collect.connect("notify::active", lambda *_: self.switched())
         top.add(self.collect)
         self.add(top)
-        self.state, self.taking, self.groups, self.shown_app = None, False, {}, "host"
+        self.made, self.rows = {}, {}
+        for key in GROUPS:  # (made once, in their order, shown as they're answered: never taken out and put back,
+            # so a row being typed in keeps its place, and the page where it's scrolled to)
+            self.made[key] = Adw.PreferencesGroup(visible=False)
+            self.add(self.made[key])
+        self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
+        self.errors_shown = self.counts_shown = None
+        self.error_rows = {}  # (the Errors group's rows, by app and fingerprint)
+        self.procs, self.proc_history, self.proc_sort, self.procs_at = [], {}, "cpu", None  # (history: pid -> [(at, cpu, rss)])
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -417,13 +746,74 @@ class Page(Adw.PreferencesPage):
     def tick(self):
         if self.get_mapped() and self.state and self.state.get("on"):
             now = time.time()
-            self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
+            self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 20},
                       self.took_metrics)
             self.ticks += 1
-            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and any(
-                    p.get("functions") for p in self.state.get("profiling") or []):
-                self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+            if self.ticks % (PROFILE_S // REFRESH_S) == 0:
+                self.read_errors()
+                self.read_counts()
+                if self.state.get("line_profiling"):
+                    self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
+
+    def read_counts(self):
+        self.read({"from": time.time() - COUNTS_DAYS * 86400, "what": ["counted"], "limit": 2000}, self.took_counts)
+
+    def took_counts(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        rows = reply.get("counted") or []
+        if "used" in self.groups and self.counts_shown == repr(rows):
+            return False
+        self.counts_shown = repr(rows)
+        used, slow = most_used(rows), slowest(rows)
+        for key, title, these, is_slow in (("used", "telemetry.most_used", used, False),
+                                           ("slowest", "telemetry.slowest", slow, True)):
+            if these:
+                self.group(key, wording.say(title), [count_row(c, slow=is_slow) for c in these])
+            else:
+                self.drop(key)
+        return False
+
+    def read_errors(self):
+        self.read({"from": time.time() - ERRORS_DAYS * 86400, "what": ["errors"], "limit": ERRORS_SHOWN},
+                  self.took_errors)
+
+    def took_errors(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        errors = reply.get("errors") or []
+        self.show_errors(errors)
+        return False
+
+    def show_errors(self, errors):
+        """The Errors group's rows brought up to date in place, by app and fingerprint: those that are still there are
+        kept (opened stays opened, the page stays where it's scrolled), the new added, the gone removed."""
+        g, have, title = self.made["errors"], self.error_rows, wording.say("telemetry.errors")
+        if not errors:
+            have.clear()
+            self.group("errors", title, [row(wording.say("telemetry.no_errors"), sensitive=False)])
+            return
+        if not have:  # (what was there was the placeholder, or nothing)
+            self.group("errors", title)
+        keys = [f"{e.get('app')}:{e.get('fingerprint')}" for e in errors]
+        for k in [k for k in have if k not in keys]:
+            g.remove(have.pop(k))
+        for k, e in zip(keys, errors):
+            if k in have:
+                have[k].set(e)
+            else:
+                have[k] = ErrorRow(e)
+        want = [have[k] for k in keys]
+        shown = [r for r in self.rows["errors"] if r in want]
+        if shown != want:
+            for r in shown:
+                g.remove(r)
+            for r in want:
+                g.add(r)
+        self.rows["errors"] = want
 
     def read(self, msg, done):
         import depsview
@@ -436,26 +826,30 @@ class Page(Adw.PreferencesPage):
     def ask(self):
         now = time.time()
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
-        self.read({"from": now - 86400, "what": ["events"], "limit": 4 * EVENTS_SHOWN}, self.took_events)
-        self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
+        self.read({"from": now - PROCS_HISTORY_S, "what": ["metrics"], "limit": 300}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+        self.read_errors()
+        self.read_counts()
 
-    def group(self, key, title, rows=(), at=None):
-        """The group key (made, or emptied), titled, with rows."""
-        g = self.groups.get(key)
-        if g is not None:
-            self.remove(g)
-        g = Adw.PreferencesGroup(title=GLib.markup_escape_text(title) if title else None)
+    def group(self, key, title, rows=()):
+        """The group key shown, titled, with rows (in place of those it had)."""
+        g = self.made[key]
+        for r in self.rows.get(key, ()):
+            g.remove(r)
+        self.rows[key] = list(rows)
         for r in rows:
             g.add(r)
+        g.set_title(GLib.markup_escape_text(title) if title else "")
+        g.set_visible(True)
         self.groups[key] = g
-        self.add(g)
-        order = ["error", "tokens", "models", "machine", "chats", "profiling", "lines"]
-        for k in order[order.index(key) + 1:]:  # (kept in their order however they're answered)
-            if (later := self.groups.get(k)) is not None:
-                self.remove(later)
-                self.add(later)
         return g
+
+    def drop(self, key):
+        """The group key emptied and hidden, if it's shown."""
+        if self.groups.pop(key, None) is not None:
+            for r in self.rows.pop(key, ()):
+                self.made[key].remove(r)
+            self.made[key].set_visible(False)
 
     def failed(self, reply):
         if reply.get("error"):
@@ -473,6 +867,7 @@ class Page(Adw.PreferencesPage):
         self.taking = False
         if not self.state.get("on"):
             self.group("machine", None, [row(wording.say("telemetry.off"), sensitive=False)])
+            self.drop("processes")
         self.show_profiling()
         return False
 
@@ -488,7 +883,6 @@ class Page(Adw.PreferencesPage):
         u = reply.get("usage") or {"days": [], "models": [], "combos": []}
         self.grid.show(u["days"])
         models = self.host_models()
-        g = self.group("tokens", wording.say("telemetry.tokens_by_day"))
         box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
         grid_row = Gtk.ListBoxRow(activatable=False, child=self.grid)
         if self.grid.get_parent() is not None:
@@ -497,14 +891,16 @@ class Page(Adw.PreferencesPage):
         box.append(grid_row)
         if u["combos"]:
             c = u["combos"][0]
-            box.append(row(wording.say("telemetry.most_used"),
-                           wording.say("telemetry.model_effort", model=model_name(c["model"], models),
-                                       effort=effort_said(c.get("effort")))))
-        g.add(box)
+            most = row(wording.say("telemetry.most_used"),
+                       wording.say("telemetry.model_effort", model=providers.model_name(c["model"], models) or "–",
+                                   effort=effort_said(c.get("effort"))))
+            most.set_tooltip_text(providers.model_slug(c["model"], models) if isinstance(c["model"], str) else None)
+            box.append(most)
+        for r in token_rows({k: sum(d.get(k) or 0 for d in u["days"]) for k in KINDS}):
+            box.append(r)
+        self.group("tokens", wording.say("telemetry.tokens_by_day"), [box])
         self.group("models", wording.say("telemetry.models") if u["models"] else None,
-                   [row(model_name(m["model"], models),
-                        wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
-                    for m in u["models"]])
+                   [model_expander(m, models) for m in u["models"]])
         return False
 
     def host_models(self):
@@ -536,26 +932,40 @@ class Page(Adw.PreferencesPage):
         if s.get("memory_total"):
             rows.append(row(wording.say("bot_memory.title"), wording.say(
                 "telemetry.memory_of", used=said_size(s.get("memory_used")), total=said_size(s["memory_total"]))))
-        for p in sorted(s.get("procs") or [], key=lambda p: (list(APP_NAMES).index(p["app"]) - 4) % 4):
-            rows.append(row(wording.say(APP_NAMES[p["app"]]), wording.say(
-                "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss")))))
+        if s.get("swap_total"):
+            rows.append(row(wording.say("telemetry.swap"), wording.say(
+                "telemetry.memory_of", used=said_size(s.get("swap_used")), total=said_size(s["swap_total"]))))
+        if s.get("memory_pressure") or s.get("memory_stall") is not None:
+            rows.append(row(wording.say("telemetry.memory_pressure"), said_pressure(s)))
         self.group("machine", wording.say("telemetry.machine"), rows)
+        with_procs = [x for x in samples if "procs" in x]  # (they're taken less often than the machine)
+        if not with_procs:
+            return False
+        if with_procs[-1]["at"] == self.procs_at:  # (the read's inclusive bound sends it again: the table stays as it is)
+            return False
+        self.procs_at = with_procs[-1]["at"]
+        for x in with_procs:
+            for p in x.get("procs") or []:
+                hist = self.proc_history.setdefault(p.get("pid"), [])
+                if not hist or x["at"] > hist[-1][0]:
+                    hist.append((x["at"], p.get("cpu"), p.get("rss")))
+        since = with_procs[-1]["at"] - PROCS_HISTORY_S
+        self.proc_history = {pid: kept for pid, h in self.proc_history.items() if (kept := [x for x in h if x[0] >= since])}
+        self.procs = [p for p in with_procs[-1].get("procs") or [] if p.get("app") in APP_NAMES]
+        self.show_procs()
         return False
 
-    def took_events(self, reply):
-        if self.failed(reply):
-            return False
-        self.took_state(reply)
-        events = shown_events(reply.get("events") or [])
-        if not events:
-            self.group("chats", wording.say("telemetry.chat_activity"),
-                       [row(wording.say("telemetry.nothing"), sensitive=False)])
-            return False
-        titles = chat_titles(self.win)
-        self.group("chats", wording.say("telemetry.chat_activity"), [
-            row(titles.get((e["host"], e["session"])) or e["session"][:8], said_event(e),
-                datetime.datetime.fromtimestamp(e["at"]).strftime("%H:%M:%S")) for e in events])
-        return False
+    def show_procs(self):
+        """Processes as the latest sample with them has them, sorted by proc_sort."""
+        if self.procs:
+            self.group("processes", wording.say("side_panel.processes"),
+                       [proc_table(self.procs, self.proc_history, self.proc_sort, self.resort)])
+        else:
+            self.drop("processes")
+
+    def resort(self, key):
+        self.proc_sort = key
+        self.show_procs()
 
     def took_profiles(self, reply):
         if self.failed(reply):
@@ -574,60 +984,68 @@ class Page(Adw.PreferencesPage):
                 depsview.ask(self.where, self.took_deps)
             return
         self.deps_for, self.missing_shown = (self.where.get("host"), True), None
+        if self.profiling_rows is None:
+            self.make_profiling()
+        switch, errors = self.profiling_rows[0], dict(zip(PROFILED, self.profiling_rows[1:]))
         on = bool(self.state.get("on"))
-        if "profiling" in self.groups and getattr(self, "profiling_shown", None) == (
-                self.shown_app, repr(self.state.get("profiling")), on):
-            return self.show_lines()
-        self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")), on)
-        mine = next((p for p in self.state.get("profiling") or [] if p["app"] == self.shown_app), {"functions": []})
-        process = Adw.ComboRow(title=wording.say("telemetry.process"), model=Gtk.StringList.new(
-            [wording.say(APP_NAMES[a]) for a in PROFILED]), selected=PROFILED.index(self.shown_app))
-        process.connect("notify::selected", lambda r, _p: self.picked(PROFILED[r.get_selected()]))
-        entry = Adw.EntryRow(title=wording.say("telemetry.functions"), text=", ".join(mine["functions"]),
-                             show_apply_button=True)
-        entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": [
-            f.strip() for f in e.get_text().split(",") if f.strip()]}))
-        collecting = on
-        on = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"), active=collecting and bool(mine["functions"]),
-                           sensitive=collecting and bool(mine["functions"] or entry.get_text().strip()))
-        entry.connect("changed", lambda e: on.set_sensitive(
-            collecting and bool(mine["functions"] or e.get_text().strip())))
-        on.connect("notify::active", lambda r, _p: r.get_active() != bool(mine["functions"]) and self.set({
-            "app": self.shown_app, "functions": [f.strip() for f in entry.get_text().split(",") if f.strip()]
-            if r.get_active() else []}))
-        rows = [on, process, entry]
-        if mine.get("error"):
-            rows.append(row(mine["error"], sensitive=False))
-        self.group("profiling", None, rows)
+        self.taking = True
+        switch.set_active(on and bool(self.state.get("line_profiling")))
+        self.taking = False
+        switch.set_sensitive(on)
+        for p in self.state.get("profiling") or []:
+            if (error := errors.get(p.get("app"))) is not None:
+                error.set_title(GLib.markup_escape_text(p.get("error") or ""))
+                error.set_visible(bool(p.get("error")))
+        if self.rows.get("profiling") != self.profiling_rows:
+            self.group("profiling", None, self.profiling_rows)
         self.show_lines()
 
-    def picked(self, app):
-        self.shown_app = app
-        GLib.idle_add(lambda: self.show_profiling() and False)
+    def make_profiling(self):
+        """Line Profiling and each process's error (shown while it has one): made once, then told what the host
+        says."""
+        switch = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"))
+        switch.connect("notify::active", lambda r, _p: self.taking or self.set({"line_profiling": r.get_active()}))
+        errors = []
+        for app in PROFILED:
+            error = row("", sensitive=False, visible=False)
+            error.add_prefix(logo(app))
+            errors.append(error)
+        self.profiling_rows = [switch, *errors]
 
     def show_lines(self):
-        """The process picked's lines profiled in the last hour, added up, the most time first."""
-        lines = {}
+        """Every process's lines profiled in the last hour, added up, the most time first, each with its app's logo."""
+        lines, picks = {}, {}
         for p in getattr(self, "profiles", []):
-            if p.get("app") != self.shown_app:
+            if p.get("app") not in PROFILED:
                 continue
+            for k in p.get("picked") or []:  # (by its function's file and Class.method, as line_profiler says it)
+                module, _, qual = k["function"].partition(":")
+                picks[(p["app"], module.replace(".", "/") + ".py", qual)] = k
             for x in p.get("lines") or []:
-                k = (x["file"], x["line"])
-                got = lines.setdefault(k, {**x, "hits": 0, "seconds": 0.0})
+                k = (p["app"], x["file"], x["line"])
+                got = lines.setdefault(k, {**x, "app": p["app"], "hits": 0, "seconds": 0.0})
                 got["hits"] += x["hits"]
                 got["seconds"] += x["seconds"]
         top = sorted(lines.values(), key=lambda x: -x["seconds"])[:LINES_SHOWN]
-        if "lines" in self.groups and self.lines_shown == (self.shown_app, repr(top)):
+        if "lines" in self.groups and self.lines_shown == repr(top):
             return
-        self.lines_shown = (self.shown_app, repr(top))
-        g = self.group("lines", wording.say("telemetry.top_lines") if top else None)
+        self.lines_shown = repr(top)
+        rows = []
         for x in top:
             r = row(f"{os.path.basename(x['file'])}:{x['line']}  {x.get('code') or x['function']}",
                     wording.say("telemetry.hits_seconds", hits=f"{x['hits']:,}", seconds=f"{x['seconds']:.3f}"),
                     mono=True)
+            r.add_prefix(logo(x["app"]))
             r.set_title_lines(1)
-            r.set_tooltip_text(f"{x['file']}:{x['line']} ({x['function']})")
-            g.add(r)
+            tip = f"{wording.say(APP_NAMES[x['app']])}: {x['file']}:{x['line']} ({x['function']})"
+            if (k := picks.get((x["app"], x["file"], x["function"]))) is not None:  # (aimed at by its counts: which)
+                tip += "\n" + wording.say("telemetry.picked_by", seconds=f"{k['seconds']:.1f}")
+                if (w := k.get("within")) is not None:
+                    tip += "\n" + wording.say("telemetry.picked_within", name=count_title(w),
+                                               ms=f"{1000 * w['each']:.0f}")
+            r.set_tooltip_text(tip)
+            rows.append(r)
+        self.group("lines", wording.say("telemetry.top_lines") if top else None, rows)
 
     def took_deps(self, reply):
         import depsview
@@ -652,14 +1070,6 @@ class Page(Adw.PreferencesPage):
         self.ask()
 
 
-def shown_events(events):
-    """The latest first, a turn's end once: the host's own (it ran there) left out where an app saw it end too."""
-    seen = [e for e in events if e.get("app") != "host"]
-    out = seen + [e for e in events if e.get("app") == "host" and not any(
-        x["kind"] == e["kind"] and x["session"] == e["session"] and abs(x["at"] - e["at"]) < 10 for x in seen)]
-    return sorted(out, key=lambda e: -e["at"])[:EVENTS_SHOWN]
-
-
 def client_network(win):
     """The window's app's hosts (Baude's sessionlist.network, Record's recordstore.network)."""
     try:
@@ -670,13 +1080,3 @@ def client_network(win):
         return recordstore.network()
     except (ImportError, AttributeError):
         return None
-
-
-def chat_titles(win):
-    """{(host id, session id): title} of every chat the window's app knows."""
-    net = client_network(win)
-    if net is None:
-        return {}
-    return {(r.info.get("id") or r.key, sid): s.get("title") for r in net.alive()
-            for sid, s in r.sessions.items() if isinstance(s, dict) and s.get("title")}
-

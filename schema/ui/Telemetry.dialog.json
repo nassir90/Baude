@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its chats' latest activity, and line profiling of its processes.",
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, what was used most and what was slowest, the errors its machine's processes had, and line profiling of its processes (a switch, and their top lines).",
   "apps": [
     "baude",
     "record",
@@ -21,7 +21,41 @@
     "Telemetry.kt:TelemetryPage",
     "Telemetry.kt:Telemetry",
     "TelemetryStore.kt:TelemetryStore",
-    "PhoneHost.kt:PhoneHost"
+    "PhoneHost.kt:PhoneHost",
+    "telemetryview.py:proc_row",
+    "telemetryview.py:logo",
+    "baudelib/server.py:Server.found_procs",
+    "baudelib/emissionlink.py:running",
+    "Telemetry.kt:ProcessRow",
+    "Telemetry.kt:AppLogo",
+    "telemetryview.py:model_expander",
+    "telemetryview.py:token_rows",
+    "baudelib/telemetry.py:tokens_of",
+    "baudelib/codex.py:turn_usage",
+    "Telemetry.kt:modelExpander",
+    "telemetryview.py:error_row",
+    "baudelib/errorbook.py:Book",
+    "uitrack.py:install",
+    "uitrack.py:part_of",
+    "uitrack.py:screen",
+    "baudelib/telemetry.py:Telemetry.keep_errors",
+    "baudelib/serverrun.py:ServerRunning.wire_errored",
+    "baudelib/client.py:Remote.request",
+    "PhoneErrors.kt:PhoneErrors",
+    "Telemetry.kt:errorExpander",
+    "baudelib/counters.py:Counters",
+    "baudelib/funccount.py:switch",
+    "baudelib/uiindex.py:index",
+    "uitrack.py:look",
+    "uitrack.py:counts_now",
+    "telemetryview.py:count_row",
+    "baudelib/telemetry.py:counted",
+    "baudelib/telemetry.py:Telemetry.flush_counts",
+    "PhoneCounts.kt:PhoneCounts",
+    "Telemetry.kt:CountRow",
+    "baudelib/aim.py:picks",
+    "baudelib/telemetry.py:Telemetry.aim",
+    "baudelib/funccount.py:within"
   ],
   "copy": [
     "telemetry",
@@ -31,7 +65,10 @@
     "bot_memory",
     "images",
     "mode_effort",
-    "tokens"
+    "tokens",
+    "deps",
+    "side_panel",
+    "meta"
   ],
   "parts": [
     {
@@ -43,7 +80,7 @@
     },
     {
       "name": "Collect Telemetry",
-      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off). The host keeps events 400 days (the tokens' grid is a year), samples 7 days and profiles 30 days.",
+      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off). The host keeps events 400 days (the tokens' grid is a year), samples 90 days (a row a minute after a day, a row an hour after a week), counts 90 days (a row an hour after a week), errors 90 days since they last happened, and profiles 30 days.",
       "copy": [
         "telemetry.collect"
       ],
@@ -75,18 +112,94 @@
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
             }
           ]
+        },
+        {
+          "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
+          "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "superseded": "2026-11-27",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good",
+          "rule": "A screen (a page, dialog, side panel's page or tab; never a region only the focus is in) is counted when it's opened, with its time in front while someone's at the machine, as one field of its count in Most Used: counting how many times it's used is what the time is for, and time on screen is never shown on its own as a measure. Supersedes the decision that no app counts time on screen",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Store chat activity yes with timestamps",
+          "rule": "Every app keeps each chat opened, chat in front, chat left and turn sent by the chat's host id and session id; a turn's end (how long it took, its model, effort and tokens) is kept once, by the chat's host. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "The owner doesn't care about the Chat Activity panel on the telemetry page (paraphrased)",
+          "rule": "No app shows chat activity on its Telemetry page; what each app tells its host of chats is still kept (the host's own turn ends are what Tokens by Day and Models add up, and the log is what samples and profiles are put together with), only not shown",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#261"
+            }
+          ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "One source for each fact: a turn's end is kept once, by the host that ran it (no app tells it too), and a model has one name in every event and in usage (the id the turn ran on, claude-opus-5-5, never its alias opus; an alias kept before is counted as the latest id of its family)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "Nothing kept is cut short silently: old samples are rolled up (a row a minute after a day, a row an hour after a week; counts a row an hour after a week) in place of a cap on rows, and a telemetry_read whose limit cut a list says so in its truncated",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Tokens by Day",
-      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens. Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\").",
+      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens (every kind added up, cache reads among them, the one figure older turns and newer share) in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens each kind apart (\"Thu 26 Nov 2026: 1.2k In · 40k Cache Writes · 3.1M Cache Reads · 12k Out\", an older day's \"600M In With Cache · 1.3M Out\"). Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\"), then a row each kind of token over the year, its count after it, dim: Input (not read from a cache or written to one), Cache Writes, Cache Reads, Output, and, only where there are some, Input With Cache (Older Turns): the input of turns kept before the kinds were told apart, cache among it, shown as it was kept.",
       "copy": [
         "telemetry.tokens_by_day",
         "telemetry.day_tokens",
         "telemetry.most_used",
         "telemetry.model_effort",
-        "mode_effort.effort_high"
+        "mode_effort.effort_high",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache",
+        "telemetry.day_input",
+        "telemetry.day_cache_write",
+        "telemetry.day_cache_read",
+        "telemetry.day_output",
+        "telemetry.day_input_with_cache"
       ],
       "decisions": [
         {
@@ -98,69 +211,86 @@
               "issue": "BaudeInternal#228"
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "Models",
-      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name, and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
-      "copy": [
-        "telemetry.models",
-        "telemetry.turns_tokens",
-        "tokens.millions",
-        "tokens.thousands"
-      ]
-    },
-    {
-      "name": "Machine",
-      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (\"11.0 GB of 16.0 GB\"), then the host process, Baude and Record (the phone's app on a phone) each with its CPU and memory (\"6.2% · 613 MB\"). While telemetry is off, one dim row \"Telemetry is off\" in its place.",
-      "copy": [
-        "telemetry.machine",
-        "telemetry.load",
-        "bot_memory.title",
-        "telemetry.memory_of",
-        "telemetry.size_gb",
-        "images.size_mb",
-        "telemetry.host_process",
-        "mesh_versions.baude",
-        "mesh_versions.record",
-        "telemetry.cpu_rss",
-        "telemetry.off"
-      ],
-      "decisions": [
+        },
         {
-          "said": "Yes store system metrics",
-          "rule": "Every host samples its machine's load and memory and its own and each app's CPU and memory every 5 seconds while telemetry is on, with no new dependency, and keeps them timestamped for a month",
-          "decided": "2026-11-26",
+          "said": "Telemetry's tokens are overstated: cache reads (and cache writes) are counted as input, so a day reads hundreds of millions of tokens in against a million out (paraphrased)",
+          "rule": "Every host keeps each turn's tokens each kind apart (input not read from a cache or written to one, cache writes, cache reads, output), each turn once, from what its agent says of that turn alone (Claude Code's tokens since its previous result, a Codex thread's totals' difference over the turn, pi's and the phone's own turn's), and every app shows them apart; turns kept before then show their input as kept, marked as having cache in it, never added to Input",
+          "decided": "2026-11-27",
           "source": [
             {
-              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
             }
           ]
         }
       ]
     },
     {
-      "name": "Chat Activity",
-      "shows": "Heading \"Chat Activity\", the latest 12 events of the last day, the latest first: the chat's title (its id's start where the app doesn't know it), then what happened and when, dim: \"Chat Opened\", \"Chat in Front\", \"Chat Left\", \"Turn Sent\", \"Turn Ended in 2m 11s\", \"23:48:29\". A turn's end the host and an app both saw is shown once. None: one dim row \"Nothing recorded\".",
+      "name": "Models",
+      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns\" after it (\"1 Turn\" for one), dim, and an arrow; opened (a click, a tap), a row each kind of token of its turns as under Tokens by Day: Input, Cache Writes, Cache Reads, Output, and Input With Cache (Older Turns) where it has some.",
       "copy": [
-        "telemetry.chat_activity",
-        "telemetry.chat_opened",
-        "telemetry.chat_front",
-        "telemetry.chat_left",
-        "telemetry.turn_sent",
-        "telemetry.turn_ended",
-        "telemetry.turn_ended_in",
-        "telemetry.nothing",
-        "time.seconds",
-        "time.minutes_seconds",
-        "time.hours_minutes"
+        "telemetry.models",
+        "tokens.millions",
+        "tokens.thousands",
+        "telemetry.turns",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache"
       ],
       "decisions": [
         {
-          "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
-          "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "said": "Model names are formatted one way across the app, the slug shown only on hover: the model dropdown's names match the telemetry section's (paraphrased)",
+          "rule": "Every app names a model one way everywhere (providers.model_name on the desktop, modelName on the phone): as its host lists it, else as its id reads by schema/icons/models/families.json's names (claude-opus-4-7 is \"Opus 4.7\"), else its name to what serves it; its slug (claude-opus-5-5, gpt-5.4-codex) shows only on hover, or a long-press on the phone",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#235"
+            }
+          ]
+        },
+        {
+          "said": "Usage by model is overstated the same way: cache reads counted as input (paraphrased)",
+          "rule": "Every app shows each model's tokens each kind apart, opened from its row, as Tokens by Day shows the year's",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "click (a model's row; a tap on the phone)",
+          "does": "Opens or closes its tokens, a row each kind"
+        }
+      ]
+    },
+    {
+      "name": "Machine",
+      "shows": "Heading \"Machine\": rows of the host's latest sample (the machine sampled every 5 seconds with someone at it, every 30 with nobody), asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it. While telemetry is off, one dim row \"Telemetry is off\" in its place.",
+      "copy": [
+        "telemetry.machine",
+        "telemetry.load",
+        "bot_memory.title",
+        "telemetry.memory_of",
+        "telemetry.swap",
+        "telemetry.memory_pressure",
+        "telemetry.pressure_normal",
+        "telemetry.pressure_warning",
+        "telemetry.pressure_critical",
+        "telemetry.stalled",
+        "telemetry.size_gb",
+        "images.size_mb",
+        "telemetry.off"
+      ],
+      "decisions": [
+        {
+          "said": "Yes store system metrics",
+          "rule": "Every host samples its machine's load and memory every 5 seconds and its own and each app's CPU and memory every 30 seconds while telemetry is on and someone's at the machine (every 30 seconds and every 2 minutes with nobody), with no new dependency and no program started to do it (macOS's libproc and sysctl, Linux's /proc), and keeps them timestamped, rolled up as they age",
           "decided": "2026-11-26",
           "source": [
             {
@@ -170,13 +300,195 @@
           ]
         },
         {
-          "said": "Store chat activity yes with timestamps",
-          "rule": "Every app keeps each chat opened, chat in front, chat left, turn sent and turn ended (with how long it took, its model, effort and tokens) by the chat's host id and session id; the chat's host keeps each of its turns' ends too. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
+          "said": "In telemetry we probably want to record both memory and swap (paraphrased)",
+          "rule": "Every host samples its memory in use, its swap in use of its total, and the memory pressure its system gives (macOS's pressure level, Linux's pressure stall share, a phone's low memory), with no new dependency, and every app shows them under Machine",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#236"
+            }
+          ]
+        },
+        {
+          "said": "Machine should be a section, and the page reads \"Machine\" then \"Processes\" (paraphrased)",
+          "rule": "Every app's Telemetry page has Machine (the machine's own rows) and, under it, Processes; no process is a row of Machine",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#261"
+            }
+          ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "Sampling costs next to nothing: no program is started for a sample, the machine's numbers are taken often and each process's less often, and both less often again while nobody's at the machine",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Processes",
+      "shows": "Heading \"Processes\": one table in a card, of the processes the host's latest sample with its processes has (they're taken every 30 seconds) (its procs, as typed: app and pid), busiest first by CPU; a click on the CPU or Memory heading sorts by that one instead (the heading sorted by has a down arrow after it), a process that gave none last. Each process keeps its name however it's sorted: the app's name, numbered where the app has several, in the order Host Process, Baude, Record, Emission, Multiplex and by pid within an app (\"Emission (2)\"; the phone's app, as Baude, on a phone's host). Each line: its app's logo at its start, monochrome in the text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), and its name. Desktop (Baude and Record): columns Process, \"CPU, Last 10 Minutes\" and \"Memory, Last 10 Minutes\"; under each of the last two, the process's line over the last 10 minutes (the samples the page reads, kept as it reads more; one scale for every process's line in a column, so the busiest stands out; a gap where its samples are 5 minutes apart; drawn in the Kubernetes history's colour), then its value now, right-aligned (\"6.2%\", \"613 MB\"). Phone: columns Process, PID (dim), CPU and Memory, the numbers right-aligned, with no lines over time (no room). Under a rule, a bold Total (no logo): the processes' CPU and memory added up, a process that gave none left out of its sum; it stays at the bottom whatever the sort. Hidden while telemetry is off, or the sample has none.",
+      "copy": [
+        "side_panel.processes",
+        "telemetry.host_process",
+        "mesh_versions.baude",
+        "mesh_versions.record",
+        "mesh_versions.emission",
+        "deps.multiplex",
+        "telemetry.process_n",
+        "telemetry.process",
+        "telemetry.pid",
+        "telemetry.cpu",
+        "bot_memory.title",
+        "telemetry.cpu_history",
+        "telemetry.memory_history",
+        "telemetry.cpu_percent",
+        "telemetry.total",
+        "telemetry.size_gb",
+        "images.size_mb"
+      ],
+      "decisions": [
+        {
+          "said": "Processes is a section of its own showing the Baude processes open, Record's, Emission's and Multiplex's and so on, each with its app's logo to its left about the size of the model logos (paraphrased)",
+          "rule": "Every host samples every process of Baude's apps on its machine: those that tell it telemetry (Baude, Record, the phone's app) and those it finds itself (each Emission, by its info's pid, and each Multiplex window, by multiplexlink's sockets); every app lists them under Processes, each with its app's logo at a model logo's size, its name, CPU and memory",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#261"
+            }
+          ]
+        },
+        {
+          "said": "Processes telemetry needs a Total row at the bottom (paraphrased)",
+          "rule": "Every app ends the Processes list with a bold Total row (no logo) that adds up the processes' CPU and memory above it, in the same form, and leaves it at the bottom",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#274"
+            }
+          ]
+        },
+        {
+          "said": "icons are not what I wanted, they should be monochrome",
+          "rule": "Every app draws each process's logo as a symbolic icon in the row's text colour, as the model logos are drawn (schema/icons/baude's baude-app-<app>-symbolic: the app's logo shape with what's drawn on it cut out), never the coloured logo or one tinted in the accent",
           "decided": "2026-11-26",
           "source": [
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+              "message": "ae00d4f1-22a6-4e1f-afe6-1ef28e5f464a"
+            }
+          ]
+        },
+        {
+          "said": "Wants the Processes CPU and memory shown more as a table, and chose from the mockups: desktop with each process's recent history beside its values, the phone as a plain table (paraphrased)",
+          "rule": "Every app shows Processes as one table, busiest first by CPU with CPU and Memory sortable by their headings, numbers right-aligned and a bold Total under a rule; Baude and Record draw each process's CPU and memory over the last 10 minutes beside its value now, on one scale per column; the phone shows Process, PID, CPU and Memory without lines over time",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#311"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Most Used",
+      "shows": "Heading \"Most Used\": the 10 things the user used most on that host's machine in the last 7 days, across Baude, Record and the phone's app (buttons and rows, menu items, screens), the most times first, read again every 30 seconds while the page is shown. Each row: its process's app's logo, its name by schema/ui (\"Composer.region · send button\", a screen as its entity, \"Telemetry.dialog\"), and after it, dim, a screen's time in front (\"6m 50s\") and how many times (\"212 Times\"); its kind and full name on hover. Hidden while nothing's counted.",
+      "copy": [
+        "telemetry.most_used",
+        "telemetry.error_times",
+        "time.hours_minutes",
+        "time.minutes_seconds",
+        "time.seconds"
+      ],
+      "decisions": [
+        {
+          "said": "Measure the raw number of invocations and a trivial index of the invocations that doesn't require searching with a model.",
+          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a function of Baude's own code (its calls and time in all, by module:function, only while line profiling is on, to aim it: counting costs about half a microsecond a call), a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            },
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good",
+          "rule": "Counting costs nothing while nothing happens: a count is a number added to in memory as a thing is used, told once a minute; nothing polls for it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Slowest",
+      "shows": "Heading \"Slowest\": the 10 things that took longest each time they ran in the last 7 days (buttons, rows and menu items by their click's time, wire ops, main-loop callbacks), the longest first. Each row: its process's app's logo, its name (an op's or callback's in monospace), and \"16.0 ms Each\" and how many times after it, dim. Hidden while nothing's counted.",
+      "copy": [
+        "telemetry.slowest",
+        "telemetry.average_ms",
+        "telemetry.error_times"
+      ]
+    },
+    {
+      "name": "Errors",
+      "shows": "Heading \"Errors\": the errors the processes on the host's machine had in the last 7 days (the host process, Baude, Record, the phone's app, Emission), the last to happen first, at most 20, read again every 30 seconds while the page is shown. Each an expander row: its process's app's logo, \"Type: message\" on one line, and how long ago it last happened and how many times (\"4m ago  3 Times\", \"Once\") after it, dim. Opened, a row each of what's known of it: Raised In (file:line and function, monospace), Answering (the wire op and its code: an error answered, a message not sent, a draft not saved), Exit Code (an agent's), On Screen (the schema/ui entity and part, \"Composer.region · send button\"), the user's last actions before it (on the phone from its shared rows and buttons, named by the same schema/ui parts), the latest first (Clicked, Picked From a Menu, Opened, each with its entity and part and how long ago), Code Version (commit · Wire 43) and First Happened (for one that happened more than once). With none, one dim row \"No Errors\".",
+      "copy": [
+        "telemetry.errors",
+        "telemetry.no_errors",
+        "telemetry.error_times",
+        "telemetry.error_where",
+        "telemetry.error_op",
+        "telemetry.error_code",
+        "telemetry.error_screen",
+        "telemetry.action_click",
+        "telemetry.action_menu",
+        "telemetry.action_open",
+        "telemetry.error_version",
+        "telemetry.version_of",
+        "telemetry.error_first",
+        "time.minutes_ago"
+      ],
+      "decisions": [
+        {
+          "said": "Record the errors that happen during program execution.",
+          "rule": "Every host keeps each error of every process on its machine once, by its fingerprint (its kind, its type and the file and function of the frame of Baude's own code it was raised in (not its line), or for one without a stack its op and code or its message's shape), with how many times it happened, when first and last, the commit and wire version it ran, the schema/ui screen and part it happened on and the user's last 8 actions before it; caught where they happen: an exception nothing caught on any thread or in a main-loop callback, GLib's and GTK's criticals and warnings, an error answered on the wire (with its op and code), an agent exiting by itself with a code other than 0, a message not sent or a draft not saved, a page Emission couldn't load, the phone's app crashing (kept as it starts again); every app shows them under Errors, and telemetry_read gives them to any member of the mesh",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            },
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Yep, unifying schema/ui and telemetry is a pretty good idea as it points to homogenous UI ontology",
+          "rule": "An error's screen, part and breadcrumbs are named by schema/ui's entity and part names (\"Composer.region\", \"send button\"), never by a widget's own text; where a widget isn't a part of its entity, its copy key, icon or kind is said instead",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
             }
           ]
         }
@@ -184,36 +496,73 @@
     },
     {
       "name": "Line Profiling",
-      "shows": "A boxed list: a switch row \"Line Profiling\" (on while the process picked profiles something; off and greyed out while telemetry is off), \"Process\" with a picker (Host Process, Baude, Record), \"Functions\" (an entry: dotted names of functions and modules, comma-separated), and, where a name isn't found, its error in one dim row. Then \"Top Lines\": the picked process's 10 lines that took longest in the last hour (read again every 30 seconds while a process profiles, as its profiles are taken), the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
+      "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is picked from its function counts (baudelib.aim): where its time actually went, each function's own time in the last day (the processor time it took, less its counted callees': what it ran, not what it waited for), what ran within a slow click or op weighted up by that click's or op's average time (twice at 100 ms, up to 10 times), the top 8 two at a time in turn, 10 minutes each, in an order that holds; never telemetry's own code, nor what runs within its ops or its page's clicks; Baude's developers' pick (lineprofile.DEFAULTS) only till anything's counted; telemetry_set from any member of the mesh names others for a process in their place (python3 -m baudelib.telemetry profile). Nothing on the page names or edits them; a top line's tooltip says the count that picked its function, matched by its file and Class.method (\"Picked by Its Own Time: 2.1s in the Last Day\", then \"Mostly in Composer.region · send button: 340 ms Each\" where a click or op weighted it). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed), gone, with the switch in its place, as soon as line_profiler's installed there (looked for again each time the page asks; no restart). Not on the phone's own host (no Python there).",
       "copy": [
         "telemetry.line_profiling",
-        "telemetry.process",
-        "telemetry.functions",
         "telemetry.top_lines",
         "telemetry.hits_seconds",
         "telemetry.not_found",
         "telemetry.no_profiling",
-        "telemetry.host_process"
+        "telemetry.host_process",
+        "telemetry.picked_by",
+        "telemetry.picked_within"
       ],
       "actions": [
         {
-          "by": "apply (the entry's ✓, Enter)",
-          "does": "The process picked profiles those functions from now (telemetry_set app, functions)"
-        },
-        {
           "by": "click (the switch)",
-          "does": "Off: it profiles nothing (what it timed is kept); on: it profiles what the entry names"
+          "does": "Line profiling on or off on that host (telemetry_set line_profiling): on, the host process, Baude and Record there each profile their functions; off, nothing (what was timed is kept)"
         }
       ],
       "decisions": [
         {
           "said": "Yes build in line_profiler",
-          "rule": "line_profiler is an optional dependency (schema/deps/line_profiler.json); the host process, Baude and Record each profile the functions and modules the host is told for them, switched at run time, saving what they timed every 30 seconds with its times; with nothing named, nothing of it runs",
+          "rule": "line_profiler is an optional dependency (schema/deps/line_profiler.json); the host process, Baude and Record each profile their functions, switched at run time, saving what they timed every 30 seconds with its times; while it's off, nothing of it runs",
           "decided": "2026-11-26",
           "source": [
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Which functions are profiled is the developers' call, shipped as a default set that can be overridden over the mesh; asking the user to pick a process and type function names doesn't make sense (paraphrased)",
+          "rule": "Every app's Line Profiling is a switch and the top lines: what each process profiles is picked from its counts (or the developers' default set till there are any), or what telemetry_set names for it from any member of the mesh; no app names, picks or edits functions on the page",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#285"
+            }
+          ]
+        },
+        {
+          "said": "Editing a Telemetry text field near the foot of Settings scrolls the page up to its start (paraphrased)",
+          "rule": "Every app keeps every text row on a Settings page where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#286"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good but we also just want intelligent choice of whre to pick line_profiler. The initial chhouice was braindead. Why would telemetry monitor itself? Who is that useful for? For a dev who wants improving software?",
+          "rule": "Every host aims line profiling at where each process's time is actually spent, not at its entry points: the functions with the most own time (less their callees'), weighted toward those that run within slow clicks and slow host ops, rotated in a stable order so each of the top gets a window, and never at telemetry's own code or what its ops and page run; each profile says which count picked each function; what telemetry_set names over the mesh still takes their place",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Line Profiling keeps saying it needs line_profiler after line_profiler's been installed (paraphrased)",
+          "rule": "Every app finds a dependency installed while the host (or the app) runs, without a restart: a Python module installed with pip --user is looked for again in the user's site-packages, even one that didn't exist when the process started, each time the page asks (its refresh, Try Again, the page opened), so Line Profiling and Settings → Dependencies stop saying it's missing as soon as it's there",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#309"
             }
           ]
         }
@@ -222,9 +571,10 @@
   ],
   "states": [
     "off: Collect Telemetry off, \"Telemetry is off\" in the machine's place",
-    "empty: no turns in the year: the grid all faint, no Most Used or Models; no events: \"Nothing recorded\"",
+    "empty: no turns in the year: the grid all faint, no Most Used or Models",
     "error: the host's error in one dim row",
-    "no line_profiler: its install row in Line Profiling's place"
+    "no line_profiler: its install row in Line Profiling's place",
+    "no errors: one dim row \"No Errors\" under Errors"
   ],
   "removed": [
     {
@@ -242,6 +592,36 @@
           "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
         }
       ]
+    },
+    {
+      "name": "Chat Activity",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner doesn't care about the Chat Activity panel on the telemetry page (paraphrased; the events are still kept)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#261"
+        }
+      ]
+    },
+    {
+      "name": "Line Profiling's Process picker and Functions entry",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner: which functions are profiled is the developers' call, a default set shipped with the code and overridden over the mesh, not something typed on the page (paraphrased)",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#285"
+        }
+      ]
     }
   ],
   "scenes": [
@@ -249,6 +629,7 @@
     "39g-telemetry-foot",
     "39h-telemetry-no-profiler",
     "40d-telemetry",
-    "40e-telemetry-foot"
+    "40e-telemetry-foot",
+    "40d2-telemetry-models"
   ]
 }

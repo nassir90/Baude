@@ -119,6 +119,21 @@ def _(app):
     return win
 
 
+@scene("14b-mcp-names", "MCP tools by name: ToolSearch selecting the mesh's tools (input open), a mesh tool, a Slack tool asking")
+def _(app):
+    win = app.window(opts())
+    win.h_system({"type": "system", "subtype": "init", "session_id": "s1", "tools": [],
+                  "mcp_servers": [{"name": "mesh", "status": "connected"}, {"name": "claude.ai Slack", "status": "connected"}]})
+    tool_with_output(win, "ToolSearch", {"query": "select:mcp__mesh__tasks,mcp__mesh__task_run", "max_results": 2}, "q1",
+                     "Loaded 2 tools")
+    win.tool_cards["q1"].output_toggle.set_expanded(False)
+    tool_with_output(win, "mcp__mesh__tasks", {"bot": "a1b2c3"}, "q2", "[]", open_input=False)
+    win.tool_cards["q2"].output_toggle.set_expanded(False)
+    ask_permission(win, "mcp__claude_ai_Slack__slack_send_message",
+                   {"channel_id": "C024BE91L", "message": "Two tasks ran today: nightly tests and the weekly report."}, "q3")
+    return win
+
+
 @scene("20-tool-views", "Readable tool inputs: Read, Grep, Glob, TodoWrite, Task (expanded)")
 def _(app):
     win = app.window(opts())
@@ -575,7 +590,7 @@ def schema_sample():
         return baude.pg_normalize(json.load(f)["raw"])
 
 
-@scene("38c-schema-diagram", "Database schemas (☰ → Database Schemas…, or a table name in a reply): every reachable "
+@scene("38c-schema-diagram", "Database schemas (☰ → Databases…, or a table name in a reply): every reachable "
                              "Postgres, its tables and foreign keys, like Supabase's visualizer; the selected table's "
                              "links light up", size=(1300 + SIDEBAR, H))
 def _(app):
@@ -607,7 +622,7 @@ def kube_window(app):
     baude.save_settings(kube_context=None, kube_log_wrap=None)
     win = app.window(opts())
     kv = win.kube
-    kv.open()
+    kv.open(page=baude.KUBE_PODS)
     T.wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods")
     kv.table.sort_by_column(next(c for c in kv.columns if c.get_title() == "CPU"), Gtk.SortType.DESCENDING)
     return win, kv
@@ -625,6 +640,44 @@ def _(app):
     T.pump(0.3)
     kv.ns_btn.popup()
     return win
+
+
+def kube_home(app, context="k3d-dev"):
+    """The Kubernetes view's Home on tests/fake_kubectl.py's context, as if it had been open half an hour."""
+    import kube_fixture as kf
+    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig"), context == "crowded"),
+                      BAUDE_KUBECTL=os.path.join(HERE, "fake_kubectl.py"), BAUDE_HELM=os.path.join(HERE, "fake_kubectl.py"))
+    for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE"):
+        os.environ.pop(k, None)
+    baude.save_settings(kube_context=None, kube_log_wrap=None)
+    kf.seed_home_history(context)
+    win = app.window(opts())
+    kv = win.kube
+    kv.open(context=context, page=baude.KUBE_HOME)
+    T.wait_for(lambda: kv.table_stack.get_visible_child_name() == "home" and not kv.loading, "Home")
+    return win, kv
+
+
+@scene("38e-kubernetes-home", "Kubernetes' Home: the whole stack's CPU and memory, requested, used and limits, each a "
+                              "bar against what the nodes can give pods, how they went over the last half hour; by "
+                              "namespace (and by node, on a cluster of more than one)", size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app)[0]
+
+
+@scene("38e-kubernetes-home-prod", "Kubernetes' Home on a cluster with no metrics API and three nodes: what's used "
+                                   "is N/A, requested and limits still added up, by namespace and by node",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app, "prod")[0]
+
+
+@scene("38e-kubernetes-home-crowded", "Kubernetes' Home on a cluster of fifteen namespaces and twelve nodes whose "
+                                      "limits are 2.3 times what the nodes can give pods: each bar past allocatable "
+                                      "its own orange segment, a tick at allocatable; the ten namespaces and nodes "
+                                      "using the most CPU, the rest an Other row", size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app, "crowded")[0]
 
 
 @scene("38e-kubernetes-logs", "Kubernetes: a pod's logs under the table, followed (kubectl logs -f), its containers "
@@ -670,6 +723,88 @@ def _(app):
     return win
 
 
+def docker_window(app, page=None):
+    """The Docker view on tests/fake_docker.py's colima (a Compose project, shop, and a redis), its running containers
+    read (or page's, picked in the sidebar)."""
+    before = os.environ.get("BAUDE_DOCKER")
+    os.environ.update(BAUDE_DOCKER=os.path.join(HERE, "fake_docker.py"))
+    for k in ("FAKE_DOCKER_FOLLOW", "FAKE_DOCKER_STATE"):
+        os.environ.pop(k, None)
+    baude.save_settings(docker_context=None, docker_inspect=None, kube_log_wrap=None)
+    win = app.window(opts())
+    win.connect("destroy", lambda *_: os.environ.update(BAUDE_DOCKER=before) if before else os.environ.pop("BAUDE_DOCKER", None))
+    dv = win.docker
+    dv.open()
+    T.wait_for(lambda: dv.store is not None and dv.store.get_n_items() and not dv.loading, "the containers")
+    if page is not None:
+        row = dv.side.get_first_child()
+        while row is not None and getattr(row, "page", {}).get("key") != page:
+            row = row.get_next_sibling()
+        dv.side.select_row(row)
+        T.wait_for(lambda: dv.table_page is dv.page and not dv.loading, "the page")
+    return win, dv
+
+
+@scene("38f-docker", "Docker (☰ → Docker): the host's Docker laid out as the Kubernetes view is: its categories "
+                     "(Containers, running and all; Images; Volumes; Networks; Compose Projects), a page's objects "
+                     "sorted by any column, a status tone each; at a row's end its log, a shell and ⋮ (Start, Stop, "
+                     "Restart, Remove…, as it is); a row selected, inspected beside the table",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "containers")
+    dv.selection.set_selected(0)
+    T.wait_for(lambda: "Config" in dv.details.buffer.get_property("text"), "its inspect")
+    return win
+
+
+@scene("38f-docker-dock", "Docker: a container's log followed and a shell in it (docker exec -it, run by the host), "
+                          "a tab each in the dock under the table", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app)
+    T.pump(0.3)
+    shop = next(dv.store.get_item(i).obj for i in range(dv.store.get_n_items())
+                if dv.store.get_item(i).obj["name"] == "shop-api-1")
+    dv.show_logs(shop["id"])
+    T.wait_for(lambda: dv.logs is not None and "GET /healthz" in dv.logs.buffer.get_property("text"), "its log")
+    dv.show_shell(shop["id"])
+    T.wait_for(lambda: dv.shell_term is not None and "/app #" in dv.shell_term.screen()["screen"], "its prompt")
+    dv.shell_term.type("ls\n")
+    T.pump(0.5)
+    win.connect("destroy", lambda *_: dv.dock.close_all())
+    return win
+
+
+@scene("38f-docker-out", "Docker moved out to a window of its own: its bar that window's header bar",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "images")
+    dv.out.out()
+    T.pump(0.5)
+    win.connect("destroy", lambda *_: dv.out.window is not None and dv.out.window.close())
+    return dv.out.window
+
+
+@scene("38f-docker-not-running", "Docker on a context whose daemon isn't running: why, the command that starts it with "
+                                 "Copy, Try Again, and docker's output folded away", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "compose")
+    dv.syncing = True
+    dv.context_dd.set_selected(1)
+    dv.syncing = False
+    dv.switch_context("default")
+    T.wait_for(lambda: dv.table_stack.get_visible_child_name() == "error", "why")
+    return win
+
+
+@scene("38f-docker-remove", "Docker: Remove… on a running container, asked first: what it is, the context, and what "
+                            "goes with it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app)
+    dv.act(dv.selection.get_item(0).obj["id"], "remove")
+    T.pump(0.5)
+    return win
+
+
 class HostThere:
     """Another host, picked in the window's host dropdown, for the Kubernetes and database views: the tests' own host
     process (in this one, so the fakes here are its too), reached by its socket, under a fixture name."""
@@ -712,7 +847,7 @@ def _(app):
         os.environ.pop(k, None)
     win = HostThere().pick(app.window(opts()))
     kv = win.kube
-    kv.open()
+    kv.open(page=baude.KUBE_PODS)
     T.wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods", 30)
     kv.show_logs("shop/api-6f7c-mnopq")
     T.wait_for(lambda: kv.logs is not None and "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"),

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A variable a task declares: a name its script reads it by (baudetask.vars), and a type, bound once for the task (its bindings), by its Bot or a person, unlike its form's inputs, which each run fills.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name, as its row and the script say it (\"Translation Model\")."
+    },
+    "type": {
+      "enum": [
+        "model",
+        "decider",
+        "host",
+        "browser_host",
+        "terminal_host",
+        "kube_context",
+        "pod",
+        "container",
+        "database",
+        "text"
+      ],
+      "description": "What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same."
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's for, as its Bot said."
+    }
+  },
+  "required": [
+    "name",
+    "type"
+  ],
+  "additionalProperties": false
+}

@@ -100,8 +100,8 @@ class ProfileSocket:
 # ------------------------------------------------------------------ addresses --
 
 def address(text):
-    """What's typed in the address bar as a URL: one as it is; a path as a file; a local host or an IP address given
-    http://, another host https://; anything else searched for."""
+    """What's typed in the address bar as a URL: one as it is; a path as a file; a local host (localhost, *.localhost,
+    *.local) or an IP address given http://, another host https://; anything else searched for."""
     text = text.strip()
     if not text:
         return HOME_PAGE
@@ -118,7 +118,7 @@ def address(text):
             ipaddress.ip_address(host)
             local = True
         except ValueError:
-            local = host == "localhost" or host.endswith(".localhost")
+            local = host == "localhost" or host.endswith((".localhost", ".local"))
         if local:
             return "http://" + text
         if "." in host:

@@ -81,16 +81,17 @@ enum class Ticks { NONE, END, START }
 private val LocalTicks = staticCompositionLocalOf { Ticks.NONE }
 
 /** A popup's own window at the page's density, placed by Placer; most: the room it has on the screen (as wide as the
- * screen less its margins, as tall as the more of the room under its anchor and over it). */
+ * screen less its margins, as tall as the more of the room under its anchor and over it). focusable false: the focus
+ * (and the keyboard) left where it is, as a list picked from as you type wants. */
 @Composable
-fun PopupAt(offset: DpOffset, dismiss: () -> Unit, content: @Composable (most: DpSize) -> Unit) {
+fun PopupAt(offset: DpOffset, dismiss: () -> Unit, focusable: Boolean = true, content: @Composable (most: DpSize) -> Unit) {
     val density = LocalDensity.current
     val view = LocalView.current
     val margin = with(density) { Popups.margin.roundToPx() }
     val off = with(density) { IntOffset(offset.x.roundToPx(), offset.y.roundToPx()) }
     val room = remember { mutableIntStateOf(Int.MAX_VALUE) }
     val placer = remember(off, margin, view) { Placer(off, offset != DpOffset.Zero, margin, view, room) }
-    Popup(popupPositionProvider = placer, onDismissRequest = dismiss, properties = PopupProperties(focusable = true)) {
+    Popup(popupPositionProvider = placer, onDismissRequest = dismiss, properties = PopupProperties(focusable = focusable)) {
         val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) }
         val most = with(density) { DpSize((frame.width() - 2 * margin).toDp(), minOf(frame.height() - 2 * margin, room.intValue).toDp()) }
         Paged(density) { content(most) }
@@ -146,14 +147,14 @@ fun Popover(open: Boolean, dismiss: () -> Unit, offset: DpOffset = DpOffset.Zero
     }
 }
 
-/** A menu's row: Popups.row high, its things Popups.inset in from the sides and Popups.gap apart; pressed and held:
+/** A menu's row (counted as a menu item, by its label): Popups.row high, its things Popups.inset in from the sides and Popups.gap apart; pressed and held:
  * onLongClick. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MenuLine(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit,
+fun MenuLine(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, label: String? = null, onClick: () -> Unit,
              content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = Popups.row)
-        .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+        .combinedClickable(enabled = enabled, onClick = onClick.tapping(label, kind = "menu"), onLongClick = onLongClick)
         .padding(horizontal = Popups.inset), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Popups.gap), content = content)
 }
@@ -165,7 +166,7 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
                onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val ticks = LocalTicks.current
-    MenuLine(enabled, onLongClick, onClick) {
+    MenuLine(enabled, onLongClick, label, onClick) {
         if (ticks == Ticks.START) Tick(on, enabled)
         dot?.let { Box(Modifier.size(14.dp).clip(CircleShape).background(it)) }
         Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = 1,
@@ -175,19 +176,23 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
 }
 
 /** A square check for each of a list of things and one over them all, as the Kubernetes page's Namespaces and home's ⋮
- * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked; none checked is every
- * one (an empty list), the one over them checked. Tapping that one shows every one again; it's never unchecked.
- * items: (key, label); pick(the keys shown, empty for every one); onLongClick(key): one pressed and held; heading: the
- * one over them reads as a section heading (the menu's "Group by"), its check kept. */
+ * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked. Every one shown is
+ * every one checked (null), the one over them checked too; tapping that one checks every one, or unchecks every one
+ * (an empty list) while they all are. items: (key, label); pick(the keys shown, null for every one); onLongClick(key):
+ * one pressed and held; heading: the one over them reads as a section heading (the menu's "Group by"), its check kept;
+ * dimmed: the keys whose labels are greyed (a column filter's values no row has), still there to tap. */
 @Composable
-fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>, pick: (List<String>) -> Unit,
-               onLongClick: ((String) -> Unit)? = null, heading: Boolean = false) {
-    MenuCheck(allLabel, shown.isEmpty(), heading = heading) { pick(emptyList()) }
+fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>?, pick: (List<String>?) -> Unit,
+               onLongClick: ((String) -> Unit)? = null, heading: Boolean = false, dimmed: Set<String> = emptySet()) {
+    val keys = items.map { it.first }
+    MenuCheck(allLabel, shown == null, heading = heading) { pick(if (shown == null) emptyList() else null) }
     MenuDivider()
     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
         for ((key, label) in items) {
-            MenuCheck(label, key in shown, onLongClick = onLongClick?.let { { it(key) } }) {
-                pick(shown.filter { it != key } + if (key in shown) emptyList() else listOf(key))
+            val on = shown == null || key in shown
+            MenuCheck(label, on, onLongClick = onLongClick?.let { { it(key) } }, dim = key in dimmed) {
+                val next = (shown ?: keys).filter { it != key } + if (on) emptyList() else listOf(key)
+                pick(if (next.isNotEmpty() && next.toSet().containsAll(keys)) null else next)
             }
         }
     }
@@ -196,15 +201,15 @@ fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<
 /** A row with a square check before its label (libadwaita's check button): the accent filled with a tick when on, an
  * outline when off. heading: its label as MenuHeading's. */
 @Composable
-private fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
-                      onClick: () -> Unit) {
+fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
+              dim: Boolean = false, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(true, onLongClick, onClick) {
+    MenuLine(true, onLongClick, label, onClick) {
         val box = Modifier.size(16.dp.icon).clip(RoundedCornerShape(3.dp))
         if (on) Box(box.background(c.accentBg), contentAlignment = Alignment.Center) {
             Icon(Adwaita.ObjectSelect, null, tint = c.accentFg, modifier = Modifier.size(14.dp.icon))
         } else Box(box.border(1.dp, c.dim, RoundedCornerShape(3.dp)))
-        Text(label, style = if (heading) Type.folder else Type.body, color = if (heading) c.dim else c.fg, maxLines = 1,
+        Text(label, style = if (heading) Type.folder else Type.body, color = if (heading || dim) c.dim else c.fg, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
@@ -213,7 +218,7 @@ private fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLo
 @Composable
 fun MenuRow(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(onClick = onClick) {
+    MenuLine(label = label, onClick = onClick) {
         if (LocalTicks.current == Ticks.START) Tick(false)
         Text(label, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Icon(Adwaita.GoNext, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
@@ -224,7 +229,7 @@ fun MenuRow(label: String, onClick: () -> Unit) {
 @Composable
 fun MenuBack(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(onClick = onClick) {
+    MenuLine(label = label, onClick = onClick) {
         Icon(Adwaita.GoPrevious, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         Text(label, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
@@ -237,6 +242,12 @@ private fun Tick(on: Boolean, enabled: Boolean = true) {
     if (on) Icon(Adwaita.ObjectSelect, null, tint = if (enabled) c.accent else c.dim, modifier = Modifier.size(16.dp.icon))
     else Spacer(Modifier.size(16.dp.icon))
 }
+
+/** Where a menu's rows' words start, from its side: past its check column where it has one (a row of its own drawing,
+ * in line with the others: ⋮'s usage row). */
+@Composable
+fun menuTextStart(): androidx.compose.ui.unit.Dp =
+    if (LocalTicks.current == Ticks.START) Popups.inset + 16.dp.icon + Popups.gap else Popups.inset
 
 /** A menu's heading: small, bold and dim, where its rows' first things are. */
 @Composable

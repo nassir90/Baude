@@ -10,12 +10,16 @@
     "toolcards.py:ToolCard",
     "toolcards.py:summarize_tool",
     "toolcards.py:tool_display",
+    "toolcards.py:tool_label",
+    "baudelib/toolnames.py",
     "toolcards.py:tool_input_view",
     "toolcards.py:_kv_rows",
     "toolcards.py:_value_widget",
     "toolcards.py:_path_label",
     "toolcards.py:humanize",
     "toolcards.py:said_nothing",
+    "toolcards.py:answer_line",
+    "toolcards.py:answer_result",
     "toolcards.py:read_tail",
     "windowview.py:WindowView.tool_card",
     "windowdrafts.py:WindowDrafts.render_assistant",
@@ -26,7 +30,11 @@
     "widgets.py:Disclosure",
     "widgets.py:_card_status",
     "widgets.py:_status_icon",
-    "widgets.py:Spinner"
+    "widgets.py:Spinner",
+    "toolcards.py:ToolCard.offer_background",
+    "windowdrafts.py:WindowDrafts.offers_background",
+    "windowdrafts.py:WindowDrafts.send_to_background",
+    "windowsignal.py:WindowSignal.task_from_result"
   ],
   "copy": [
     "meta",
@@ -48,11 +56,12 @@
       "parts": [
         {
           "name": "name",
-          "shows": "The tool's name in bold, as Claude Code names it (Bash, Read, Edit, Write, Grep, Glob, WebFetch, WebSearch, TodoWrite, Task, Agent, Skill, NotebookEdit, ExitPlanMode, …). An MCP tool (mcp__<server>__<tool>) shows its tool part humanized and capitalized, with the server's prefix dropped: mcp__github__create_issue → \"Create issue\", mcp__claude_ai_Slack__slack_send_message → \"Send message\"."
+          "shows": "The tool's name in bold, as Claude Code names it (Bash, Read, Edit, Write, Grep, Glob, WebFetch, WebSearch, TodoWrite, Task, Agent, Skill, NotebookEdit, ExitPlanMode, …). An MCP tool (mcp__<server>__<tool>) shows as \"<Server> / <Tool>\" (mcp__mesh__tasks → \"Mesh / Tasks\", mcp__claude_ai_Slack__slack_send_message → \"Slack / Send message\"): the server's title and the tool's from what's structured, best first: Baude's own servers' (baudelib/toolnames.py: each says them in its initialize's serverInfo.title and its tools/list's title), the names the chat's host says its claude's servers are configured as (its system init's mcp_servers, kept by the host and said in its info's tool_names: \"claude.ai Slack\" → \"Slack\"), and only then the name itself in words (the server's prefix dropped from the tool's: slack_send_message → \"Send message\"; a server known only by an id is \"MCP\").",
+          "decisions": [{"said": "A ToolSearch call showed its raw query (select:mcp__mesh__tasks) and MCP tools showed as mcp__server__tool; asked for human-readable, namespaced names such as \"Mesh / Tool\", ideally from the JSON (the server's and tool's own names) rather than split from underscores (paraphrased)", "rule": "Every app names an MCP server's tool \"<Server> / <Tool>\" wherever it names one (a tool card, Meta's cards for other servers' tools, ToolSearch's select list, a permission prompt, Always allow, a denied note, a notification), from the server's and tool's own titles and the server names Claude Code reports, which the chat's host says on the wire (Info's tool_names); splitting the name is only the fallback.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#257"}]}]
         },
         {
           "name": "toggles",
-          "shows": "Small toggle buttons right after the name, 4px apart (0.85em text, 1px/7px padding, 4px corners; pressed look while open). The first opens the input; its label is \"Command\" for Bash/BashOutput/PowerShell, \"Prompt\" for Task/Agent, \"Diff\" for Edit/MultiEdit, else \"Input\". The second, \"Output\", appears only once there is output, and reads \"Error\" when the call failed. A subagent's card (Task/Agent run as a tracked subagent) has \"View\" instead of Output (Output kept only for an Error). A plain Read (just a path, no line range or pages) has no Input button; with no buttons at all, the summary follows the name directly.",
+          "shows": "Small toggle buttons right after the name, 4px apart (0.85em text, 1px/7px padding, 4px corners; pressed look while open). The first opens the input; its label is \"Command\" for Bash/BashOutput/PowerShell, \"Prompt\" for Task/Agent, \"Diff\" for Edit/MultiEdit, else \"Input\". The second, \"Output\", appears only once there is output, and reads \"Error\" when the call failed. A subagent's card (Task/Agent run as a tracked subagent) has \"View\" instead of Output (Output kept only for an Error). A plain Read (just a path, no line range or pages) has no Input button; with no buttons at all, the summary follows the name directly. While a command (Bash, PowerShell) or a subagent (Task, Agent) runs in the foreground of a chat whose agent can move it to the background (Claude Code, by its background_tasks control request; Codex, pi and Apple's model have no way to), \"Background\" comes last among them; gone once the call ends, waits for your permission, or is moved.",
           "copy": [
             "meta.input",
             "meta.output",
@@ -61,9 +70,29 @@
             "common.command",
             "common.prompt",
             "tool_calls.diff",
-            "tool_calls.view_tip"
+            "tool_calls.view_tip",
+            "tool_calls.to_background",
+            "tool_calls.to_background_tip",
+            "tool_calls.not_moved",
+            "tool_calls.not_moved_why"
           ],
           "actions": [
+            {
+              "by": "click Background",
+              "does": "Asks the chat's agent to move that call to the background (Claude Code's background_tasks, by the call's tool_use_id). The command or subagent keeps running there; the call's result says so, the card reads \"running in background\" with its spinner going until the task ends, and the turn goes on, so a message sent or queued meanwhile reaches the agent. If the agent says nothing was moved (the call ended first), or refuses, a quiet note in the chat says so and Background comes back while the call still runs. Tooltip \"Send to background: it keeps running, and the turn goes on, so a message you send reaches the agent\".",
+              "decisions": [
+                {
+                  "said": "Where an agent (pi, claude, codex) supports it I should be able to click a button to send a task to the background if I want a messagse to go through to the model.",
+                  "rule": "Every app offers a button on a running command's or subagent's call that moves it to the background, for every agent that can move one there as it runs (Claude Code); none for an agent that can't (Codex, pi, Apple's model)",
+                  "decided": "2026-11-27",
+                  "source": [
+                    {
+                      "issue": "BaudeInternal#291"
+                    }
+                  ]
+                }
+              ]
+            },
             {
               "by": "click Command / Prompt / Diff / Input",
               "does": "Slides the input view open under the line (120ms), or closed again. The button stays where it is on screen; what's below moves."
@@ -85,7 +114,7 @@
         },
         {
           "name": "summary",
-          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. An MCP tool's server name comes first, dimmed (55%), then two spaces (\"GitHub  …\"; an unnamed connector with only an id shows \"MCP\"). Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
+          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. A ToolSearch whose query selects tools (\"select:a,b\") shows them by name, comma-separated (\"Mesh / Tasks, Mesh / Task run\"), never the raw query; its input view lists them a line each. Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". Mesh / Answer task (a Bot's answer to its task's ask): its answer's fields, \"<field> = <value>\" joined by \" · \" (text as it is, a number or true/false as written), or its text's first line. The summary is selectable (to copy) and updates live as the input streams in.",
           "copy": [
             "tool_calls.running_in_background",
             "meta.interrupted",
@@ -96,6 +125,26 @@
         {
           "name": "status",
           "shows": "At the end of the line, a 16px spinner (a faint ring with an arc going round, growing and shrinking) while the call runs or runs in the background. Nothing once it's done, failed or interrupted: success says nothing; failure is the red border. Hidden while the call waits for your permission."
+        }
+      ]
+    },
+    {
+      "name": "task answer",
+      "shows": "A Bot's mcp__mesh__answer_task call, once the host's taken it: the name reads \"Answered <task>\" (the task's name, from the call's result) and the summary is the answer as it was taken, e.g. \"Answered Deploy site  env = staging · dry_run = true\". Each value is cut to its first line and the whole summary to 120 characters, on one line ending in … where it doesn't fit; the name is cut with … too, so a long task name never widens the chat. No Output toggle: the card says what came back; Input still opens what it was given. Before it's taken it's drawn as any other call (\"Mesh / Answer task\" and the answer it was given); refused (an answer that doesn't fit the form, or no ask waiting), it's an error card whose Error opens what was wrong.",
+      "copy": [
+        "tool_calls.answered_task"
+      ],
+      "decisions": [
+        {
+          "said": "There should be an answer tool. I see at the moment, models are expected to dump JSON into the text body to parse out for tasks -- this is super ugly!",
+          "rule": "Every app draws a Bot's answer to its task's ask as a compact card, \"Answered <task>\" and its fields as \"field = value\", never as raw JSON.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "9e88c2db-84ec-4c98-ac7a-c62302de4241"
+            }
+          ]
         }
       ]
     },

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "What a process is told to profile.",
+  "description": "What a process profiles while line profiling's on.",
   "properties": {
     "app": {
       "enum": [
@@ -16,7 +16,11 @@
       "items": {
         "type": "string"
       },
-      "description": "What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off."
+      "description": "What's profiled: functions (module.function, module.Class.method) and modules (every function in it): what telemetry_set named for it, else what its counts picked (picked), else Baude's developers' pick (lineprofile.DEFAULTS) till there are counts."
+    },
+    "default": {
+      "type": "boolean",
+      "description": "Nothing's named for it by telemetry_set: what it profiles is picked by its counts (or the developers' pick, before there are any)."
     },
     "error": {
       "type": [
@@ -24,11 +28,19 @@
         "null"
       ],
       "description": "Why it isn't profiling what it's told to (a name not found; line_profiler not installed)."
+    },
+    "picked": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryPick.json"
+      },
+      "description": "What its counts picked for it now, each with the count that picked it (none while something's named, or nothing's counted yet)."
     }
   },
   "required": [
     "app",
-    "functions"
+    "functions",
+    "default"
   ],
   "additionalProperties": false
 }

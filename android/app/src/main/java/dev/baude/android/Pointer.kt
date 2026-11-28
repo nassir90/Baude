@@ -19,7 +19,7 @@ import kotlin.math.sin
  * it on a desktop): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played
  * in turn. It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
  * takes it pressed along its path, a scroll shows the wheel's way (a chevron going that way). It fades once the Bot's
- * let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or its
+ * let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at Emission's tools (acting) or its
  * pointer's moving, and out once neither is, GLOW_HOLD_S after. */
 class BotPointer {
     private sealed class Step {

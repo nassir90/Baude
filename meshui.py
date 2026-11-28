@@ -1,6 +1,6 @@
 """meshui — the mesh in a window: GitHub's lists watched while it's shown (watch_github), a banner while an app
-and its host process run different code (HostApart), and ☰ → Mesh: the machines, their versions, a machine
-renamed or removed (mesh_dialog).
+and its host process run different code (HostApart), a daemon's pending restart and what it waits for (restart_said,
+RestartToasts, restart_dialog), and ☰ → Mesh: the machines, their versions, a machine renamed or removed (mesh_dialog).
 """
 import weakref
 import threading
@@ -14,7 +14,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402,F401
 
 import lookupgit  # noqa: E402
 from baudelib import wording  # noqa: E402
-from widgets import pretty_path, settings_page  # noqa: E402
+import baudelib.wire  # noqa: E402
+from widgets import insert_actions, pretty_path, settings_page  # noqa: E402
 from pickers import RefPalette  # noqa: E402
 
 
@@ -141,6 +142,233 @@ class HostApart:
             restart_host(then=restart_app)
 
 
+# ---- a daemon's restart, kept by it till nothing blocks it (info's restart): every head shows the same
+BLOCKER_ICONS = {"chat": "utilities-terminal-symbolic", "task": "media-playback-start-symbolic",
+                 "agent": "emblem-system-symbolic", "terminal": "input-keyboard-symbolic"}
+
+
+def restart_said(state, host=None):
+    """What a host's pending restart's toast says (info's restart, RestartState), or None. host: its name, said first
+    (one among others')."""
+    if not state:
+        return None
+    said = wording.say("hosts.restart_paused") if state.get("paused") else \
+        wording.say("hosts.restart_waiting", n=len(state.get("blockers") or []))
+    return wording.say("hosts.restart_on", host=host, said=said) if host else said
+
+
+def restart_lines(remotes, name):
+    """What's toasted for each host keeping a restart (remotes: those there; this machine's first), [(its key, said)],
+    each named (name(remote)) when there's more than one."""
+    pending = sorted((r for r in remotes if r.info.get("restart")), key=lambda r: (not r.mine, name(r).lower()))
+    return [(r.key, restart_said(r.info["restart"], name(r) if len(pending) > 1 else None)) for r in pending]
+
+
+RESTART_TOAST_S = 10
+_TOASTED = set()  # (the hosts whose pending restart's been toasted, in some window: once each, till it's gone)
+
+
+class RestartToasts:
+    """A window's toast for each host's pending daemon restart (say: restart_lines), its words kept up as it changes,
+    with Details: what it waits for (details(key): restart_dialog, the restart held while it's open). Each restart's
+    toasted once, in one window, and goes as toasts do (RESTART_TOAST_S, or dismissed); the restart goes on, as it was.
+    A See Thread from its Waiting For holds the restart (hold): toasted again, "Daemon restart paused", till it's
+    dismissed, which lets go of that pause (as closing Waiting For does), or Details is clicked again."""
+
+    def __init__(self, window, details):
+        self.window, self.details, self.shown, self.held, self.lines = window, details, {}, set(), []
+
+    def say(self, lines, new=True):
+        """lines: [(a host's key, said: restart_said)], each host keeping a restart. new: this window toasts one not
+        toasted yet."""
+        self.lines = [x for x in lines or () if x[1]]
+        said = dict(self.lines)
+        _TOASTED.intersection_update(said)
+        self.held &= set(said)
+        for key, t in list(self.shown.items()):
+            if key not in said:
+                del self.shown[key]
+                t.dismiss()
+            elif t.get_title() != GLib.markup_escape_text(said[key]):
+                t.set_title(GLib.markup_escape_text(said[key]))
+        for key, text in self.lines:
+            if key not in self.shown and (key in self.held or new and key not in _TOASTED):
+                self.toast(key, text)
+
+    def toast(self, key, text):
+        overlay = getattr(self.window, "toasts", None)
+        if overlay is None:
+            return
+        _TOASTED.add(key)
+        t = Adw.Toast(title=GLib.markup_escape_text(text), button_label=wording.say("hosts.restart_details"),
+                      timeout=0 if key in self.held else RESTART_TOAST_S)
+        t.connect("button-clicked", lambda t: self.opened(t, key))
+        t.connect("dismissed", lambda t: self.gone(t, key))
+        self.shown[key] = t
+        overlay.add_toast(t)
+
+    def opened(self, t, key):
+        if self.shown.get(key) is t:
+            del self.shown[key]
+            t.dismiss()
+            self.held.discard(key)  # (Waiting For holds it now: a pause of its own)
+            GLib.idle_add(lambda: self.details(key) and False)
+
+    def gone(self, t, key):
+        if self.shown.get(key) is not t:
+            return
+        del self.shown[key]
+        if key in self.held:
+            self.held.discard(key)
+            let_go_held(self.window)
+
+    def hold(self, key):
+        """A See Thread from key's Waiting For: the restart held while it's looked at, toasted till it's dismissed."""
+        self.held.add(key)
+        if (t := self.shown.pop(key, None)) is not None:
+            t.dismiss()
+        self.toast(key, dict(self.lines).get(key) or wording.say("hosts.restart_paused"))
+
+
+def let_go_held(parent):
+    """The pause a See Thread from parent's Waiting For holds (restart_dialog), let go of, as parent closing does."""
+    if (fn := getattr(parent, "restart_held", None)) is not None:
+        fn()
+
+
+def ask_restart(remote, now, said, gone=None):
+    """remote's host process restarted (restart: free, once nothing blocks it, or now). One on older code, which
+    doesn't take restart, asked as it was then (quit restart: if_idle unless now, asked again every 5 s while a command
+    runs, that said once); anything else that fails said (said(text)). gone(grace): waits for it to go, grace seconds
+    at least (this machine's: started again then)."""
+    def failed(reply):
+        said(wording.say("hosts.restart_failed", why=baudelib.wire.said(reply) or reply.get("op") or "?"))
+
+    def older(waited):
+        def got(reply):
+            if reply.get("op") == "busy":
+                if not waited:
+                    said(wording.say("hosts.restart_waiting", n=len(reply.get("sessions") or []) or 1))
+                GLib.timeout_add_seconds(5, lambda: older(waited + 5) and False)
+            elif reply.get("op") == "error":
+                failed(reply)
+            elif gone is not None:
+                gone(15)
+        remote.request({"op": "quit", "restart": True, **({} if now else {"if_idle": True})}, got)
+
+    def answered(reply):
+        if reply.get("op") != "error":
+            return
+        if reply.get("code") == baudelib.wire.UNSUPPORTED:
+            return older(0)
+        failed(reply)
+    if gone is not None:
+        gone(5)
+    remote.request({"op": "restart", "do": "now" if now else "free"}, answered)
+
+
+def let_go_restart(remote):
+    """This head's pause on remote's restart let go of, if it still has one pending: never a restart of its own."""
+    if remote.info.get("restart"):
+        remote.request({"op": "restart", "do": "free"}, lambda _r: None)
+
+
+def restart_dialog(remote, parent, ask, see=None, held=None):
+    """Restart Daemon: what remote's pending restart waits for (each chat running a command, each task's run, each
+    agent run there for a chat elsewhere, each terminal there someone's attached to), the restart held while it's open
+    (restart pause: every head shows it paused). Restart: it restarts once nothing's running; Force Restart: now, what's
+    running stopped (ask(now): the head asks it, and waits for it to go). Closing it lets go of the pause. See Thread
+    on a row: see(blocker) shows it, the restart held meanwhile (held(): its toast says it's paused; Details, this
+    again; dismissed, let go of: let_go_held). Its rows are drawn again as the host says what it waits for (its info's
+    restart, pushed as that changes), looked at every 500 ms; parent closed, it goes, its pause with it."""
+    box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"], valign=Gtk.Align.START)
+    nothing = Gtk.Label(label=wording.say("hosts.restart_nothing"), css_classes=["dim-label"], margin_top=12,
+                        margin_bottom=12)
+    scroll = Gtk.ScrolledWindow(child=box, propagate_natural_height=True, max_content_height=320,
+                                hscrollbar_policy=Gtk.PolicyType.NEVER, width_request=560)
+    dlg = Adw.AlertDialog(heading=wording.say("hosts.restart_blockers"), extra_child=scroll,
+                          default_response="restart", close_response="close", prefer_wide_layout=True)
+    dlg.add_response("force", wording.say("hosts.force_restart"))
+    dlg.add_response("restart", wording.say("shared_settings.restart"))
+    dlg.set_response_appearance("force", Adw.ResponseAppearance.DESTRUCTIVE)
+    dlg.set_response_appearance("restart", Adw.ResponseAppearance.SUGGESTED)
+    shown, state = [object()], {"open": True, "looking": False}
+
+    def seen(b):
+        state["looking"] = True  # (held while it's looked at: not let go of as the dialog goes)
+        if state["open"]:
+            state["open"] = False
+            GLib.source_remove(tick)
+        dlg.force_close()
+        see(b)
+        if held is not None:
+            held()
+
+    def draw():
+        if not state["open"]:
+            return False
+        blockers = (remote.info.get("restart") or {}).get("blockers") or []
+        if blockers == shown[0]:
+            return True
+        shown[0] = blockers
+        while (row := box.get_row_at_index(0)) is not None:
+            box.remove(row)
+        box.set_placeholder(None if blockers else nothing)  # (kept out while there are rows: the last row's the list's
+        # last child then, its foot rounded with no rule under it)
+        for b in blockers:
+            title = b.get("name") or b.get("what") or ""
+            row = Adw.ActionRow(title=title, title_lines=1, use_markup=False,
+                                tooltip_text="\n".join(dict.fromkeys(filter(None, (title, b.get("what"))))) or None)
+            icon = Gtk.Image(icon_name="baude-waiting-symbolic" if b.get("waiting") else
+                             BLOCKER_ICONS.get(b.get("kind"), "utilities-terminal-symbolic"))
+            if b.get("waiting"):  # (a task's run waiting for input: as its Tasks page draws it)
+                icon.add_css_class("warning")
+            row.add_prefix(icon)
+            if see is not None and (b.get("session") or b.get("terminal")):
+                go = Gtk.Button(label=wording.say("hosts.see_thread"), valign=Gtk.Align.CENTER)
+                go.connect("clicked", lambda _b, b=b: seen(b))
+                row.add_suffix(go)
+            box.append(row)
+        return True
+    draw()
+    tick = GLib.timeout_add(500, draw)
+    old = getattr(parent, "restart_closing", None)  # (one held from a See Thread before: this one's now)
+    if old is not None:
+        parent.disconnect(old)
+
+    def parent_closed(*_):
+        if parent.restart_closing != closing:
+            return False
+        parent.restart_closing = parent.restart_held = None
+        parent.disconnect(closing)
+        if state["open"]:
+            state["open"] = False
+            GLib.source_remove(tick)
+            dlg.force_close()
+        let_go_restart(remote)
+        return False
+    closing = parent.connect("close-request", parent_closed)
+    parent.restart_closing, parent.restart_held = closing, parent_closed
+
+    def answered(_d, response):
+        if not state["open"]:
+            return
+        state["open"] = False
+        GLib.source_remove(tick)
+        if state["looking"]:
+            return  # (held still: the window's closing lets go of it, as this again does, or its toast dismissed)
+        parent.restart_closing = parent.restart_held = None
+        parent.disconnect(closing)
+        if response in ("restart", "force"):
+            ask(response == "force")
+        else:
+            let_go_restart(remote)
+    dlg.connect("response", answered)
+    remote.request({"op": "restart", "do": "pause"}, lambda _r: None)
+    dlg.present(parent)
+    return dlg
+
+
 # ---- ☰ → Mesh: each machine in the mesh and each host known here, the code its daemon and the apps on it run
 
 VERSION_CLIENTS = {"baude": "baude", "record": "record", "emission": "emission", "baude-android": "android"}
@@ -236,7 +464,7 @@ def mesh_dialog(net):
         act.connect("activate", lambda _a, key, ask=ask: (r := remote(key.get_string())) is not None and
                     ask(dialog, net, r, fill))
         actions.add_action(act)
-    dialog.insert_action_group("mesh", actions)
+    insert_actions(dialog, "mesh", actions)
 
     def menu(key):
         items = Gio.Menu()

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "docker_follow logs: more of the log.",
+  "properties": {
+    "op": {
+      "const": "docker_text",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "text": {
+      "type": "string",
+      "description": "The lines."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

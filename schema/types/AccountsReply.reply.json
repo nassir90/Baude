@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.",
+  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program and each subscription's last read usage (with error, if it couldn't be done); usage's, the limits; sign_in's, each line Claude's sign-in writes (line alone), or Codex's state as it goes (login alone), then its end; callback's, the page codex's server answered (page alone), or error.",
   "properties": {
     "op": {
       "const": "accounts",
@@ -34,7 +34,7 @@
       "properties": {
         "claude": {
           "type": "string",
-          "description": "Claude's default account's id, \"\" for the CLI's own sign-in."
+          "description": "Claude's account's id, \"\" for the CLI's own sign-in."
         },
         "codex": {
           "type": "string",
@@ -42,7 +42,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Each provider's default for new chats."
+      "description": "The account each provider's new chats take: the one a chat's provider picker (accounts' use) last picked there, else the CLI's own sign-in."
     },
     "usage": {
       "type": [
@@ -52,11 +52,35 @@
       "items": {
         "$ref": "UsageLimit.json"
       },
-      "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's)."
+      "description": "usage: the subscription's limits; for a Claude sign-in that can't be asked (a setup token's), as its chats' turns last said them (as_of); null where none can be said (an API key's, a Codex sign-in that isn't a ChatGPT plan's, a setup token's before its first turn: after_turn)."
+    },
+    "as_of": {
+      "type": "number",
+      "description": "usage: where its limits are as the subscription's chats' turns last said them (its sign-in can't be asked: a setup token's), when they last said them, in seconds since 1970; shown as \"Last update <how long ago>\" under them."
+    },
+    "after_turn": {
+      "type": "boolean",
+      "description": "usage: true where its limits can only be said by its chats' turns (a setup token's) and none has said them yet (usage null)."
+    },
+    "api_key": {
+      "type": "boolean",
+      "description": "usage: true where the account is signed in with an API key (paid per use), so it has no subscription limits (usage null)."
     },
     "line": {
       "type": "string",
-      "description": "sign_in: a line the sign-in wrote (the page to open, or Codex's device code, among them)."
+      "description": "sign_in (Claude's): a line the sign-in wrote (the page to open among them)."
+    },
+    "login": {
+      "$ref": "ChatLogin.json",
+      "description": "sign_in (Codex's): its state as it goes (login alone: signing_in, then with the page, and the device code's code), then on its end, signed_in or failed."
+    },
+    "page": {
+      "$ref": "CallbackPage.json",
+      "description": "callback: what the Codex sign-in's server answered the address."
+    },
+    "cb": {
+      "type": "integer",
+      "description": "callback: the request's cb, carried back."
     },
     "signed_in": {
       "type": "boolean",
@@ -66,12 +90,51 @@
       "type": "boolean",
       "description": "Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token."
     },
+    "codex_usage": {
+      "type": "boolean",
+      "description": "Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's \"codex\"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of \"\" is Claude's."
+    },
+    "missing": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "Dep.json"
+      },
+      "description": "What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account."
+    },
+    "disabled": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions disabled on the host, by usage key (an account's id, \"\" for Claude's CLI's own sign-in, \"codex\" for Codex's): their chats can't send."
+    },
+    "auto_disable": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted."
+    },
+    "auto_resume": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions whose Auto Resume on Reset is on, by usage key: a chat of theirs a usage limit stopped is sent a message to carry on once the limit resets."
+    },
+    "last_usage": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "UsageReading.json"
+      },
+      "description": "Each Claude and Codex subscription's usage as the host last read it, by id (\"\" for Claude's CLI's own sign-in, \"codex\" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers."
+    },
     "who": {
       "type": [
         "string",
         "null"
       ],
-      "description": "sign_in (Claude's), signed in: who as, as claude auth status says."
+      "description": "sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names)."
     }
   },
   "required": [

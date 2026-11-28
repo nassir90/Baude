@@ -1,41 +1,54 @@
 """The host process running (Server's ServerRunning): serving its socket, shutting down and restarting onto new code,
-a head's requests (handle), feedback, routines and Bots.
+a head's requests (handle), feedback, tasks and Bots.
 """
 import base64
+import copy
 import hashlib
 import json
 import os
 import re
 import select
 import socket
+import sys
 import threading
 import time
 import uuid
 
 from baudelib import (
-    agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themepacks, themes, wire, wording,
-    worktree,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, counters, funccount, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
+    themepacks, wire, wording, worktree,
 )
 from baudelib.serverstate import (
-    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
+    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, bot_folder_name, clean_env,
 )
+
+
+def catalogued_kube(item):
+    """Is a catalogue's item of a cluster's (a Kubernetes object, a context, a workload)?"""
+    return item.get("kind") == "k8s" or item.get("icon") == "k8s"
 
 
 class ServerRunning:
-    """Server's running: serving its socket, shutting down, a head's requests, feedback, routines and Bots."""
+    """Server's running: serving its socket, shutting down, a head's requests, feedback, tasks and Bots."""
 
     # ---- running
     def serve_forever(self):
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
         threading.Thread(target=self._emissions, daemon=True, name="emissions").start()
+        threading.Thread(target=self._multiplexes, daemon=True, name="multiplexes").start()
         self.mesh.start()
+        counters.count_programs()  # (each program this process starts counted)
         self.telemetry.start()
         with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
             waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
         for s, w in waits:
             threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
+        with self.lock:  # (follow-ups a restart cut short: sent now, keep_follow_ups)
+            self.send_follow_ups()
+            hostqueue.send_left(self)  # (queues a restart cut short: sent as at a turn's end)
+            self.tasks.resume_told()  # (what chats a task's run started had still to tell their Bots: told now)
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -113,13 +126,21 @@ class ServerRunning:
             self.stop_procs(procs)
         return busy
 
-    def halt(self, if_idle=False, restart=None):
+    def halt(self, if_idle=False, restart=None, pending=False):
         """(shutdown's first half, all at once, so nothing starts between the look and the stop) Nothing more taken,
-        unless (if_idle) a command's running; every session whose claude is at a turn or asking marked cut, and kept
-        so: (busy, the claudes to stop). Those: None if it's not stopping (busy) or stopping already."""
+        unless (if_idle) a command's running, or (pending: its kept restart going through) a head's paused it or
+        something blocks it since it was looked at; every session whose claude is at a turn or asking marked cut, and
+        kept so, and its follow-ups kept for after a restart (keep_follow_ups): (busy, the claudes to stop). Those:
+        None if it's not stopping (busy) or stopping already."""
         with self.lock:
             if self.stopped.is_set():
-                if not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
+                if not if_idle and restart:  # (stopping already, and told to restart now: it starts again)
+                    self.restarting = self.restarting or restart
+                    self.keep_follow_ups()
+                    if self.quitting is not None and not self.quitting["restart"]:
+                        self.quitting = {**self.quitting, "restart": True}
+                        self.said_quitting()
+                elif not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
                     self.restarting = None
                     if self.quitting is not None and self.quitting["restart"]:
                         self.quitting = {**self.quitting, "restart": False}
@@ -127,8 +148,12 @@ class ServerRunning:
                 return None, None
             if if_idle and (busy := self.running()):
                 return busy, None
+            if pending and (self.pending_restart is None or self.restart_holds or self.blockers()):
+                return [], None
             self.stopped.set()
             self.restarting = restart
+            if restart:
+                self.keep_follow_ups()
             procs = []
             for s in self.sessions.values():
                 if s.app_tools is not None:  # (the host going: its heads' tools let go of)
@@ -141,6 +166,124 @@ class ServerRunning:
                         self.cutting.add(s.id)
                 procs.append(s.proc)
         return None, procs
+
+    def keep_follow_ups(self):
+        """(lock held) Each session's follow-ups sent at a turn a restart cuts short (queued): kept in its
+        meta (follow_ups), and sent once it's started again (send_follow_ups), not lost with its claude."""
+        for s in self.sessions.values():
+            held = [{"message": m, "uuid": u} for m, u, _by in s.queued]
+            if held:
+                s.meta["follow_ups"] = (s.meta.get("follow_ups") or []) + held
+                s.queued = []
+                self.save(s)
+
+    def send_follow_ups(self):
+        """(lock held) Follow-ups a restart cut short (keep_follow_ups): sent, in order, as they were first."""
+        for s in list(self.sessions.values()):
+            held = s.meta.pop("follow_ups", None)
+            if not held:
+                continue
+            self.save(s)
+            for f in held:
+                msg = {"type": "user", "message": f["message"],
+                       **({"uuid": f["uuid"]} if wire.is_id(f.get("uuid") or "") else {})}
+                try:
+                    self.take_input(None, s, msg, again=wire.is_id(f.get("uuid") or ""))
+                except Exception as e:  # (one that can't be sent: said in the log, the rest sent)
+                    self.log(f"{s.id}: a follow-up kept over a restart not sent: {type(e).__name__}: {e}")
+            self.log(f"{s.id}: {len(held)} follow-up{'s' if len(held) != 1 else ''} kept over a restart sent")
+
+    # ---- a restart kept till nothing blocks it (info's restart): a head's Restart Daemon, or its own updater's
+    def blockers(self):
+        """(lock held) What a restart waits for (as every head lists it: RestartBlocker): each chat whose agent's
+        running a command (its oldest), each task's run, each agent run here for a chat on another host (an Apple or
+        pi model's), and each terminal here someone's attached to."""
+        chats = [{"kind": "chat", "session": s.id, "name": s.listing()["title"] or "", "what": cmds[0]["what"]}
+                 for s in self.sessions.values() if (cmds := s.commands())]
+        agents = []
+        for run in self.agent_runs.values():
+            if not isinstance(run, agentproxy.Run) or run.gone:
+                continue
+            host = getattr(run.conn, "member", None)
+            agents.append({"kind": "agent", "name": run.model, **({"session": run.chat} if run.chat else {}),
+                           **({"host": host} if isinstance(host, str) else {}),
+                           "what": wording.say("hosts.restart_agent", model=run.model,
+                                               host=self.mesh.name_of(host) if isinstance(host, str) else "?")})
+        return chats + self.tasks.blocking() + agents + hostterminal.blocking()
+
+    def restart_state(self):
+        """(lock held) info's restart: the restart kept (RestartState), or None. by: a head's, while one's asked for
+        it, else its updater's."""
+        p = self.pending_restart
+        if p is None:
+            return None
+        return {"by": "head" if "head" in p["owners"] else "update", **({"to": p["to"]} if p.get("to") else {}),
+                "paused": bool(self.restart_holds), "blockers": self.blockers()}
+
+    def restart_when_free(self, by, to=None):
+        """A restart kept (by: head, update, each kept for apart: drop_restart; to: the commit an update's onto), and
+        gone through once nothing's running and no head's holding it (_restart_watch), heads told as what it waits for
+        changes."""
+        with self.lock:
+            p = self.pending_restart
+            self.pending_restart = {"owners": (p["owners"] if p else set()) | {by},
+                                    "to": to or (p or {}).get("to")}
+            if p is None:
+                threading.Thread(target=self._restart_watch, daemon=True, name="restart").start()
+            self.changed()
+            return self.restart_state()
+
+    def drop_restart(self, by):
+        """by's restart let go of (its updater's: updates turned off, or the checkout moved on): one a head asked for
+        stays. Gone once nothing's asking for it, the heads' pauses with it (a pause outlives nothing)."""
+        with self.lock:
+            p = self.pending_restart
+            if p is None or by not in p["owners"]:
+                return
+            owners = p["owners"] - {by}
+            if owners:
+                self.pending_restart = {"owners": owners, "to": None if by == "update" else p.get("to")}
+            else:
+                self.pending_restart = None
+                self.restart_holds.clear()
+            self.changed()
+
+    def hold_restart(self, conn, on):
+        """(lock held) A head showing what the restart waits for holds it (on), or lets go of it."""
+        was = bool(self.restart_holds)
+        (self.restart_holds.add if on else self.restart_holds.discard)(conn)
+        if was != bool(self.restart_holds):
+            self.changed()
+
+    def _restart_watch(self):
+        said = None
+        while not self.stopped.wait(0.5):
+            with self.lock:
+                if self.pending_restart is None:
+                    return
+                state = self.restart_state()
+                if state != said:
+                    said = state
+                    self.changed()
+                if state["paused"] or state["blockers"]:
+                    continue
+            if self.restart_now(force=False):
+                return
+
+    def restart_now(self, force=True):
+        """The host process stopped to start again on the code checked out (baude_headless.py's serve: restarting);
+        not force: only if nothing's running and no head's paused it (halt looks again, as it stops). True once it's
+        stopping."""
+        with self.lock:
+            to = (self.pending_restart or {}).get("to")
+        to = to or selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or self.commit or "here"
+        busy, procs = self.halt(if_idle=not force, restart=to, pending=not force)
+        if busy is not None:
+            return False
+        if procs is not None:
+            self.stop_procs(procs)
+        self.log(f"restart{' forced' if force else ''}: stopping to start again")
+        return True
 
     def said_quitting(self):
         """(lock held) How far along stopping it is (quitting), to the heads attached and the menu bar's item."""
@@ -166,6 +309,7 @@ class ServerRunning:
             pass
         self.mesh.stop()
         self.telemetry.stop()
+        self.tasks.stop_all()  # (its tasks' runs: stopped, and kept so)
         for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
             run.end()
         with self.lock:
@@ -202,13 +346,14 @@ class ServerRunning:
         os.close(self.lock_file)
         self.closed.set()
 
-    def serve(self, sock, origin=None, sender=None):
+    def serve(self, sock, origin=None, sender=None, verified=True):
         """A connection served (a tunnel's through the mesh: origin, the member it came from; sender, who what's sent
-        through it is from, as that member said: Conn's)."""
+        through it is from, as that member said; verified, whether its open was signed by origin's key: Conn's)."""
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
         ch.serving = True
-        conn = Conn(ch, origin, sender)
+        conn = Conn(ch, origin, sender, verified)
+        conn.errored = self.wire_errored
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -220,11 +365,17 @@ class ServerRunning:
                     if (refused := wire.refusal(msg)) is not None:
                         conn.send(refused)
                         continue
+                    if msg["op"] == "relay" and conn.task is not None:  # (a task's script's: from its run's Bot)
+                        msg = {**msg, "as": conn.task["bot"]["id"]}
+                        msg.pop("as_meta", None), msg.pop("as_agent", None)
                     with self.lock:
                         self.conns.discard(conn)
                     conn.close()
                     (self.mesh.take if msg["op"] == "join" else self.mesh.relay)(ch, msg)
                     break
+                conn.asking(msg)
+                began = time.perf_counter()
+                was = funccount.within("op", str(msg.get("op"))[:64])  # (what its handling runs: this op's, to aim)
                 try:
                     self.handle(conn, msg)
                 except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
@@ -232,8 +383,15 @@ class ServerRunning:
                                "gone": {"why": e.why, "folder": e.folder}})
                 except deps.Missing as e:  # (a program a chat runs isn't here: what to install, said as it is)
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True, "missing": e.dep})
+                except accounts.Disabled as e:  # (a chat on a disabled subscription: said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
+                finally:
+                    funccount.within(*(was or ()))
+                if msg.get("op") != "ping":  # (counted with how long its handling took here: what it answers on a
+                    # thread of its own, till it's started)
+                    self.telemetry.counters.add("op", str(msg.get("op"))[:64], time.perf_counter() - began)
         finally:
             if getattr(conn, "agent_run", None) is not None:  # (its caller gone: the agent with it)
                 conn.agent_run.end()
@@ -244,6 +402,7 @@ class ServerRunning:
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
+            hostdocker.stop(conn)  # (its containers' logs: docker ended with it)
             hostterminal.gone(conn)  # (its terminal: left running a while, to be attached to again)
             hostlogin.stop(conn)  # (a sign-in it ran: stopped)
             hostaccounts.stop(conn)  # (a Codex sign-in it ran: stopped)
@@ -255,6 +414,7 @@ class ServerRunning:
                     pass
             with self.lock:
                 self.conns.discard(conn)
+                self.hold_restart(conn, False)  # (a head gone: its pause with it)
                 for s in list(self.sessions.values()):
                     s.viewers.discard(conn)
                     s.live.discard(conn)
@@ -266,15 +426,33 @@ class ServerRunning:
             if conn.subscribed:
                 self.heads_look()
 
+    def wire_errored(self, msg, op):
+        """An error answered on a connection (Conn's), kept as the host's with the op it answered: one answered from
+        an except block that exception with its stack, unless it's one of the schema's refusals or said for the user
+        as it is."""
+        t, e, tb = sys.exc_info()
+        code = msg.get("code") or msg.get("denied")
+        if t is not None and not msg.get("plain") and not code:
+            err = {**errorbook.of_exception(t, e, tb, "exception"), "wire_op": op}
+        else:
+            err = errorbook.of_note("wire", op or "?", msg.get("error") or "", key=f"{code}" if code else None,
+                                    wire_op=op, code=code)
+        self.telemetry.note(err)
+
     def emission_watch(self, conn, req, bot, msg):
-        """A Bot's Emission here (started if it isn't) watched for conn: its frames (as JPEG) and state, a message
-        each (emission_frame), till either end goes (emission_watch_end)."""
+        """A Bot's Emission here (started if it isn't; bot None: Emission's own window on its Default profile)
+        watched for conn: its frames (as JPEG) and state, a message each (emission_frame), till either end goes
+        (emission_watch_end)."""
         size = {k: int(msg[k]) for k in ("max_w", "max_h") if isinstance(msg.get(k), int)}
         try:
-            emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
+            if bot is None:  # (Emission's own window here, on its Default profile: ☰ → Browser elsewhere)
+                path = emissionlink.default_window(emissiontools.HOST_WAIT_S)
+            else:
+                emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
+                path = emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None))
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None)))
-            sock.sendall((json.dumps({"op": "watch", **size}) + "\n").encode())
+            sock.connect(path)
+            sock.sendall((json.dumps({"op": "watch", "from_pane": bot is None, **size}) + "\n").encode())
         except (OSError, ValueError) as e:
             conn.send({"op": "error", "req": req, "error": str(e)})
             return
@@ -352,7 +530,7 @@ class ServerRunning:
         body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
                                         else "") + "\n\n" + mark + "\n"
         ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
-                           f'"baude-note-{note}" in:body', "--json", "number,url,body")
+                           f'"baude-note-{note}" in:body', "--json", "number,url,body", feature="fixes.send_feedback")
         if not ok:
             return reply("error", error=out or wording.say("host_errors.gh_list_failed"))
         try:
@@ -360,7 +538,8 @@ class ServerRunning:
         except ValueError:
             made = None
         if made is None:
-            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body)
+            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body,
+                               feature="fixes.send_feedback")
             url = next((line for line in out.splitlines() if line.startswith("https://")), None) if ok else None
             if url is None:
                 return reply("error", error=out or wording.say("host_errors.gh_create_failed"))
@@ -371,6 +550,76 @@ class ServerRunning:
             _write_json(os.path.join(self.state_dir, "feedback-filed.json"), self.feedback_filed)
         self.log(f"feedback {note} filed on {repo}: {made['url']}")
         reply("feedback_filed", url=made["url"], number=made.get("number"), repo=repo)
+
+    def deciders_op(self, msg, reply):
+        """deciders: this host's (with their URLs), then the other members' as their records say; one added, removed
+        or tested first."""
+        what, tested, error = msg.get("what") or "list", None, None
+        try:
+            if what == "add":
+                tested = self.deciders.add(msg.get("name"), msg.get("url"))
+            elif what == "remove":
+                self.deciders.remove(msg.get("id"))
+            elif what == "test":
+                tested = self.deciders.test(msg.get("id"))
+        except (ValueError, OSError) as e:
+            error = str(e)
+        own = self.deciders.listing(fresh=what == "list")
+        if what != "list" or not error:
+            self.mesh.deciders_changed(own)
+        listed = [{**d, "host": None, "host_name": self.me["name"]} for d in own]
+        for member, name, decs in self.mesh.member_deciders():
+            listed += [{**d, "value": f"{name}/{d['id']}", "host": member, "host_name": name, "url": None}
+                       for d in decs]
+        reply("deciders", what=what, deciders=listed, tested=tested, **({"error": error} if error else {}))
+
+    def decide(self, msg, reply):
+        """decide: asked of one of this host's deciders, or carried to the member that has it; decided either way
+        (unavailable: why it couldn't be asked)."""
+        name = msg.get("decider") if isinstance(msg.get("decider"), str) and msg["decider"].strip() else None
+        here = self.me["name"]
+        host, _, which = (name or "").rpartition("/")
+        member = None
+        if host and host.lower() not in (here.lower(), self.me["id"]):
+            member = self.mesh.member_named(host)
+            if member is None:
+                return reply("decided", decider=which, host=host, unavailable=wording.say("deciders.host_gone", host=host))
+        if member is not None:
+            ask = {"op": "decide", "decider": which, "state": msg.get("state", ""), "questions": msg.get("questions"),
+                   **({"images": msg["images"]} if msg.get("images") else {})}
+            try:
+                ch, _info = self.mesh.channel(member)
+            except OSError as e:
+                return reply("decided", decider=which, host=host, unavailable=str(e) or
+                             wording.say("deciders.host_gone", host=host))
+            try:
+                ch.sock.settimeout(wire.SILENT_S)
+                ch.keep_alive()
+                ch.send({**ask, "req": 1})
+                while (got := ch.reply()) is not None:
+                    if got.get("req") != 1:
+                        continue
+                    if got.get("op") == "decided":
+                        return reply("decided", **{k: v for k, v in got.items() if k not in ("op", "req")})
+                    return reply("error", error=wire.said(got))
+                return reply("decided", decider=which, host=host, unavailable=wording.say("deciders.host_gone", host=host))
+            except OSError as e:
+                return reply("decided", decider=which, host=host, unavailable=str(e))
+            finally:
+                ch.close()
+        entry = self.deciders.find(which) if which else next(iter(self.deciders.entries()), None)
+        if entry is None:
+            return reply("decided", decider=which or "", host=here, unavailable=wording.say(
+                "deciders.no_such", host=here, name=which) if which else wording.say("deciders.none_here", host=here))
+        try:
+            got = self.deciders.decide(entry, msg)
+        except deciders.Unavailable as e:
+            self.mesh.deciders_changed(self.deciders.listing())
+            return reply("decided", decider=entry["name"], host=here, unavailable=wording.say(
+                "deciders.unavailable", name=entry["name"], host=here, why=str(e)))
+        except ValueError as e:
+            return reply("error", error=wording.say("deciders.said", name=entry["name"], host=here, why=str(e)))
+        reply("decided", decider=entry["name"], host=here, **got)
 
     def handle(self, conn, msg):
         op, req = msg.get("op"), msg.get("req")
@@ -383,6 +632,35 @@ class ServerRunning:
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
             return reply("error", error="the host process is stopping")
+        if op == "hello" and conn.origin is None and conn.task is None and isinstance(msg.get("task"), dict):
+            if (bot := self.tasks.bot_of(msg["task"])) is None:  # (a task's script: its run's Bot's from now on)
+                return conn.send(wire.refused(wire.DENIED, req, wording.say("host_errors.no_task_token")))
+            conn.task, conn.acting = {"run": msg["task"]["run"], "bot": bot}, bot["id"]
+            if (by := self.started_by(bot["id"])) is not None:  # (judged as the Bot's own tools are)
+                conn.member, conn.verified = by
+        elif op == "hello" and conn.origin is None and conn.task is None and wire.is_id(msg.get("as") or ""):  # (a
+            conn.acting = msg["as"]                          # chat's own tools: judged as the member that started it)
+            if (by := self.started_by(msg["as"])) is not None:
+                conn.member, conn.verified = by
+        if conn.task is not None and op in ("emission", "multiplex", "emission_watch"):  # (a task's: its Bot's own
+            if msg.get("default"):                                     # browser and terminals, never another's)
+                return conn.send(wire.refused(wire.DENIED, req, wording.say("host_errors.task_default_browser")))
+            msg = {**msg, "bot": dict(conn.task["bot"])}
+        if (cap := access.rule_of(msg)) is not None and op not in access.FOUND and not self.access.allowed(conn, cap):
+            return conn.send(self.access.refused(req, cap))  # (a chat's: as it's found, its own rules first)
+        if (op in ("start", "task_output", "autofix", "git", "signal_names") or op == "accounts" and
+                msg.get("what") == "use") and (cap := self.manage_refused(conn, msg)):  # (a chat named: forked,
+            return conn.send(self.access.refused(req, cap))  # adopted, read, its Auto-fix, moved to another subscription)
+        if op in ("read_file", "git", "signal_names", "catalogue") and conn.member is not None and \
+                not self.managed_folder(conn, msg.get("path") if op == "read_file" else msg.get("cwd")):
+            return conn.send(self.access.refused(req, "manage_read"))  # (a member's: in the folder of a chat it reads)
+        if op == "start":
+            with self.lock:
+                src = self.sessions.get(msg.get("fork_from")) if isinstance(msg.get("fork_from"), str) else None
+            if (cap := self.access.needs(conn, msg, src)) is not None:
+                return conn.send(self.access.refused(req, cap))
+        if op in ("access", "access_set"):
+            return self.access_op(conn, msg, reply)
         if op == "hello":
             head = msg.get("commit")  # (the head's code: one on other code than this, said in the log, once each)
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
@@ -402,7 +680,8 @@ class ServerRunning:
                 for s in self.sessions.values():
                     self.rescan(s)
                 self.desktop.look(force=True)
-            return reply("sessions", sessions=self.heads_listing(conn.archived), server=self.info())
+                listing = self.shown_to(conn, self.heads_listing(conn.archived))
+            return reply("sessions", sessions=listing, server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
             # going on cut short, and marked so)
             with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
@@ -414,6 +693,19 @@ class ServerRunning:
                 threading.Thread(target=self.stop_procs, args=(procs, bool(msg.get("restart"))), daemon=True,
                                  name="quit").start()
             return None
+        if op == "restart":  # (kept till nothing blocks it, held while a head shows what that is, or now)
+            if msg["do"] == "now":
+                reply("quitting")
+                threading.Thread(target=self.restart_now, daemon=True, name="restart").start()
+                return None
+            if msg["do"] == "pause":
+                with self.lock:
+                    if self.pending_restart is not None:
+                        self.hold_restart(conn, True)
+                    return reply("restart_pending", restart=self.restart_state())
+            with self.lock:
+                self.hold_restart(conn, False)
+            return reply("restart_pending", restart=self.restart_when_free("head"))
         if op == "start":
             return self.start(msg, conn, req)
         if op == "read_file":
@@ -427,7 +719,11 @@ class ServerRunning:
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():
                 try:
-                    reply("catalogue", **self.catalogue(msg.get("cwd"), bool(msg.get("wait"))))
+                    got = self.catalogue(msg.get("cwd"), bool(msg.get("wait")))
+                    kube, dbs = self.access.allowed(conn, "kube_read"), self.access.allowed(conn, "databases")
+                    got["items"] = [it for it in got["items"] if (kube or not catalogued_kube(it)) and
+                                    (dbs or it.get("icon") != "db")]  # (its clusters' and databases' parts: theirs)
+                    reply("catalogue", **got)
                 except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
@@ -439,8 +735,9 @@ class ServerRunning:
                         reply("dir", **hostfiles.list_dir(self, msg.get("path")))
                     elif op == "fixes":
                         reply(op, **hostfixes.answer(self, msg))
-                    else:
-                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
+                    else:  # (a member's git: the repository its folder's, not one named, read with this host's gh)
+                        asked = {k: v for k, v in msg.items() if k != "repo"} if conn.member is not None else msg
+                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, asked))
                 except (ValueError, OSError) as e:
                     reply("error", error=str(e))
                 except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
@@ -506,10 +803,10 @@ class ServerRunning:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=tell, daemon=True, name="telemetry").start()
             return None
-        if op in ("kube", "databases"):  # (the clusters and databases here, read for a head elsewhere: hostkube, hostdb)
-            def read():
+        if op in ("kube", "databases", "docker"):  # (the clusters, databases and Docker here, for a head anywhere:
+            def read():                            # hostkube, hostdb, hostdocker)
                 try:
-                    reply(op, **(hostkube if op == "kube" else hostdb).answer(self, msg))
+                    reply(op, **{"kube": hostkube, "databases": hostdb, "docker": hostdocker}[op].answer(self, msg))
                 except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
@@ -547,13 +844,19 @@ class ServerRunning:
             return conn.agent_run.take(msg)
         if op == "emission":  # (a Bot's browser tools: its own Emission profile here, started for it if it isn't
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # running; on a thread of its own)
-            if not isinstance(bot.get("id"), str) or not bot["id"] or not isinstance(msg.get("call"), dict):
+            own = msg.get("default") is True  # (Emission's own window on its Default profile, from a Browser pane
+            if not own and (not isinstance(bot.get("id"), str) or not bot["id"]) or \
+                    not isinstance(msg.get("call"), dict):  # elsewhere: what a pane does, nothing else)
                 return reply("error", error="emission needs a Bot (its id) and a call")
-            if msg["call"].get("op") not in emissiontools.HOST_OPS:  # (the tools' requests only: no quit, open, …)
+            if msg["call"].get("op") not in (emissiontools.PANE_OPS if own else emissiontools.HOST_OPS):
                 return reply("error", error=f"emission takes the tools' requests, not {msg['call'].get('op')!r}")
 
             def browse():
                 try:
+                    if own:
+                        return reply("emission", result=emissionlink.call(
+                            emissionlink.profile_id(emissionlink.DEFAULT), {**msg["call"], "from_pane": True},
+                            timeout=emissiontools.HOST_WAIT_S))
                     if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there)
                         return reply("emission", result=self.phones.call(bot, msg["call"]))
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
@@ -561,6 +864,14 @@ class ServerRunning:
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
+        if op == "browser_open":  # (☰ → Browser: Emission's window here, brought to the front or started; on a thread)
+            def browser():
+                try:
+                    reply("browser_opened", **emissionlink.open_window())
+                except (OSError, ValueError) as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=browser, daemon=True, name="browser-open").start()
             return None
         if op in ("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals"):  # (a terminal here:
             if (bad := hostterminal.take(conn, msg)) is not None:  # hostterminal, its bytes carried on this connection)
@@ -585,15 +896,23 @@ class ServerRunning:
             return hostlogin.start(self, conn, msg)
         if op == "login_code":
             return hostlogin.code(conn, msg)
+        if op == "docker_follow":  # (a container's or a Compose project's log followed: on this connection, ended
+            threading.Thread(target=hostdocker.follow, args=(self, conn, msg), daemon=True,  # with it)
+                             name="docker-follow").start()
+            return None
         if op == "kube_follow":  # (a pod's log followed, or a kind's list watched, for a head elsewhere: on this
             threading.Thread(target=hostkube.follow, args=(self, conn, msg), daemon=True,  # connection, ended with it)
                              name="kube-follow").start()
             return None
         if op == "emission_watch":  # (a Browser pane elsewhere: a Bot's Emission here watched, its frames carried on
-            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection)
-            if not isinstance(bot.get("id"), str) or not bot["id"] or getattr(conn, "emission_watch", None):
+            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection.
+            if msg.get("default") is True:  # default: Emission's own window instead, ☰ → Browser's)
+                bot = None
+            elif not isinstance(bot.get("id"), str) or not bot["id"]:
                 return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
-            if self.phones.phone(bot["id"]) is not None:
+            if getattr(conn, "emission_watch", None):
+                return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
+            if bot is not None and self.phones.phone(bot["id"]) is not None:
                 return reply("error", error=wording.say("host_errors.browser_on_phone"))
             threading.Thread(target=self.emission_watch, args=(conn, req, bot, msg), daemon=True,
                              name="emission-watch").start()
@@ -619,10 +938,41 @@ class ServerRunning:
             return reply("relaying")
         if op == "mcp_line" and getattr(conn, "agent_relay", None) is not None:
             return conn.agent_relay[0].relay_line(conn.agent_relay[1], msg.get("line"))
+        if op in inbox.OPS:  # (what a task asks of a person: raised, waited for and answered; baudelib/inbox.py)
+            return self.inbox.op(conn, msg, reply)
+        if op in ("task_report", "task_ask"):  # (a task's script, running here: on this machine's socket, its run's
+            if conn.origin is not None or conn.member is not None:  # token its own)
+                return conn.send(self.access.refused(req, "shell"))
+            if op == "task_report":
+                try:
+                    self.tasks.report(msg)
+                except ValueError as e:
+                    return reply("error", error=str(e))
+                return reply("task_reported")
+
+            def asked():  # (on a thread of its own: its Bot's turn waited for)
+                try:
+                    said, values = self.tasks.script_ask(msg)
+                    reply("task_answer", text=said, values=values)
+                except ValueError as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=asked, daemon=True, name="task-ask").start()
+            return None
+        if op == "deciders":  # (the host's decision models' servers: listed, added, removed, tested; on a thread)
+            threading.Thread(target=self.deciders_op, args=(msg, reply), daemon=True, name="deciders").start()
+            return None
+        if op == "decide":  # (a task's script's, on this machine's socket with its run's token; a member's, through
+            if msg.get("run") is not None and conn.origin is None and conn.member is None and \
+                    self.tasks.held(msg) is None:  # the mesh: as it may use providers)
+                return reply("error", error=wording.say("host_errors.no_run"))
+            threading.Thread(target=self.decide, args=(msg, reply), daemon=True, name="decide").start()
+            return None
         if op in ("deactivate", "activate"):  # (a member, by its id or where a link from here goes: mesh.deactivate)
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        if cap := self.manage_refused(conn, msg):  # (every op from here on is a chat's: refused before it's touched)
+            return conn.send(self.access.refused(req, cap))
         with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below;
             # not while Desktop's writing it)
             if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
@@ -645,33 +995,45 @@ class ServerRunning:
                 return reply("error", error=f"no session {msg.get('session')}")
             if s.deleting:
                 return reply("error", error=wording.say("host_errors.being_deleted", session=s.id))
+            if (cap := self.access.needs(conn, msg, s)) is not None:  # (commands run, or a Bot driven, through it)
+                return conn.send(self.access.refused(req, cap))
+            if op == "waits_on" and conn.member is not None and conn.acting != s.id:  # (its own agent's tools' only)
+                return conn.send(self.access.refused(req, "manage_write"))
             if op == "attach":
-                conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
+                writes = self.access.allowed(conn, "manage_write", s)  # (one that only reads: answers nothing)
+                if writes and msg.get("answers", True) is not False:  # (false: it won't answer what's asked)
+                    conn.mute.discard(s.id)
+                else:
+                    conn.mute.add(s.id)
                 s.attached_once = True
                 if s.drop_timer is not None:  # (a head back on it: not dropped after all)
                     s.drop_timer.cancel()
                     s.drop_timer = None
-                if isinstance(msg.get("always_allow"), list):  # (tools a head always allows: added to those allowed
-                    s.always_allow |= {t for t in msg["always_allow"] if isinstance(t, str)}  # here, kept in memory)
-                    self.changed()
-                if isinstance(msg.get("env"), dict):  # (a head here: its claude's environment, from its next start)
-                    s.env = clean_env(msg["env"])
+                if isinstance(msg.get("always_allow"), list) and writes:  # (tools a head always allows: added to
+                    s.always_allow |= {t for t in msg["always_allow"] if isinstance(t, str)}  # those allowed here,
+                    self.changed()  # kept in memory)
+                if isinstance(msg.get("env"), dict) and writes:  # (a head here: its claude's environment, from its
+                    s.env = clean_env(msg["env"])  # next start)
                 s.viewers.add(conn)
                 autofix.held(self, s, conn)  # (Auto-fix stopped while nobody was here: said now)
                 if msg.get("live"):
                     s.live.add(conn)
-                if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
+                if msg.get("app_tools") and writes and s.app_tools is not None:  # (its head back: its tools carried to
+                    # it again)
                     s.app_tools.bind(conn)
-                return reply("attached", session=s.listing(), asks=list(s.asks.values()))
-            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
-                s.viewers.discard(conn)
+                return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes,
+                             login=hostlogin.attached(self, conn, s), draft=s.meta.get("composer") if writes else None,
+                             queue=hostqueue.given(s, writes))
+            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace;
+                s.viewers.discard(conn)  # one that only reads it isn't its head: its grace kept)
                 s.live.discard(conn)
-                self.drop_ephemeral(s, meant=True)
+                conn.mute.discard(s.id)
+                self.drop_ephemeral(s, meant=self.access.allowed(conn, "manage_write", s))
                 return None
             if op == "input":
                 try:
                     self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
-                except desktopchats.Elsewhere as e:
+                except (desktopchats.Elsewhere, accounts.Disabled) as e:
                     return reply("error", error=str(e), plain=True)
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
@@ -706,6 +1068,8 @@ class ServerRunning:
                     s.proc.kill()
                 s.meta["archived"] = op == "archive"
                 self.save(s)
+                if op == "archive":
+                    self.inbox.chat_gone(s.id)  # (its model's asks still waiting: stopped)
                 self.changed()
                 return reply(op + "d", session=s.id)
             if op == "delete":  # (on a thread of its own: its claude's waited for, its files moved, not under the lock)
@@ -731,10 +1095,28 @@ class ServerRunning:
                                                                                msg.get("limit")))
             if op == "subagents":
                 return reply("subagents", session=s.id, **self.read_subagents(s, msg.get("have"), msg.get("limit")))
+            if op == "seen":  # (a head shows it on screen, up to upto: its last turn's end seen once that reaches it)
+                upto = msg.get("upto")
+                if self.saw(s, upto if isinstance(upto, int) and not isinstance(upto, bool) else 0):
+                    self.changed()
+                return reply("seen_set", session=s.id, seen=s.meta.get("seen"))
             if op == "rename":
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
+            if op == "draft_save":  # (what's written in its box and not sent: kept here for every head, the last
+                kind, fields = self.save_draft(conn, s, msg)  # write's, told the others attached)
+                return reply(kind, **fields)
+            if op == "queue":  # (what's written while its turn runs: kept here for every head, sent by this host
+                kind, fields = hostqueue.change(self, conn, s, msg)  # as the turn ends, hostqueue)
+                return reply(kind, **fields)
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
+            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh,
+                try:              # on model if it's given)
+                    thread = self.rotate(s) if msg.get("model") is None else \
+                        self.rotate_to(s, msg["model"], msg.get("effort"))
+                except (OSError, ValueError) as e:
+                    return reply("error", error=str(e), plain=True)
+                return reply("rotated", session=s.listing(), thread=thread.listing() if thread is not None else None)
             if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
                 # at once: kept if it can't be)
                 held = s.meta.get("held") or []
@@ -746,12 +1128,15 @@ class ServerRunning:
                         self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
                                         h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
                                         meshtools.shown_of_told(h.get("text") or ""))
-                    except desktopchats.Elsewhere as e:  # (kept: sent once it's quiet)
+                    except (desktopchats.Elsewhere, accounts.Disabled) as e:  # (kept: sent once it's quiet)
                         return reply("error", error=str(e), plain=True)
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)
                 self.changed()
                 return reply("held", session=s.id)
+            if op == "resume_cancel":  # (its resume after a usage limit, let go of: hostresume)
+                hostresume.drop(self, s)
+                return reply("resume_cancelled", session=s.id)
             if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
                 on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
                 if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):
@@ -769,35 +1154,31 @@ class ServerRunning:
                 return reply("waits_on", session=s.id)
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
-            if op == "routines":  # (a Bot's routines: read; or one set (made, or changed by its id), or deleted (by its
-                have = list(s.meta.get("routines") or [])  # id); each set checked, its next run worked out)
-                if "set" in msg or "delete" in msg:
-                    if not s.meta.get("bot"):
-                        return reply("error", error=wording.say("host_errors.routines_bot_only"))
-                    if "delete" in msg:
-                        have = [r for r in have if r["id"] != msg["delete"]]
-                    else:
-                        given = msg["set"] if isinstance(msg["set"], dict) else None
-                        old = next((r for r in have if given and r["id"] == given.get("id")), None)
-                        if given is None or (old is None and len(have) >= 50):
-                            return reply("error", error=wording.say("host_errors.routine_limit"))
-                        try:
-                            made = routines.clean(given, old)
-                        except (ValueError, TypeError) as e:
-                            return reply("error", error=str(e))
-                        have = [made if r["id"] == made["id"] else r for r in have] if old else have + [made]
-                    s.meta["routines"] = have
-                    self.save(s)
-                    self.changed()
-                    self.woken.set()  # (the next due may be sooner: the watch told)
-                return reply("routines", session=s.id, routines=have, clock=routines.clock())
-            if op == "run_routine":  # (one of a Bot's routines run now, its schedule as it was)
-                r = next((r for r in s.meta.get("routines") or [] if r["id"] == msg.get("id")), None)
-                if r is None or not s.meta.get("bot") or s.meta.get("archived"):
-                    return reply("error", error=wording.say("host_errors.no_routine"))
-                self.run_routine(s, r, schedule=False)
-                return reply("routines", session=s.id, routines=s.meta.get("routines") or [],
-                             clock=routines.clock())
+            if op in ("task_bind", "task_choices"):  # (a task's variables: on a thread of its own, as what's here of
+                def variables(s=s):                     # their type is looked at: kubectl, docker, the mesh)
+                    try:
+                        kind, fields = self.tasks.bind(s, msg) if op == "task_bind" else \
+                            self.tasks.choices(s, msg.get("type"), lambda cap: self.access.allowed(conn, cap))
+                    except (ValueError, TypeError, OSError) as e:
+                        return reply("error", error=str(e))
+                    return reply(kind, **fields)
+                threading.Thread(target=variables, daemon=True, name=op).start()
+                return None
+            if op in ("tasks", "task", "run_task", "task_run", "task_stop"):  # (a Bot's tasks: baudelib.tasks)
+                try:
+                    kind, fields = self.tasks.op(s, msg, by={"id": conn.member, "verified": conn.verified}
+                                                 if conn.member is not None else None)
+                except (ValueError, TypeError, OSError) as e:
+                    return reply("error", error=str(e))
+                return reply(kind, **fields)
+            if op == "answer_task":  # (an ask of one of a Bot's tasks' runs, waiting on it: answered, its run going on)
+                if not s.meta.get("bot"):
+                    return reply("error", error=wording.say("host_errors.tasks_bot_only"))
+                try:
+                    kind, fields = self.tasks.answer(s, msg)
+                except ValueError as e:
+                    return reply("error", error=str(e))
+                return reply(kind, **fields)
             if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
                 # base_mtime, with what it wrote)
                 mem = self.bot_memory(s, msg.get("text"), msg.get("seen"),
@@ -808,95 +1189,363 @@ class ServerRunning:
         self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
         return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
 
-    def run_routine(self, s, r, schedule=True):
-        """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for
-        mid-turn taken after it); its next run worked out from now (schedule), or left as it was (run now). One
-        sent and not yet taken (its Bot still on a turn from before) isn't sent again: the run's skipped."""
-        now = time.time()
-        if r["id"] in s.routines_out and s.busy:
-            error = wording.say("host_errors.routine_skipped")
-        else:
-            try:
-                self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
-                                          "message": {"role": "user", "content": routines.said(r, now)}})
-                error = None
-                s.routines_out.add(r["id"])
-            except desktopchats.Elsewhere as e:
-                error = str(e)
-        s.meta["routines"] = [(routines.ran(x, now, error) if schedule else {**x, "last": now})
-                              if x["id"] == r["id"] else x for x in s.meta.get("routines") or []]
+    def save_draft(self, conn, s, msg):
+        """(lock held) draft_save: s's draft kept as msg's text, its revision one more than the last, and told every
+        other head attached that may write it (draft_changed); the reply's op and fields. One written before the
+        draft's last send (its epoch less) isn't kept (stale_draft); one a send makes (sent) empties it and starts
+        the next epoch, once for each send."""
+        text = msg.get("text")
+        if s.id not in self.sessions:  # (a Claude Desktop chat only listed: Baude's own, on this machine, keeps its)
+            return "error", {"error": f"no session {s.id}"}
+        if not isinstance(text, str) or len(text) > wire.CONSTANTS["DRAFT_CHARS_MAX"]:
+            return "error", {"error": wire.SAID[wire.INVALID], "code": wire.INVALID}
+        was = s.meta.get("composer") or {}
+        epoch, sent = int(was.get("epoch") or 0), msg.get("sent") if isinstance(msg.get("sent"), str) else None
+        if sent is not None and sent == was.get("sent"):  # (that send's own, made again: it's emptied it already)
+            return "draft_saved", {"session": s.id, "draft": was}
+        if msg["epoch"] < epoch:  # (written before the last send: what was sent, not to come back)
+            return "error", {"error": wire.SAID[wire.STALE], "code": wire.STALE, "session": s.id, "draft": was}
+        epoch = max(epoch, msg["epoch"])  # (a head's own send's, its save not come: it's emptied it there already)
+        if sent is not None:
+            text, epoch = "", epoch + 1
+        draft = {"text": text, "rev": int(was.get("rev") or 0) + 1, "epoch": epoch, "sent": sent or was.get("sent"),
+                 "head": msg["head"][:64] if isinstance(msg.get("head"), str) else None, "at": time.time()}
+        s.meta["composer"] = draft
         self.save(s)
-        self.log(f"routine {r['name']!r} of {s.id}: " + (error or "run"))
+        for v in list(s.viewers):
+            if v is not conn and self.access.allowed(v, "manage_write", s):
+                v.send({"op": "draft_changed", "session": s.id, "draft": draft})
+        return "draft_saved", {"session": s.id, "draft": draft}
 
-    def routines_due(self):
-        """Routines due now run (each Bot's that are, not archived, not being deleted, the host not stopping): each
-        one's folder made again first if it's gone, as for a message; when the next one's due (seconds from now), or
-        None if there's none to run."""
-        now, soonest, due = time.time(), None, []
+    def started_by(self, sid):
+        """(member, verified) that started the chat sid here (its meta's started_by), or None: a head here did."""
         with self.lock:
-            if self.stopped.is_set():
-                return None
-            for s in list(self.sessions.values()):
-                if not s.meta.get("bot") or s.meta.get("archived") or s.deleting:
-                    continue
-                for r in s.meta.get("routines") or []:
-                    if routines.due(r, now):
-                        due.append((s.id, r["id"]))
-                    elif not r.get("paused") and r.get("next") is not None:
-                        soonest = r["next"] - now if soonest is None else min(soonest, r["next"] - now)
-        for sid, _rid in due:  # (not under the lock: git)
-            self.restore_folder(None, sid)
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+            by = s.meta.get("started_by") if s is not None else None
+        return (by["id"], by.get("verified") is not False) if isinstance(by, dict) and wire.is_id(by.get("id") or "") \
+            else None
+
+    def managed_folder(self, conn, path):
+        """Is path (absolute) in the folder of a chat here conn may manage?"""
+        if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
+            return False
+        real = os.path.realpath(os.path.expanduser(path))
         with self.lock:
-            for sid, rid in due:
-                s = self.sessions.get(sid)
-                if s is None or s.deleting or self.stopped.is_set():
-                    continue
-                r = next((x for x in s.meta.get("routines") or [] if x["id"] == rid), None)
-                if r is None or not routines.due(r, time.time()):
-                    continue
-                try:
-                    self.run_routine(s, r)
-                except Exception as e:  # noqa: BLE001 (said, on the page too, and tried again at its next time)
-                    self.log(f"routine {r.get('name')!r} of {s.id} didn't run: {type(e).__name__}: {e}")
-                    s.meta["routines"] = [routines.ran(x, time.time(), f"didn't run: {e}") if x["id"] == rid else x
-                                          for x in s.meta.get("routines") or []]
-                    self.save(s)
-                nxt = next((x["next"] for x in s.meta.get("routines") or [] if x["id"] == rid), None)
-                if nxt is not None:
-                    soonest = nxt - time.time() if soonest is None else min(soonest, nxt - time.time())
-        return soonest
+            chats = list(self.sessions.values()) + list(self.desktop.chats.values())
+        folders = {os.path.realpath(c.meta["cwd"]) for c in chats
+                   if isinstance(c.meta.get("cwd"), str) and self.access.allowed(conn, "manage_read", c)}
+        return any(real == f or real.startswith(f.rstrip(os.sep) + os.sep) for f in folders)
+
+    def manage_refused(self, conn, msg):
+        """The rule, if any, by which conn may not do msg to the chat it names (session; a start's fork_from, read, or
+        adopt, written; a chat moved to another subscription, written), as access has it: msg's own side of
+        Agent Management (access.OPS) for the rest."""
+        if conn.member is None:
+            return None
+        for key in ("session", "fork_from", "adopt"):
+            if isinstance(sid := msg.get(key), str) and sid:
+                with self.lock:
+                    s = self.sessions.get(sid) or self.desktop.chats.get(sid)
+                side = access.rule_of(msg, s)
+                side = "manage_write" if msg.get("op") == "accounts" or key == "adopt" else side \
+                    if access.capability(side or "") == "manage" else "manage_read"
+                if not self.access.allowed(conn, side, s):
+                    return side
+        return None
+
+    def access_op(self, conn, msg, reply):
+        """access and access_set: the host's rules, a chat's own (session) too; set from where access allows it."""
+        op, sid = msg["op"], msg.get("session")
+        with self.lock:
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+            listed = sid in self.desktop.chats
+        if sid is not None and listed and s is None:  # (a Claude Desktop chat only listed: its rule's the host's)
+            return reply("error", error=wording.say("access.desktop_listed"), plain=True)
+        if sid is not None and (s is None or not self.access.allowed(conn, "manage_read", s)):
+            return reply("error", error=f"no session {sid}")
+        if op == "access_set":
+            if not self.access.allowed(conn, "access_write"):
+                return conn.send(self.access.refused(msg.get("req"), "access_write"))
+            try:
+                if s is not None:
+                    with self.lock:
+                        self.access.set_own(s.meta, msg.get("capability"), msg.get("rule"))
+                        self.save(s)
+                elif msg.get("capability") is not None and msg.get("rule") is not None:
+                    self.access.set(msg["capability"], msg["rule"])
+                else:
+                    raise ValueError(wording.say("access.bad_rule"))
+            except (OSError, ValueError) as e:
+                return reply("error", error=str(e))
+            self.log(f"access: {sid or msg['capability']} set by {conn.member or 'a head here'}")
+        own = access.own_rules(s.meta) if s is not None else {}
+        return reply(op, state=self.access.state(conn, [m for r in own.values() for m in r.get("members") or ()]),
+                     session=sid if s is not None else None, chat=own or None)
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
-        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again."""
-        folder = bot_dir(self.state_dir, s.id)
+        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again.
+        Its folder named after it (name_bot_folder). A chat made one has its agent given a Bot's tools as it runs
+        (grow_agent), where its program takes them so; another change to what it's told, or one that can't, has its
+        agent started again (renew_agent)."""
+        was = s.meta.get("bot")
         if bot is None:
             s.meta.pop("bot", None)
         else:
             if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
                 raise ValueError(wording.say("host_errors.bot_needs_name"))
-            os.makedirs(folder, mode=0o700, exist_ok=True)
-            s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
-                             "since": (s.meta.get("bot") or {}).get("since") or time.time()}
+            name = " ".join(str(bot["name"]).split())[:80]
+            data = base64.b64decode(bot["picture"]) if bot.get("picture") else None
+            if data is not None and len(data) > BOT_PICTURE_MAX:
+                raise ValueError(wording.say("host_errors.picture_too_big"))
+            if was and name != was.get("name") and getattr(s, "proc", None) is not None and s.busy:
+                s.bot_rename = True  # (its agent goes on writing its memory where it began the turn: moved as it ends)
+                folder = bot_dir(self.state_dir, s.meta)
+            else:
+                folder = self.name_bot_folder(s, name)
+            s.meta["bot"] = {"name": name, "since": (was or {}).get("since") or time.time()}
             if not os.path.exists(os.path.join(folder, "memory.md")):  # (and nothing in it accepted yet: all the Bot
-                for name in ("memory.md", "memory.seen.md"):              # writes is shown as its changes)
-                    with open(os.path.join(folder, name), "w") as f:
+                for n in ("memory.md", "memory.seen.md"):                 # writes is shown as its changes)
+                    with open(os.path.join(folder, n), "w") as f:
                         f.write("")
             pic = os.path.join(folder, "picture")
             if bot.get("picture") == "":
                 if os.path.exists(pic):
                     os.remove(pic)
-            elif bot.get("picture"):
-                data = base64.b64decode(bot["picture"])
-                if len(data) > BOT_PICTURE_MAX:
-                    raise ValueError(wording.say("host_errors.picture_too_big"))
+            elif data is not None:
                 with open(pic + ".new", "wb") as f:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
-        self.renew_agent(s)
+        now = s.meta.get("bot")
+        if (was or {}).get("name") != (now or {}).get("name"):
+            s.bot_note = None  # (what it was to be told, with the name and folder it had)
+            if not (was is None and self.grow_agent(s)):
+                self.renew_agent(s)  # (its picture alone: nothing its agent's told)
         self.changed()
         return s.listing()
+
+    def name_bot_folder(self, s, name):
+        """(under the lock) A Bot's folder (bot_dir) named after it (serverstate.bot_folder_name), as it's named:
+        the one it has moved there, or made; a number after the name if another Bot's has it. Left where it is if it
+        can't be moved. Its tasks' store goes on in it where it is now."""
+        old, base = bot_dir(self.state_dir, s.meta), bot_folder_name(name)
+        mine = (s.meta.get("bot_folder") or "").casefold()
+        taken = {(o.meta.get("bot_folder") or "").casefold() for o in self.sessions.values() if o is not s}
+        bots = os.path.join(self.state_dir, "bots")
+        for n in range(1, 100):
+            want = base if n == 1 else f"{base} {n}"
+            if want.casefold() == mine and os.path.isdir(old):
+                return old  # (named so already)
+            if want.casefold() not in taken and not os.path.lexists(os.path.join(bots, want)):
+                break
+        else:
+            want = wire.safe_name(s.id)
+        new = os.path.join(bots, want)
+        before = {k: s.meta.get(k) for k in ("bot_folder", "bot_moving")}
+        try:
+            os.makedirs(bots, mode=0o700, exist_ok=True)
+            if os.path.isdir(old):
+                s.meta["bot_folder"], s.meta["bot_moving"] = want, os.path.basename(old)
+                self.save(s)  # (the name it's to have kept first: a crash between this and the move is mended as the host starts)
+                os.rename(old, new)
+            else:
+                os.makedirs(new, mode=0o700)
+        except OSError as e:
+            self.log(f"{s.id}: its Bot's folder not named {want}: {e}")
+            for k, v in before.items():
+                s.meta.pop(k, None) if v is None else s.meta.__setitem__(k, v)
+            try:
+                self.save(s)
+                os.makedirs(old, mode=0o700, exist_ok=True)
+            except OSError:
+                pass
+            return old
+        s.meta["bot_folder"] = want
+        s.meta.pop("bot_moving", None)
+        self.tasks.moved(s, os.path.join(new, "tasks"))
+        return new
+
+    def move_bot_folder(self, s):
+        """(under the lock) A Bot's folder moved to its name's, now its agent's turn is over (set_bot)."""
+        if s.bot_rename and s.meta.get("bot"):
+            s.bot_rename = False
+            self.name_bot_folder(s, s.meta["bot"]["name"])
+            try:
+                self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: {e}")
+
+    def settle_bot_folders(self):
+        """(as the host starts) Each Bot's folder named after it, a Bot's kept by its session's id till now too; one a
+        crash left between saving its folder's name and moving it, moved. Never stops the host."""
+        bots = os.path.join(self.state_dir, "bots")
+        for s in list(self.sessions.values()):
+            if not s.meta.get("bot"):
+                continue
+            try:
+                if s.meta.get("bot_moving"):
+                    new, old = (os.path.join(bots, s.meta.get(k) or "") for k in ("bot_folder", "bot_moving"))
+                    if os.path.isdir(old) and not os.path.lexists(new):
+                        os.rename(old, new)
+                    s.meta.pop("bot_moving", None)
+                    self.save(s)
+                if not s.meta.get("bot_folder"):
+                    self.name_bot_folder(s, s.meta["bot"].get("name") or "Bot")
+                    self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: its Bot's folder not settled: {e}")
+
+    # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
+    THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
+                   "fork_from", "adopted", "desktop", "ended", "seen")
+
+    def rotate(self, s):
+        """(under the lock) A Bot's conversation archived as a past thread (a session of its own, read-only, named
+        "<Bot> / <its title>"), and the Bot carried on in a new, empty one with a new agent: its id, name, picture,
+        memory, tasks, browser, rules and place all as they were. Refused (ValueError) while it's at a turn, asking,
+        running commands or agents in the background, or a task's ask waits on it. Kept in an order a crash can't
+        spoil: the thread's settings first (rotating, till the Bot's are), then its files moved, then the Bot's;
+        one left half done is undone or finished as the host next starts (settle_rotations), or at once if a step
+        fails here. The thread: the new session, as it's kept."""
+        bot = s.meta.get("bot")
+        self.can_rotate(s)
+        if s.transcript() is None:
+            raise ValueError(wording.say("host_errors.nothing_to_rotate"))
+        self.rescan(s)  # (its title as its transcript has it now)
+        listed = s.listing()
+        meta = copy.deepcopy(s.meta)
+        for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
+                    "start_key", "rotated", "last_thread", "composer", "bot_folder", "bot_moving", "queue"):  # (the Bot's draft, and its
+            # folder, stay the Bot's)
+            meta.pop(key, None)
+        title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
+        meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",
+                    rotating=True, cli_id=s.meta.get("cli_id") or (
+                        None if models.model_program(s.meta.get("model")) == "codex" else s.id))
+        if not meta["cli_id"]:
+            meta.pop("cli_id")
+        if meta.get("ended"):  # (its last turn's end, seen: rotated by hand, and read-only from now on)
+            meta["seen"] = dict(meta["ended"])
+        thread = Session(self, meta)
+        was = copy.deepcopy(s.meta)
+        try:
+            self.save(thread)  # (1: the thread, rotating: undone as the host starts, unless the Bot's kept below)
+            for src, dst in self.rotated_files(s.id, thread.id):  # (2: the host's own transcript, its senders)
+                if os.path.exists(src):
+                    os.replace(src, dst)
+            ended = s.meta.get("ended")
+            for key in self.THREAD_KEYS:
+                s.meta.pop(key, None)
+            if ended:  # (the Bot's last turn's end, said seen: every head's notification of it taken back)
+                s.meta["seen"] = dict(ended)
+            if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
+                s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
+            s.meta.update(said=listed.get("said"), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
+                          last_thread=thread.id)  # (its place in the list kept: what's next said in it moves it up)
+            self.save(s)  # (3: the Bot afresh: from here the thread's its own)
+        except Exception:
+            s.meta = was
+            self.undo_rotation(s.id, thread.id)
+            raise
+        if s.proc is not None:  # (its agent between turns: let go of, as ensure_proc lets go of one that's stopping)
+            old, s.proc = s.proc, None
+            old.stopping = True
+            s.forget_commands()
+            old.kill()
+            self.drop_routes(s)
+        thread.meta.pop("rotating")
+        try:
+            self.save(thread)  # (4: settled; if it isn't kept, settle_rotations settles it next start)
+        except OSError as e:
+            self.log(f"rotating {s.id}: {thread.id} not marked done yet: {e}")
+        self.sessions[thread.id] = thread
+        self.rescan(thread)
+        thread.agents = thread.subagent_files()
+        s.scan = s.info = s.stat = s.agents = None
+        s.senders, s.outputs, s.outputs_at, s.context_asked = {}, set(), 0, 0.0
+        s.rewinds.clear()
+        s.reverting.clear()
+        self.rescan(s)
+        self.log(f"rotated {s.id}: its conversation archived as {thread.id}")
+        self.changed()
+        return thread
+
+    def can_rotate(self, s):
+        """(under the lock) Refused (ValueError) if a session can't be rotated now: it isn't a Bot, or it's at a turn,
+        asking, running commands or agents in the background, or a task's ask waits on it."""
+        if not s.meta.get("bot"):
+            raise ValueError(wording.say("host_errors.not_a_bot"))
+        if s.busy or s.asks or s.queued:
+            raise ValueError(wording.say("host_errors.at_a_turn"))
+        if s.commands() or s.background_agents:
+            raise ValueError(wording.say("host_errors.background_running"))
+        if self.tasks.asking(s.id):
+            raise ValueError(wording.say("host_errors.task_asking"))
+
+    def rotate_to(self, s, model, effort=None):
+        """(under the lock) A Bot moved onto any model, of whatever program: its conversation rotated (rotate) if
+        anything's been said in it, and the Bot carried on afresh on model, at effort if its program has one, its
+        memory telling it who it is. Refused (ValueError) as rotate is, or for a model this host can't run. The
+        thread: its past one, None if there was nothing to rotate."""
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model is a model's name")
+        if not self.can_run(model):
+            raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
+        self.can_rotate(s)
+        thread = self.rotate(s) if s.transcript() is not None else None
+        was = models.model_program(s.meta.get("model"))
+        run = models.launch(model, s.meta.get("mode"), effort if isinstance(effort, str) and effort else
+                            s.meta.get("effort"))
+        if run["program"] == "codex":
+            run["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")),
+                                                model, run["effort"])
+        s.meta.update(model=model, mode=run["mode"], effort=run["effort"])
+        if run["program"] != was:  # (a conversation of the new program's: Codex names its own thread as it starts)
+            for key in ("cli_id", "path", "codex_started", "context_usage", "init"):
+                s.meta.pop(key, None)
+            if run["program"] != "codex":
+                s.meta["cli_id"] = str(uuid.uuid4())
+        self.save(s)
+        if s.proc is not None:  # (its agent between turns, the old model's: let go of, as rotate does)
+            old, s.proc = s.proc, None
+            old.stopping = True
+            s.forget_commands()
+            old.kill()
+            self.drop_routes(s)
+        self.log(f"moved {s.id} onto {model}")
+        self.changed()
+        return thread
+
+    def rotated_files(self, bot, thread):
+        """(from, to) of what a rotation moves from the Bot to its thread: the host's own transcript, its senders."""
+        return [(os.path.join(self.state_dir, "transcripts", f"{bot}.jsonl"),
+                 os.path.join(self.state_dir, "transcripts", f"{thread}.jsonl")),
+                (self.senders_path(bot), self.senders_path(thread))]
+
+    def undo_rotation(self, bot, thread):
+        """A rotation not kept to its end (the Bot's settings never written): its files moved back to the Bot, and
+        the thread gone."""
+        for src, dst in self.rotated_files(bot, thread):
+            if os.path.exists(dst) and not os.path.exists(src):
+                os.replace(dst, src)
+        try:
+            os.remove(os.path.join(self.state_dir, "sessions", f"{thread}.json"))
+        except FileNotFoundError:
+            pass
+        self.sessions.pop(thread, None)
+
+    def settle_rotations(self):
+        """(as the host starts) Rotations a crash left half done: one whose Bot's settings were kept, finished; any
+        other undone, its Bot as it was."""
+        for t in [x for x in self.sessions.values() if x.meta.get("rotating")]:
+            b = self.sessions.get(t.meta.get("thread_of"))
+            if b is not None and b.meta.get("last_thread") == t.id:
+                t.meta.pop("rotating")
+                self.save(t)
+            else:
+                self.log(f"rotating {t.meta.get('thread_of')}: undone, the host stopped before it was")
+                self.undo_rotation(t.meta.get("thread_of"), t.id)
 
     def renew_agent(self, s):
         """(under the lock) A session's agent told what it's told at its start anew (a Bot made, its mesh's tools
@@ -916,17 +1565,17 @@ class ServerRunning:
         s.proc.close_stdin()
 
     def edits_memory(self, s, request):
-        """Is what a Bot's agent asks to do an edit of a file in its own folder (its memory's)?"""
+        """Is what a Bot's agent asks to do a read or an edit of a file in its own folder (its memory's)?"""
         path = (request.get("input") or {}).get("file_path")
-        if not s.meta.get("bot") or request.get("tool_name") not in ("Edit", "MultiEdit", "Write") or \
+        if not s.meta.get("bot") or request.get("tool_name") not in ("Read", "Edit", "MultiEdit", "Write") or \
                 not isinstance(path, str) or not path:
             return False
-        folder = os.path.realpath(bot_dir(self.state_dir, s.id))
+        folder = os.path.realpath(bot_dir(self.state_dir, s.meta))
         path = os.path.realpath(os.path.join(s.meta.get("cwd") or "/", os.path.expanduser(path)))
         return path.startswith(folder + os.sep)
 
     def bot_picture(self, s):
-        pic = os.path.join(bot_dir(self.state_dir, s.id), "picture")
+        pic = os.path.join(bot_dir(self.state_dir, s.meta), "picture")
         if not os.path.exists(pic):
             return None
         with open(pic, "rb") as f:
@@ -939,7 +1588,7 @@ class ServerRunning:
         else nothing's written and it's {refused: why, text, seen, mtime, path}, the memory as the Bot left it."""
         if not s.meta.get("bot"):
             raise ValueError(wording.say("host_errors.not_a_bot"))
-        folder = bot_dir(self.state_dir, s.id)
+        folder = bot_dir(self.state_dir, s.meta)
         path, seen_path = os.path.join(folder, "memory.md"), os.path.join(folder, "memory.seen.md")
         if text is not None:
             if "base_mtime" in base and _mtime(path) != base["base_mtime"]:

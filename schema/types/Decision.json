@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A decider's answer to one question, as System One gives it.",
+  "properties": {
+    "type": {
+      "enum": [
+        "choice",
+        "noul",
+        "score"
+      ],
+      "description": "Its question's kind."
+    },
+    "choice": {
+      "type": "string",
+      "description": "choice: the option picked."
+    },
+    "noul": {
+      "type": "number",
+      "description": "noul: the probability it's true."
+    },
+    "score": {
+      "type": "number",
+      "description": "score: the expected level, over the levels' indices (0 the lowest)."
+    },
+    "probabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      },
+      "description": "choice: each option's probability; score: each level's, by its index."
+    },
+    "legend": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "score: each level's index and what it is."
+    },
+    "confidence": {
+      "type": "number",
+      "description": "How sure it is, calibrated (choice and score; a noul's probability says it)."
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "additionalProperties": false
+}

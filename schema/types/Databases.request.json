@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "The running databases, read-only: their servers and databases (servers), one database's schema (schema), a table's first rows (rows). Secret-looking columns are masked here.",
+  "description": "The running databases, read-only: their servers and databases (servers), one database's schema (schema), a table's first rows (rows), a query's rows (query: Postgres's, in a read-only transaction). Secret-looking columns are masked here.",
   "properties": {
     "op": {
       "const": "databases",
@@ -12,16 +12,16 @@
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "what": {
-      "enum": ["servers", "schema", "rows"],
+      "enum": ["servers", "schema", "rows", "query"],
       "description": "What to read."
     },
     "container": {
       "type": "string",
-      "description": "schema, rows: the server's container."
+      "description": "schema, rows, query: the server's container."
     },
     "database": {
       "type": "string",
-      "description": "schema, rows: the database."
+      "description": "schema, rows, query: the database."
     },
     "schema": {
       "type": "string",
@@ -30,6 +30,10 @@
     "table": {
       "type": "string",
       "description": "rows: the table."
+    },
+    "sql": {
+      "type": "string",
+      "description": "query: one statement that reads (SELECT, WITH, VALUES, TABLE), run read-only; its rows come back as rows' do, secret-looking columns masked, QUERY_ROWS_MAX of them at most."
     }
   },
   "required": ["op"],

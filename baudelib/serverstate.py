@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import accounts, autofix, desktopchats, models, transcripts, wire
+from baudelib import accounts, autofix, desktopchats, emissiontools, models, transcripts, wire
 
 
 IDLE_S = 30 * 60
@@ -26,6 +26,7 @@ GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral sessi
 # to come back)
 APPS = frozenset({"baude", "record", "baude-android"})  # (heads listed as apps connected: a script that says
 # anything else, or a host's mesh, is no app)
+MULTIPLEX_S = 15  # (this machine's Multiplex windows, asked this often: telemetry's processes)
 EMISSIONS_S = 30  # (this machine's Emissions, and the code each runs, asked this often: heads_look)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
@@ -34,6 +35,7 @@ FILE_LIMIT = 4 << 20
 CATALOGUE_WAIT_S = 30  # (a folder's catalogue being made: waited for this long before what there is is sent)
 CATALOGUE_LIMIT = 20000  # (files sent of a folder's, at most: its other names all are)
 RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
+CONTEXT_EVERY_S = 1.0  # (through a turn, its agent's asked how much of its window it's used at most this often)
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
 SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mode")}
@@ -189,17 +191,35 @@ def _read_json(path):
 class Conn:
     """A client's connection: what it's sent goes out on a thread of its own, so a slow one holds nobody up."""
 
-    def __init__(self, channel, origin=None, sender=None):
+    def __init__(self, channel, origin=None, sender=None, verified=True):
         self.channel, self.out = channel, queue.Queue()
-        self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
+        self.subscribed, self.mute = False, set()  # (mute: the chats it's attached to whose asks it won't answer)
         self.origin, self.sender = origin, sender  # (a tunnel's: the member it came from; the chat there its relay
         # named, as that member has it: what's sent through it is from)
+        self.member, self.verified = origin, verified  # (who the access rules judge it as: a tunnel's origin, or the
+        # member that started the chat whose own tools it is (hello's as); verified: by its key, mesh.Mesh.opener)
+        self.acting = None  # (the chat here whose own tools it is, as its hello said)
+        self.task = None  # (a task's script's: {run, bot: {id, name}}, its run's Bot's from its hello on)
         self.archived = False  # (subscribed to archived sessions too)
+        self.asked = {}  # (the ops of its latest requests, by their req: what an error answered was answering)
         self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
         self.writer.start()
 
+    errored = None  # (told of each error answered on it, with the op it answered: the host's telemetry)
+
     def send(self, msg):
+        if self.errored is not None and msg.get("op") == "error":
+            try:
+                self.errored(msg, self.asked.get(msg.get("req")))
+            except Exception:  # noqa: BLE001 (answered all the same)
+                pass
         self.out.put(msg)
+
+    def asking(self, msg):
+        """A request come: its op kept by its req, the latest 64."""
+        self.asked[msg.get("req")] = msg.get("op")
+        if len(self.asked) > 64:
+            self.asked.pop(next(iter(self.asked)))
 
     def _write(self):
         while (msg := self.out.get()) is not None:
@@ -221,14 +241,19 @@ class Session:
         self.proc = None
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
+        self.login = None         # (its sign-in, as every head's card draws it: ChatLogin, hostlogin; memory only)
+        self.signing = set()      # (the sign-ins for it going on, by connection: hostlogin.began)
+        self.login_before = None  # (its sign-in as the first of those began: what it goes back to if all are cancelled)
+        self.login_turns = 0      # (its turns that failed for want of signing in: ChatLogin.turn)
+        self.login_heard = False  # (the turn going on's failed for want of it: counted once)
         self.busy = False         # at a turn
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
-        self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
+        self.acting = False       # at its browser's tools: an Emission call begun, nothing else since (turn_acting)
+        self.acting_by = {}       # (whose Emission call's begun: None its own, else a subagent's, by its Agent call's id)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
-        self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
+        self.writing = None       # (the id of the message its agent last began to stream: took_queued's)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid, conn that sent it) sent at a turn, kept once it's over (Server.keep)
-        self.codex_queue = []     # (msg, conn that sent it): Codex runs each follow-up as a separate turn.
         self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
         self.reverting = {}       # request id sent on -> the message a revert takes back (what it drops of Senders)
         self.senders = None       # (its sender store as it's kept, {uuid: sender}, once it's read: Server.senders)
@@ -240,6 +265,13 @@ class Session:
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
+        self.bot_rename = False   # (a Bot renamed at a turn: its folder moved once the turn's over, set_bot)
+        self.bot_note = None      # (what a Bot's told, for the next message its running agent's sent: grow_agent)
+        self.account_to = None    # (an account picked for it, not yet taken: switch_account; "": the CLI's own sign-in)
+        self.context_asked = 0.0  # (when its agent was last asked its context's usage: ask_context)
+        self.context_soon = False  # (asked again a moment from now, through a turn)
+        self.account_after_turn = False  # (that one taken once its turn and the follow-ups sent at it are answered)
+        self.sent_at_turn = False  # (its claude sent a follow-up at the turn going on: one more turn of its own to come)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
         self.app_tools = None     # (a head's own tools for its claude, start's app_tools: agentproxy.AppTools; memory only)
         # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
@@ -368,7 +400,7 @@ class Session:
         bot = self.meta.get("bot")
         if not bot:
             return None
-        pic = os.path.join(bot_dir(self.server.state_dir, self.id), "picture")
+        pic = os.path.join(bot_dir(self.server.state_dir, self.meta), "picture")
         return {"name": bot.get("name") or "Bot", "since": bot.get("since"),
                 "picture": os.path.getmtime(pic) if os.path.exists(pic) else None}
 
@@ -381,10 +413,26 @@ class Session:
     def account(self):
         """The subscription account its agent runs under here (Account's fields), or None: the CLI's own sign-in, a
         model that isn't Claude's or Codex's, or an account since removed."""
+        return accounts.account(self.profile())
+
+    def profile(self):
+        """The id of the account its agent runs under ("": the CLI's own sign-in, or a model that isn't Claude's or
+        Codex's): one picked for it, as it waits for its turn's end (account_to), else its own."""
         program = models.model_program(self.meta.get("model"))
         if program not in accounts.PROVIDERS:
-            return None
-        return accounts.account((self.meta.get("profiles") or {}).get(program, ""))
+            return ""
+        return self.account_to if self.account_to is not None else (self.meta.get("profiles") or {}).get(program, "")
+
+    def subscription(self):
+        """Its subscription's usage key (accounts.usage_key: the account its agent runs under, as profile says), or
+        None: a model that isn't Claude's or Codex's."""
+        program = models.model_program(self.meta.get("model"))
+        return accounts.usage_key(program, self.profile()) if program in accounts.PROVIDERS else None
+
+    def subscription_off(self):
+        """Whether the subscription it runs on is disabled on its host (nothing sent to its agent, nor started)."""
+        key = self.subscription()
+        return key is not None and accounts.disabled(key)
 
     def listing(self):
         info = self.info or {}
@@ -401,40 +449,89 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
+                "rotated": self.meta.get("rotated") if self.meta.get("bot") else None,
+                "task_asks": self.server.tasks.asks_of(self.id) if self.meta.get("bot") else [],
                 "autofix": autofix.listing(self.meta.get("autofix")),
                 "acting": self.acting and self.busy and not self.asks,
+                "context": context_listing(self.meta.get("context_usage")),
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "task_run": {k: v for k, v in self.meta["task_run"].items() if k in ("bot", "task", "run", "name")}
+                if isinstance(self.meta.get("task_run"), dict) else None,
                 "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
                 "start_key": self.meta.get("start_key"), "account": self.account(),
+                "account_gone": bool(self.profile()) and self.account() is None,
+                "account_disabled": self.subscription_off(),
+                "resume_at": self.meta.get("resume_at"),
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,
                 "always_allow": sorted(self.always_allow),
+                "ended": self.meta.get("ended"), "seen": self.meta.get("seen"),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 
 
+def context_listing(usage):
+    """What every head's told of a session's context (ContextUsage, as context_kept has it): its count and window,
+    without its categories (those are said to the chat that's open, on get_context_usage)."""
+    kept = context_kept(usage)
+    return None if kept is None else {k: v for k, v in kept.items() if k != "categories"}
+
+
+def context_kept(usage):
+    """What an agent said of its context (get_context_usage's answer, Codex's or pi-claude's count) as it's kept
+    (ContextUsage); None for one with neither a window nor a wish to be shown without one (a stopped one's {})."""
+    if not isinstance(usage, dict):
+        return None
+    used, total = usage.get("totalTokens"), usage.get("maxTokens")
+    total = total if isinstance(total, int) and not isinstance(total, bool) and total > 0 else None
+    if total is None and not usage.get("showWithoutLimit"):
+        return None
+    return {"totalTokens": used if isinstance(used, int) and not isinstance(used, bool) else None, "maxTokens": total,
+            "showWithoutLimit": bool(usage.get("showWithoutLimit")),
+            "categories": [{"name": c["name"], "tokens": int(c.get("tokens") or 0),
+                            "kind": c.get("kind") if isinstance(c.get("kind"), str) else None}
+                           for c in usage.get("categories") or [] if isinstance(c, dict) and
+                           isinstance(c.get("name"), str) and isinstance(c.get("tokens") or 0, (int, float))]}
+
+
 def turn_acting(msg, was, streamed=False):
-    """Whether a turn's at its tools once msg (its agent's own, not a subagent's) has come, was being whether it
-    was before: a tool call's begun (its block started, as it's streamed; or come whole, as some agents send their
-    calls though they stream their text), and it is; text begun, and it isn't (it's writing to you). streamed: its
-    agent streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say),
-    not looked at. Thinking, and the rest, leave it as it was: between two calls it's still at them. Its result, or
-    its agent gone, ends it (from_claude, claude_exited)."""
+    """Whether one of a turn's agents (its own, or a subagent: note_acting's) is at its browser's tools (Emission's:
+    what its browser glows for) once msg has come, was being whether it was before: a call of Emission's begun (its
+    block started, as it's streamed; or come whole, as some agents send their calls though they stream their text), and
+    it is; another tool's call, or text, begun, and it isn't (at other tools, or writing to you). streamed: its agent
+    streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say), not
+    looked at. Thinking, and the rest, leave it as it was: between two of Emission's calls it's still at them. Its
+    result, or its agent gone, ends it (from_claude, claude_exited)."""
     if msg.get("type") == "stream_event":
         event = msg.get("event") or {}
         if event.get("type") != "content_block_start":
             return was
-        kinds = [(event.get("content_block") or {}).get("type")]
+        blocks = [event.get("content_block") or {}]
     else:
         content = (msg.get("message") or {}).get("content")
-        kinds = [c.get("type") for c in content if isinstance(c, dict)] if isinstance(content, list) else []
-    if any(k in ("tool_use", "server_tool_use") for k in kinds):
-        return True
+        blocks = [c for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+    calls = [b for b in blocks if b.get("type") in ("tool_use", "server_tool_use")]
+    if calls:
+        return any(str(b.get("name") or "").startswith(EMISSION_TOOL) for b in calls)
     if msg.get("type") != "stream_event" and streamed:
         return was
-    return False if "text" in kinds else was
+    return False if any(b.get("type") == "text" for b in blocks) else was
+
+
+def note_acting(by, msg, streamed=False):
+    """Whether any of a turn's agents (its own, and its subagents: msg's parent_tool_use_id) is at Emission's tools,
+    once msg has come; by (whose call's begun, by that id) is kept for it."""
+    who = msg.get("parent_tool_use_id") or None
+    if turn_acting(msg, by.get(who, False), streamed):
+        by[who] = True
+    else:
+        by.pop(who, None)
+    return bool(by)
+
+
+EMISSION_TOOL = f"mcp__{emissiontools.NAME}__"  # (Emission's tools' names, as its agent calls them)
 
 
 BOT_PICTURE_MAX = wire.CONSTANTS["BOT_PICTURE_MAX"]  # (bytes: a Bot's picture, as sent)
@@ -442,10 +539,18 @@ BOT_MEMORY_TOLD = 32 << 10  # (bytes of a Bot's memory put in what its agent's t
 # Linux; the rest it reads in the file)
 
 
-def bot_dir(state_dir, sid):
-    """A Bot's own folder on its host: its memory (memory.md), what the user's accepted of it (memory.seen.md: what the
-    Bot's changes are shown against, on the Memory page) and its picture."""
-    return os.path.join(state_dir, "bots", wire.safe_name(sid))
+def bot_dir(state_dir, meta):
+    """A Bot's own folder on its host (meta: its session's): its memory (memory.md), what the user's accepted of it
+    (memory.seen.md: what the Bot's changes are shown against, on the Memory page), its picture and its tasks. Named
+    after the Bot (bot_folder, kept as it's named: Server.name_bot_folder), else by its session's id."""
+    return os.path.join(state_dir, "bots", meta.get("bot_folder") or wire.safe_name(meta["id"]))
+
+
+def bot_folder_name(name):
+    """A Bot's name as its folder's: what can't be in a file's name, or in a permission rule's path (brackets and
+    glob characters), taken out; at most 64 characters."""
+    name = re.sub(r"[\x00-\x1f/\\:*?\"<>|()\[\]{}]", "-", " ".join(str(name).split())).strip(" .")[:64].strip(" .")
+    return name or "Bot"
 
 
 def bot_system(name, memory_path, memory):

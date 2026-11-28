@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
+  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Databases… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
   "apps": [
     "baude",
     "record",
@@ -16,7 +16,20 @@
     "Subscriptions.kt:HostAccounts",
     "Subscriptions.kt:SubscriptionsPage",
     "Subscriptions.kt:ClaudeLogin",
-    "Settings.kt:SettingsScreen"
+    "Settings.kt:SettingsScreen",
+    "baudelib/deps.py",
+    "depsview.py:row",
+    "Deps.kt:DepRow",
+    "subscriptionpage.py:CodexLogin",
+    "subscriptionpage.py:add_codex",
+    "baudelib/hostaccounts.py:_sign_in",
+    "Subscriptions.kt:CodexLogin",
+    "Subscriptions.kt:CodexSignIn",
+    "Subscriptions.kt:CodexCard",
+    "baudelib/accounts.py:set_switch",
+    "baudelib/accounts.py:exhausted",
+    "baudelib/serversessions.py:subscription_disabled",
+    "baudelib/accounts.py:set_auto_resume"
   ],
   "copy": [
     "subscriptions",
@@ -34,7 +47,7 @@
     },
     {
       "name": "provider group",
-      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a boxed list.",
+      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
@@ -49,54 +62,66 @@
               "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
             }
           ]
+        },
+        {
+          "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+          "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#226"
+            }
+          ]
+        },
+        {
+          "said": "(BaudeInternal#278, paraphrased) a host-wide default subscription is redundant now that each chat picks its own in its provider picker; take the setting out",
+          "rule": "No app's Subscriptions page has a Current Subscription row or any other pick of a default subscription: a chat's provider picker is the one place a subscription is chosen. A new chat on a host takes the subscription a chat's provider picker last picked there for its model's provider, else the CLI's own sign-in (also once that account is removed)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#278"
+            }
+          ]
         }
       ],
       "parts": [
         {
-          "name": "Account",
-          "shows": "Picker: \"CLI default\" (the CLI's own sign-in) then each account by name; the one picked is the default a new chat on this host takes.",
-          "copy": [
-            "subscriptions.account",
-            "subscriptions.cli_default"
-          ],
-          "actions": [
-            {
-              "by": "pick",
-              "does": "select: the host's default for that provider; new chats not written in yet take it too"
-            }
-          ]
-        },
-        {
-          "name": "account row",
-          "shows": "One per account: its name, and ⋮.",
+          "name": "subscription card",
+          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, \"Disabled\" dim at the end of its line where it's disabled, and ⋮ (every card's, CLI default's too). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for the CLI default or a folder account whose sign-in isn't a claude.ai subscription's (signed out, an API key, Bedrock or Vertex, a Console login) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was. A setup token's (whose usage can't be asked) shows its limits as its chats' turns last said them, with \"Last update <how long ago>\" dim under them, or \"Usage available after a message\" before its first turn.",
           "actions": [
             {
               "by": "click ⋮",
-              "does": "Menu: Rename…, Sign In Again… (Replace Token… for a token account), Remove…"
+              "does": "Menu: an account's Rename…, Sign In Again… (Replace Token… for a token account); then every card's Disable (Enable where it's disabled), Auto Disable on Exhaustion and Auto Resume on Reset (check items, ticked where they're on); then an account's Remove…. Disable and Enable, Auto Disable on Exhaustion and Auto Resume on Reset are said to the host at once (accounts disable / auto_disable / auto_resume, the card's id, \"\" with provider for CLI default, and on), and the card drawn again from its answer (disabled, auto_disable, auto_resume)"
+            },
+            {
+              "by": "(none)",
+              "does": "Each card's usage is read from the host (accounts usage, its id; \"\" for Claude's CLI default, \"\" with provider codex for Codex's) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude at a time and one codex at a time (a hung codex holds no claude's read) (Codex's: its App Server's account/rateLimits/read, asked without the reset-credit details, run with the subscription's CODEX_HOME, ~/.codex for CLI default); every answer to accounts carries the host's last reading of each subscription with when it was read (last_usage), which the page shows greyed till its own read of that card answers"
             }
           ],
           "copy": [
+            "subscriptions.cli_default",
             "common.rename_ellipsis",
             "subscriptions.replace_token",
             "subscriptions.sign_in_again",
             "common.remove_ellipsis",
-            "subscriptions.more_tip"
-          ]
-        },
-        {
-          "name": "Subscription usage",
-          "apps": [
-            "baude",
-            "record",
-            "phone"
-          ],
-          "shows": "Claude's only: row \"Subscription usage\" with a refresh icon; once read, the default account's limits after its name (\"Five hour 25% · Seven day 40%\"), or \"Usage unavailable for this sign-in\" (a token account's: a setup token can't read them).",
-          "copy": [
-            "subscriptions.usage",
-            "subscriptions.usage_limit",
+            "subscriptions.more_tip",
+            "subscriptions.usage_percent",
             "subscriptions.checking",
             "subscriptions.usage_unavailable",
-            "subscriptions.usage_failed"
+            "subscriptions.usage_failed",
+            "subscriptions.five_hour_limit",
+            "subscriptions.weekly_limit",
+            "subscriptions.weekly_limit_today",
+            "subscriptions.other_limit",
+            "subscriptions.other_limit_today",
+            "subscriptions.no_limits",
+            "subscriptions.last_update",
+            "subscriptions.after_turn",
+            "subscriptions.disable",
+            "subscriptions.enable",
+            "subscriptions.auto_disable",
+            "subscriptions.auto_resume",
+            "subscriptions.disabled"
           ],
           "decisions": [
             {
@@ -108,26 +133,135 @@
                   "issue": "BaudeInternal#204"
                 }
               ]
+            },
+            {
+              "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+              "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#226"
+                }
+              ]
+            },
+            {
+              "said": "226 should be Five Hour Limit (Resets <TIME>) and Weekly Limit (Resets <DAY> <TIME>) or just <TIME> if the Weekly Reset Time is today.",
+              "rule": "Every app labels a Claude card's limits Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), or Weekly Limit (Resets <time>) when the weekly reset is today, the times as the host's usage read says them, shown in the viewer's local time and clock format",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "261792c7-ec64-4d01-aac0-475fd2183c0c"
+                }
+              ]
+            },
+            {
+              "said": "The subscription percentages last read should be cached, and shown a bit grey while they're read again (paraphrased)",
+              "rule": "Every app's Subscriptions page shows each Claude card's usage as its host last read it, greyed, as soon as the page opens, until the page's own read answers with the current reading; the host keeps that last reading and when it was taken, so every app (and any later one) gets it from the host rather than keeping its own; \"Checking…\" shows only where the host has never read that subscription",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#242"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#264, paraphrased) Codex's CLI default shows no usage amounts",
+              "rule": "Every app's Subscriptions page has a card for Codex's CLI default where the host has codex, and every Codex card (CLI default and each account) shows its usage as a Claude card does: a bar per limit with its name, reset time and percentage, read the same way",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#264"
+                }
+              ]
+            },
+            {
+              "said": "Okay then we need to build the one that siphons usage from inference calls … Build this, it's important. Should look like the other bars but maybe (\"last update X ago\")",
+              "rule": "Every app shows a Claude subscription whose usage can't be asked (a setup token's) with the same bars as any other, its limits as its chats' turns last said them (the host keeps each turn's rate-limit figures for the account the chat runs on, across restarts), then a dim \"Last update <how long ago>\" line under them; a subscription whose usage can be asked shows only that",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "message": "63ffd6d1-dc05-4f66-9cee-c255d5e3a05d"
+                },
+                {
+                  "message": "c9b7a342-0308-450e-acfb-707b69f2c927"
+                }
+              ]
+            },
+            {
+              "said": "\"Usage shows aftetr this acount's next turn\" !!!! -> \"Available after a message\" Then: Ok maybe \"Usage available after a message\"",
+              "rule": "Where a setup token's subscription has had no turn yet to say its limits, every app says exactly \"Usage available after a message\" in place of its bars",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "message": "b0979709-ca86-482f-8b0e-ee406f67f132"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#280, paraphrased) a provider should be able to be disabled without removing it: its chats turned off and the send button blocked for chats on it, since some providers don't stop when usage runs out and bill extra instead",
+              "rule": "Every app's Subscriptions page lets any subscription (an account, or a provider's CLI default) be disabled and enabled again from its ⋮, without removing it; while it's disabled its card says Disabled, its host stops the agent of every chat on it (a turn going on cut short) and refuses anything sent to them or anything that would start them, and every app's chat on it has its send button off with a banner \"Subscription <name> is disabled\" (Meta's box, where Meta runs on it, the same line over it), till it's enabled or the chat's moved to another subscription",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#280"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#281, paraphrased) a subscription should have a toggle to auto disable on exhaustion",
+              "rule": "Every app's subscription ⋮ has Auto Disable on Exhaustion, a check item; while it's on, the host disables the subscription (as Disable does, its chats stopped) as soon as its chats' turns or a usage read say one of its limits is used up or extra usage is being billed (Claude's rate-limit events: a limit refused, at 100%, or using overage; Codex's rate-limit updates and usage reads: a window at 100%), or at once when it's turned on if the last reading says so; it stays disabled till it's enabled by hand",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#281"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#307, paraphrased) a chat that stops because its five-hour usage limit is used up should carry on by itself once the limit resets",
+              "rule": "Every app's Subscriptions page has Auto Resume on Reset in each subscription's ⋮ (a check item, off until turned on); while it's on, a chat on that subscription whose turn a usage limit stops is sent \"Continue where you left off: the usage limit has reset.\" by its host a minute after the limit resets, over a host restart, unless something is sent to it first, it's cancelled, the switch is turned off, or the subscription is disabled by hand (a subscription disabled by hand is never resumed onto or enabled again by itself). Where Auto Disable on Exhaustion is on too, the subscription that disabled itself as it was exhausted is enabled again a minute after the limit resets (a by-hand Enable or Disable forgets that it disabled itself), and its chats are resumed then; their line stays meanwhile. A chat whose resumes keep being refused again waits at least 5 minutes after each (doubling), and is let be after three in a row with no turn going through; a scheduled task run's chat isn't resumed (its schedule runs it again). Every app's chat says when at its end (\"Resumes at 3:20 PM\", with the day where it isn't today) with Cancel beside it.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#307"
+                }
+              ]
             }
           ]
         },
         {
           "name": "Add account",
-          "shows": "Button row \"Add account\" with a plus.",
+          "shows": "Button row \"Add account\" with a plus. Where the host lacks the provider's program (Codex's codex, by the host's deps), its Dependencies row in its place: \"Codex CLI isn't installed\", the install command with Copy (else the install page); Copy toasts \"Copied: run it in a terminal\", Settings having no Try Again.",
           "copy": [
-            "subscriptions.add_account"
+            "subscriptions.add_account",
+            "deps.not_installed",
+            "deps.needs",
+            "deps.install_page",
+            "common.copy"
+          ],
+          "decisions": [
+            {
+              "said": "Settings → Subscriptions showed a raw \"No such file or directory: 'codex'\" error; the dependencies page already has a central store that knows whether runtimes and dependencies are installed, and it should gate features like this one (paraphrased)",
+              "rule": "Every app's Subscriptions page asks the host's dependency store (schema/deps, the same one Settings → Dependencies lists) whether each provider's program is there; where it isn't, that provider's Add account row is replaced by its Dependencies row, titled \"<program> isn't installed\" with the host's install command and Copy (else its install page), and a sign-in the host is asked to run without it answers with that same line, never the run's OS error",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#234"
+                }
+              ]
+            }
           ]
         }
       ]
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; what claude says of a pasted code (\"Invalid code…\") replaces \"Checking the code…\"; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste a token from claude setup-token or an API key\" and the accent button Add account (usable once something is typed), which adds the account on the host with that token (a setup token, sk-ant-oat…, or an Anthropic API key, sk-ant-api…; anything else is refused with \"Enter a Claude setup token or an Anthropic API key\" under the fields); under Folder only, \"Signed-in Claude folder\"; the accent button Sign in under Login (Use signed-in folder under Folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry \"Paste a token from claude setup-token or an API key\", Add account (usable once something is typed), Close. Tab goes from \"Account name\" to the box picked under the switcher (else the dialog's button), then the switcher, then Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
         "subscriptions.token_hint",
-        "subscriptions.save_account",
         "common.close",
         "subscriptions.claude_folder_hint",
         "subscriptions.use_folder",
@@ -137,15 +271,24 @@
         "sign_in.code_hint",
         "sign_in.checking_code",
         "sign_in.starting",
-        "common.send",
         "subscriptions.claude_failed",
         "subscriptions.no_claude",
-        "subscriptions.not_signed_in_folder"
+        "subscriptions.not_signed_in_folder",
+        "subscriptions.new_login",
+        "common.folder",
+        "common.continue",
+        "common.cancel",
+        "common.try_again",
+        "sign_in.signing_in",
+        "sign_in.failed",
+        "subscriptions.token_tab",
+        "subscriptions.add_account",
+        "subscriptions.enter_token"
       ],
       "decisions": [
         {
           "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
-          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token (or an API key) can also be pasted on any host (the Token tab), and is the only way where claude can't be guaranteed: a host without claude, and the phone as a host",
           "decided": "2026-11-25",
           "source": [
             {
@@ -153,18 +296,113 @@
               "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
             }
           ]
+        },
+        {
+          "said": "We need TOKEN auth in addition so -> Login | Token | Folder.",
+          "rule": "Every app's Add account dialog (Claude's and Codex's) has three tabs, Login | Token | Folder, Login picked when it opens. Token takes a pasted secret in a masked box, with one accent button, Add account, usable once something is typed: for Claude a long-lived token from claude setup-token or an Anthropic API key (told apart by its sk-ant-api start), for Codex an OpenAI API key. The host checks it (trimmed, non-empty, its known start) and says plainly why one is refused; it is kept only on the host, owner-only, and never said back on the wire, in listings, logs or meta. An API-key account's usage says it has no subscription limits instead of an error",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "cbf5d0ed-bd77-4270-ab92-65bc911f3f39"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Add Codex account dialog",
-      "shows": "Heading \"Add Codex account\"; \"Account name\"; \"Existing signed-in CODEX_HOME (optional)\"; its button Sign in with device code (Use signed-in profile once a folder is typed); Close. A device sign-in runs codex login --device-auth on the host and shows what it writes (the code and where to enter it) in the dialog; Close stops it.",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste an OpenAI API key\" and the accent button Add account (usable once something is typed), which adds the account on the host as a new CODEX_HOME of its own whose auth.json holds the key as codex login --with-api-key writes it (anything not starting sk- is refused with \"Enter an OpenAI API key\"); under Folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in under Login (Use signed-in profile under Folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it. Tab goes from \"Account name\" to the box picked under the switcher (else the dialog's button), then the switcher, then Close.",
       "copy": [
         "subscriptions.add_codex",
         "subscriptions.codex_home_hint",
-        "subscriptions.device_code",
+        "sign_in.sign_in",
         "subscriptions.use_profile",
-        "subscriptions.requesting_code"
+        "subscriptions.new_login",
+        "common.folder",
+        "subscriptions.token_tab",
+        "subscriptions.openai_key_hint",
+        "subscriptions.add_account",
+        "subscriptions.enter_openai_key"
+      ],
+      "parts": [
+        {
+          "name": "Codex sign-in card",
+          "shows": "In the dialog, under its fields, once Sign in is pressed (the dialog's own button gone while it's there): the card a chat's Sign in card is (LoginCard's: warning-bordered, a bold title, a line, then what can be done now), drawn from the sign-in's state as the host says it (accounts sign_in's login, a ChatLogin). The browser's, by default (codex login): waiting, \"Signing in to Codex…\" / dimmed \"Starting the sign-in…\"; once codex has said its page, the page's link as Claude's card has it: where the host is this machine's, the page opened in its browser at once (by codex itself on macOS, else by the app) and \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\"; another machine's and the phone's, \"Open the sign-in page to sign in.\" and a box \"Paste the address the browser ended on\" with Continue (the accent button, usable once an address is typed, and not while \"Checking the address…\" shows) (that address passed to the host, which asks codex's server on its own 127.0.0.1 for it; \"Checking the address…\", then why not, dimmed, if it wasn't taken). On Baude and Record, for another machine's host, this machine's 127.0.0.1 at the port codex took (1455, else 1457) is passed on to the host the same way while it runs, so the browser's own way back reaches it and nothing need be pasted (where that port's taken here, the box is the way). Under it, \"Use a device code instead\" and Cancel. The device code's (codex login --device-auth: on that button, or by itself where codex can't listen on either port): waiting, dimmed \"Requesting a device code…\"; then its page's link the same way, the one-time code large (bold monospace, .device-code: 1.8em; the phone's 26 px), selectable, with Copy (the accent button) beside it (\"Code copied\" once pressed), and Cancel. Signed in: \"Signed in to Codex\" / \"as <email>\" (the email its sign-in names; else the account's name); the dialog stays till Close. Failed: \"Sign-in didn't finish\" / dimmed what codex said last (an error line, else \"The Codex CLI did not complete sign-in\"), and Try Again (the browser's again), with \"Use a device code instead\" where the browser's failed; the fields can be changed again first.",
+          "copy": [
+            "subscriptions.codex_signing_in",
+            "sign_in.starting",
+            "subscriptions.requesting_code",
+            "sign_in.browser_opened",
+            "sign_in.open_page",
+            "sign_in.page_there",
+            "sign_in.open_page_there",
+            "subscriptions.address_hint",
+            "common.continue",
+            "subscriptions.checking_address",
+            "subscriptions.relay_busy",
+            "subscriptions.not_callback",
+            "subscriptions.no_sign_in",
+            "subscriptions.device_instead",
+            "common.copy",
+            "subscriptions.code_copied",
+            "common.cancel",
+            "subscriptions.codex_signed_in",
+            "sign_in.as_who",
+            "sign_in.failed",
+            "subscriptions.codex_failed",
+            "common.try_again"
+          ],
+          "actions": [
+            {
+              "by": "click the link",
+              "does": "Opens the sign-in page in this device's browser (on the host's own machine it's opened already, once, as the code comes)"
+            },
+            {
+              "by": "click Copy",
+              "does": "Puts the code on the clipboard; the button says \"Code copied\""
+            },
+            {
+              "by": "paste the address and click Continue (or press Enter)",
+              "does": "Passes the address the browser ended on to the host's sign-in, which requests it of codex's server on the host's 127.0.0.1; codex finishes, and the card says signed in or failed"
+            },
+            {
+              "by": "click Use a device code instead",
+              "does": "Stops the browser's sign-in and starts codex login --device-auth in its place"
+            },
+            {
+              "by": "click Cancel",
+              "does": "Lets go of the sign-in's connection, which stops codex login on the host (a new account's folder removed); the card goes and the dialog's fields and button come back"
+            },
+            {
+              "by": "click Try Again",
+              "does": "Signs in again as the dialog's button would (with a signed-in CODEX_HOME typed by then, that's added instead)"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "(BaudeInternal#262, paraphrased) the Codex device-code sign-in is poor next to Claude's: its link can't even be clicked",
+              "rule": "Every app shows a Codex device-code sign-in as a card the way it shows a chat's Claude sign-in: drawn from its state as the host says it (signing in, signed in, failed with codex's reason; never codex's raw output), the sign-in page as a link that can be clicked (opened at once in the browser where the host is the app's own machine), the one-time code large with Copy, and Cancel",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#262"
+                }
+              ]
+            },
+            {
+              "said": "Device code honestly seems like the \"oauth-token\" like approach, somethign to fallback to but not default",
+              "rule": "A Codex sign-in is codex login's browser sign-in by default, as Claude's is claude auth login; the device code (a beta that has to be switched on in ChatGPT's security settings) is the fallback: \"Use a device code instead\" in the card, and by itself where the browser's can't listen. For a host on another machine, the browser's way back to codex's 127.0.0.1 is passed on to the host: by this machine's own 127.0.0.1 where it can, else by pasting the address the browser ended on",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "bbf948bf-6104-465a-81a6-e58398927218"
+                }
+              ]
+            }
+          ]
+        }
       ]
     },
     {
@@ -185,9 +423,10 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code (its output in the dialog as it comes). Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the Claude sign-in card, as Add Claude account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
       "copy": [
-        "subscriptions.sign_in_heading"
+        "subscriptions.sign_in_heading",
+        "deps.copied"
       ]
     },
     {
@@ -204,11 +443,11 @@
   "states": [
     {
       "name": "loading",
-      "shows": "The groups' rows only once the host answers."
+      "shows": "The pills, cards and Add account only once the host answers."
     },
     {
       "name": "host unreachable",
-      "shows": "Each group's list holds the error the reach gave."
+      "shows": "Each group holds the error the reach gave, with no pill."
     },
     {
       "name": "phone picked beside New session",
@@ -232,7 +471,7 @@
     },
     {
       "said": "There needs to be a way of seeing claude sub usage in the app",
-      "rule": "Every app's Subscriptions page reads the default Claude account's usage when asked, and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
+      "rule": "Every app's Subscriptions page shows each Claude subscription's usage on its card, read by itself (see BaudeInternal#226's decision), and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
       "decided": "2026-11-24",
       "source": [
         {
@@ -291,6 +530,63 @@
       "source": [
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
+        }
+      ]
+    },
+    {
+      "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+      "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#226"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#279, paraphrased) Claude's sign-in shows Send beside Sign In, which is redundant; once sign-in has started, Sign In should give way to the next step (Continue, the accent button, where a code is needed), as Codex's does; both sign-in flows should make sense",
+      "rule": "Every app's Claude and Codex sign-ins (Add account, Sign In Again, and a chat's Sign in card) go one step at a time, the same shape for both: the dialog's own button (Sign in, or Use signed-in folder/profile) goes once sign-in starts, and the sign-in shows as a card (a bold title, a line, then what can be done now). At each step at most one button is the accent one, labelled for what it does next: Continue beside the code box (Claude, shown once the page's link is) or the address box (Codex), usable once something is typed and not while what was sent is checked; Copy beside a device code; Try Again once it failed; changing Login / Token / Folder after a failure puts the dialog's own button back in its place. No two buttons do the same thing; Cancel, Use a device code instead and Close are never the accent one. While the sign-in only waits on the browser, no button is the accent one",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#279"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#279, paraphrased) the existing folder path box is always shown though it's rarely filled in; a tab-like choice between New login and an existing folder would be better",
+      "rule": "Every app's Add account dialog (Claude's on a host with claude, and Codex's) puts a switcher under the account name: Login (first, picked when it opens), Token and Folder; the folder's path box shows only under Folder, the token's only under Token, and the dialog's button says Sign in, Add account or Use signed-in folder/profile to match; with Folder picked and its box empty, the button focuses the box",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#279"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#294, paraphrased) Tab in the Add Claude account dialog should move between the fields that matter, e.g. from the name to the token box",
+      "rule": "Every app's Add account dialog (Claude's and Codex's) moves Tab from the account name straight to the box picked under the switcher (the token's or the folder's), else the dialog's own button, never through Login | Token | Folder first; Shift+Tab goes the same way back. On the desktop the switcher's three tabs come after the dialog's button, before Close; the phone's switcher is picked by touch and is not a Tab stop",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#294"
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "Current Subscription row in Settings → Subscriptions",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner (BaudeInternal#278, paraphrased): a host-wide default subscription is redundant now that each chat picks its own in its provider picker. New chats take the picker's last pick",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#278"
         }
       ]
     }

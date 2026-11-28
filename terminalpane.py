@@ -37,12 +37,19 @@ class TerminalPane(Gtk.Box):
         if page := self.tabs.get_selected_page():
             self.tabs.close_page(page)
 
-    def open(self, where=None, name=None):
-        """A new terminal on where (the host picked, if none): its login shell there."""
+    def open(self, where=None, name=None, attach=None):
+        """A new terminal on where (the host picked, if none): its login shell there; attach: the one there by that
+        id, attached to (its tab, if one's open here already, picked)."""
         import multiplexterm
         if where is None:
             where, name = self.host()
-        term = multiplexterm.HostedTerminal(where, host_name=name, on_exit=self._ended,
+        if attach is not None:
+            for i in range(self.tabs.get_n_pages()):
+                page = self.tabs.get_nth_page(i)
+                if getattr(page.get_child(), "host_id", None) == attach:
+                    self.tabs.set_selected_page(page)
+                    return page.get_child()
+        term = multiplexterm.HostedTerminal(where, attach=attach, host_name=name, on_exit=self._ended,
                                             on_title=self._titled, on_close=self._finish)
         multiplexterm.Terminals.get(wire.HEAD_CLIENT).add(term)
         page = self.tabs.append(term)
@@ -154,22 +161,44 @@ class TerminalView(Gtk.Box):
         term = self.pane.current()
         self.host_label.set_label((term.host_name or "") if term is not None else "")
 
-    def open(self):
-        """Shown, with a terminal on the host picked if it has none; or, out, its window brought up."""
+    def open(self, where=None, name=None):
+        """Shown (or, out, its window brought up) on a terminal of yours on where (the host picked, if none): on_host."""
         import multiplexterm
         if (dep := multiplexterm.missing()) is not None:  # (no terminals: what's missing shown in their place)
             self.show_missing(dep)
             return
         if self.window is not None:
             self.window.present()
-            if self.pane.tabs.get_n_pages() == 0:
-                self.pane.open()
-            return
-        self.set_visible(True)
-        if self.pane.tabs.get_n_pages() == 0:
-            self.pane.open()
         else:
-            self.pane._focus()
+            self.set_visible(True)
+        self.on_host(*((where, name) if where is not None else self.pane.host()))
+
+    def on_host(self, where, name):
+        """A terminal of yours on where shown: the one shown if it's that, else another there, else a new one. Yours:
+        opened here (not one attached to, a Bot's), no Bot at its tools, its program still running."""
+        def yours(term):
+            return getattr(term, "host_where", None) == where and getattr(term, "attach_to", None) is None and \
+                term.bot is None and term.status is None and not getattr(term, "stopped", False)
+        tabs = self.pane.tabs
+        current = self.pane.current()
+        if current is not None and yours(current):
+            return self.pane._focus()
+        for i in range(tabs.get_n_pages()):
+            if yours(tabs.get_nth_page(i).get_child()):
+                return tabs.set_selected_page(tabs.get_nth_page(i))
+        self.pane.open(where, name)
+
+    def show(self, where, name, tid):
+        """Shown on the terminal tid on where (named name): its tab, or one attached to it."""
+        import multiplexterm
+        if (dep := multiplexterm.missing()) is not None:
+            self.show_missing(dep)
+            return
+        if self.window is not None:
+            self.window.present()
+        else:
+            self.set_visible(True)
+        self.pane.open(where, name, attach=tid)
 
     def show_missing(self, dep):
         """VTE isn't here: the view shown with what to install in place of its tabs, and nothing to open."""

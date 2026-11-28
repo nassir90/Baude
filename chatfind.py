@@ -14,7 +14,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import wording  # noqa: E402
-from widgets import accent_rgba, focus_shown, walk, watch_style  # noqa: E402
+from widgets import accent_rgba, focus_shown, insert_actions, walk, watch_style  # noqa: E402
 from chatparts import FindBar, SummaryPin  # noqa: E402
 
 
@@ -418,7 +418,7 @@ class ChatSelection:
             action.connect("activate", lambda _a, _p, fn=fn: fn())
             group.add_action(action)
             menu.append(label, f"chat-text.item{i}")
-        self.root.insert_action_group("chat-text", group)
+        insert_actions(self.root, "chat-text", group)
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False)
         pop.set_parent(self.root)
         x, y = self._in(self.root)

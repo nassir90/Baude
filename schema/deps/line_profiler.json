@@ -1,5 +1,5 @@
 {
-  "description": "line_profiler (4 or later), which times each line of the functions profiled from Settings → Telemetry or telemetry_set, in the host process and in Baude and Record. Nothing else needs it: without it, nothing is profiled.",
+  "description": "line_profiler (4 or later), which times each line of the functions each process profiles (lineprofile.DEFAULTS, or what telemetry_set names) while Line Profiling is on in Settings → Telemetry, in the host process and in Baude and Record. Nothing else needs it: without it, nothing is profiled.",
   "name": "line_profiler",
   "where": "host",
   "needed_by": ["telemetry.line_profiling"],

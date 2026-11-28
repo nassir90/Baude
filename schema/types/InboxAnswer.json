@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "How an ask was answered: the button pressed and the form's values.",
+  "properties": {
+    "button": {
+      "type": "integer",
+      "description": "The button's index."
+    },
+    "label": {
+      "type": "string",
+      "description": "The button's label."
+    },
+    "values": {
+      "type": "object",
+      "description": "The form's values, checked against its fields."
+    },
+    "by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A Bot's name, if a Bot answered it (sent to it, or the asking task's); none: a person."
+    },
+    "at": {
+      "type": "number",
+      "description": "When (seconds since the epoch)."
+    }
+  },
+  "required": [
+    "button",
+    "label",
+    "values",
+    "at"
+  ],
+  "additionalProperties": false
+}

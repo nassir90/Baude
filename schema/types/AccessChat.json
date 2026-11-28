@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's own rules for managing it, each going before its host's of the same name; one not there is the host's. Checked as a pair: write lets in only those read does, whatever the host's rules are.",
+  "properties": {
+    "manage_read": {
+      "$ref": "AccessRule.json",
+      "description": "Who may read it."
+    },
+    "manage_write": {
+      "$ref": "AccessRule.json",
+      "description": "Who may change it (and read it)."
+    }
+  },
+  "additionalProperties": false
+}

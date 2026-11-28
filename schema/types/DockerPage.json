@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A page of the Docker view: what one of its sidebar's rows lists.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its name, as the sidebar has it."
+    },
+    "key": {
+      "type": "string",
+      "description": "What it's asked for by: running, containers, images, volumes, networks or compose."
+    },
+    "what": {
+      "type": "string",
+      "description": "What it lists, in a word for a count: containers, images…"
+    }
+  },
+  "required": [
+    "title",
+    "key"
+  ],
+  "additionalProperties": false
+}

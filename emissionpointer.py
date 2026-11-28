@@ -16,7 +16,7 @@ class BotPointer:
     it): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played in turn.
     It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
     takes it pressed along its path, a scroll shows the wheel's way (a chevron going that way). It fades once the Bot's
-    let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or
+    let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at Emission's tools (acting) or
     its pointer's moving (gliding, pressing, dragging, scrolling), and out once neither is, GLOW_HOLD_S after.
     look(now) says what's to be drawn then (now: time.monotonic())."""
     # (a glide's time: the shortest, the longest; about a second for 1500 px between)
@@ -36,6 +36,7 @@ class BotPointer:
         self.moved = -1e9  # (when its pointer last moved: the glow's held on till GLOW_HOLD_S after)
         self.tab = None  # (the tab it was last in: hosted, drawn over that tab's page only)
         self.log, self.seq = [], 0  # (what was done, numbered: watchers' to play, in the watch's state)
+        self.changed = None  # (told as something's to be moved or drawn anew: a hosted page's frames start then)
 
     def add(self, kind, x, y, tab=None, path=None, count=1, dx=0, dy=0, played=True):
         """What the Bot did: kind hover, click, drag or scroll, at x, y (a drag's path from there); played False:
@@ -82,9 +83,14 @@ class BotPointer:
                     self.pressed = bool(what)
             self.step = None
         self.seen = self.moved = time.monotonic()
+        if self.changed is not None:
+            self.changed()
 
     def set_acting(self, on):
-        self.acting = bool(on)
+        if bool(on) != self.acting:
+            self.acting = bool(on)
+            if self.changed is not None:
+                self.changed()
 
     def busy(self):
         """Whether anything's moving, or about to (the glow's hold after the pointer's last move running out): else
@@ -97,7 +103,7 @@ class BotPointer:
         return bool(self.steps or self.step or self.marks)
 
     def glowing(self, now=None):
-        """Whether the glow's wanted: the Bot's at its tools, or its pointer's moving or just has."""
+        """Whether the glow's wanted: the Bot's at Emission's tools, or its pointer's moving or just has."""
         return self.acting or self.moving() or (now or time.monotonic()) - self.moved < self.GLOW_HOLD_S
 
     def shown(self, now=None):

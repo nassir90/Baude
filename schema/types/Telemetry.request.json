@@ -18,9 +18,10 @@
       "enum": [
         "baude",
         "record",
-        "phone"
+        "phone",
+        "emission"
       ],
-      "description": "The app it's of: Baude, Record, or the phone's app."
+      "description": "The app it's of: Baude, Record, the phone's app, or Emission (its errors only)."
     },
     "pid": {
       "type": "integer",
@@ -50,6 +51,38 @@
         "null"
       ],
       "description": "Why it isn't profiling what it's told to, if it isn't."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the app runs (its first 12 characters), as it started: kept on each of its rows."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the app speaks: kept on each of its rows."
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryError.json"
+      },
+      "description": "Its errors since it last told, each once by its fingerprint with how many times it happened (added to what the host keeps of it)."
+    },
+    "counters": {
+      "anyOf": [
+        {
+          "$ref": "TelemetryCounters.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it counted since it last told them (about once a minute)."
     }
   },
   "required": [

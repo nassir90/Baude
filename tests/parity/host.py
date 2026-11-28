@@ -35,13 +35,16 @@ def fixes_env(tmp):
 
 
 def kube(msg):
-    """kube: tests/fake_kubectl.py's cluster k3d-dev, read as hostkube.py reads a real one."""
+    """kube: tests/fake_kubectl.py's clusters (k3d-dev, prod, crowded), read as hostkube.py reads a real one."""
     import kube_fixture
     from baudelib import hostkube
-    os.environ.update(KUBECONFIG=kube_fixture.make_kubeconfig(os.path.join(tempfile.mkdtemp(dir="/tmp"), "kubeconfig")),
+    os.environ.update(KUBECONFIG=kube_fixture.make_kubeconfig(os.path.join(tempfile.mkdtemp(dir="/tmp"), "kubeconfig"),
+                                                              crowded=True),
                       BAUDE_KUBECTL=os.path.join(TESTS, "fake_kubectl.py"), BAUDE_HELM=os.path.join(TESTS, "fake_kubectl.py"))
     for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE", "BAUDE_KUBE_FAULT"):
         os.environ.pop(k, None)
+    if msg.get("what") == "summary":  # (a process a request: Home's history as the desktop scene's)
+        kube_fixture.seed_home_history(msg.get("context") or "k3d-dev")
     return hostkube.answer(None, msg)
 
 
@@ -60,6 +63,15 @@ def databases(msg):
     return hostdb.answer(None, msg)
 
 
+def docker(msg):
+    """docker: tests/fake_docker.py's colima, read as hostdocker.py reads a real one."""
+    from baudelib import hostdocker
+    os.environ["BAUDE_DOCKER"] = os.path.join(TESTS, "fake_docker.py")
+    for k in ("FAKE_DOCKER_FOLLOW", "FAKE_DOCKER_STATE"):
+        os.environ.pop(k, None)
+    return hostdocker.answer(None, msg)
+
+
 def main():
     msg = json.load(sys.stdin)
     tmp = tempfile.mkdtemp(prefix="parity-host-", dir="/tmp")
@@ -70,6 +82,8 @@ def main():
             reply = hostfixes.answer(None, msg)
         elif msg.get("op") == "kube":
             reply = kube(msg)
+        elif msg.get("op") == "docker":
+            reply = docker(msg)
         elif msg.get("op") == "databases":
             reply = databases(msg)
         else:

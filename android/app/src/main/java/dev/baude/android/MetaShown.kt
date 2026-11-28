@@ -40,7 +40,8 @@ import java.util.Locale
  * value, what a value must be, and its row. */
 class MetaSetting(val name: String, val title: () -> String, val get: () -> Any, val takes: () -> String,
                   val coerce: (Any?) -> Any, val put: (Any) -> Unit, val note: String? = null, val metaSets: Boolean = true,
-                  val row: @Composable (String?, (@Composable () -> Unit)?) -> Unit)
+                  val row: @Composable (String?, (@Composable () -> Unit)?) -> Unit,
+                  val changed: ((Any?) -> List<String>)? = null, val hostRows: (@Composable (List<String>) -> Unit)? = null)
 
 /** A number as Settings shows a scale: two places, the zeros after the point left off (widgets.fmt_scale). */
 fun fmtScale(v: Double): String = String.format(Locale.ROOT, "%.2f", v).trimEnd('0').let { if (it.endsWith(".")) it + "0" else it }
@@ -153,7 +154,137 @@ object MetaSet {
                     HomePrefs.save()
                 }
             }),
-    )
+    ).apply { for (rule in PhoneAccess.RULES) put("access_$rule", MetaAccess.setting(rule)) }
+}
+
+/** Meta's access_<rule> settings (accessview.meta_settings: each of PhoneAccess.RULES, a split capability's read and
+ * write each a setting): the rules of every host the phone reaches that has them, as each last said them (asked again
+ * as they're read, the answers there for the next read), said "<host>: <rule>; ..." and shown as a row for each host,
+ * titled "<host> / <capability>" (its capability's: both rules of a split one). Meta may set a rule itself
+ * only to a narrower one ("<host>: <who>[: names]", or "<who>" for the host Meta runs on); a wider one is the user's,
+ * on its row. Nothing here waits for a host: each is asked, and its answer kept, off the main thread. */
+object MetaAccess {
+    private val states = androidx.compose.runtime.mutableStateMapOf<String, JSONObject>() // (a host's id: its AccessState)
+    private val ORDER = listOf("nobody", "chosen", "everybody")
+
+    private fun hosts(): List<Pair<String, String>> = Mesh.reached(Op.ACCESS)
+
+    private fun ask(h: String) = Mesh.ask(h, Msg.Access().json()) { r -> r.optJSONObject("state")?.let { states[h] = it } }
+
+    private fun ids(rule: JSONObject?) = rule?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+
+    private fun names(st: JSONObject) = st.optJSONArray("members")?.let { m ->
+        (0 until m.length()).associate { m.getJSONObject(it).let { x -> x.optString("id") to x.optString("name") } } }.orEmpty()
+
+    private fun ruleSaid(st: JSONObject?, cap: String): String {
+        val rule = st?.optJSONObject("rules")?.optJSONObject(cap) ?: return "unknown"
+        if (rule.optString("who") != "chosen") return rule.optString("who")
+        val named = names(st)
+        return "chosen: " + ids(rule).joinToString(", ") { named[it] ?: it.take(8) }
+    }
+
+    private fun said(cap: String): String {
+        val hs = hosts()
+        for ((h, _) in hs) ask(h)
+        return hs.joinToString("; ") { (h, label) -> "$label: ${ruleSaid(states[h], cap)}" }.ifEmpty { "unknown" }
+    }
+
+    /** Is rule no wider than was: everybody, then chosen (fewer members, narrower), then nobody? */
+    private fun narrower(was: JSONObject?, rule: JSONObject): Boolean {
+        val a = ORDER.indexOf(was?.optString("who") ?: "everybody")
+        val b = ORDER.indexOf(rule.optString("who"))
+        if (b == 1 && a == 1) return ids(was).containsAll(ids(rule))
+        return b < a || b == a || b == 1 && ids(rule).isEmpty()
+    }
+
+    /** value read: each host's rule it names, by the host's id (unknown: left as it is). */
+    private fun parse(cap: String, value: Any?): Map<String, JSONObject> {
+        val out = LinkedHashMap<String, JSONObject>()
+        val hs = hosts()
+        for (part in value?.toString().orEmpty().split(";").map { it.trim() }.filter { it.isNotEmpty() }) {
+            val t = part.split(":", limit = 3).map { it.trim() }
+            val (h, rest) = if (t[0].lowercase() in PhoneAccess.WHO + "unknown") (metaHost()
+                ?: throw IllegalArgumentException("access_$cap: Meta's host isn't connected")) to t
+            else (hs.firstOrNull { it.second.equals(t[0], true) || it.first == t[0] }?.first
+                ?: throw IllegalArgumentException("access_$cap: no host '${t[0]}': ${hs.joinToString(", ") { it.second }}")) to t.drop(1)
+            val who = rest.getOrNull(0)?.lowercase() ?: throw IllegalArgumentException("access_$cap: <host>: everybody|nobody|chosen[: names]")
+            if (who == "unknown") continue
+            if (who !in PhoneAccess.WHO) throw IllegalArgumentException("access_$cap is everybody, nobody or chosen: <names>")
+            val st = states[h] ?: throw IllegalArgumentException("access_$cap: that host's rules aren't known yet; ask again")
+            val named = names(st)
+            val members = if (who != "chosen") null else rest.getOrNull(1).orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                .map { n -> named.entries.firstOrNull { it.value.equals(n, true) || it.key == n }?.key
+                    ?: throw IllegalArgumentException("access_$cap: no member '$n' on that host: ${named.values.joinToString(", ")}") }
+            out[h] = Msg.AccessRule(who = who, members = members).json()
+        }
+        return out
+    }
+
+    /** value as it'd be with what's given set: each host's rule, only narrower ones. */
+    private fun coerce(cap: String, value: Any?): String {
+        val given = parse(cap, value)
+        for ((h, rule) in given) if (!narrower(states[h]?.optJSONObject("rules")?.optJSONObject(cap), rule))
+            throw IllegalArgumentException("only narrower: show its row for the user to widen")
+        return hosts().joinToString("; ") { (h, label) ->
+            val st = states[h]
+            "$label: " + (given[h]?.let { r -> ruleSaid(st?.let { JSONObject(it.toString()).put("rules", JSONObject().put(cap, r)) }, cap) }
+                ?: ruleSaid(st, cap))
+        }
+    }
+
+    private fun send(h: String, cap: String, rule: JSONObject?) =
+        Mesh.ask(h, Msg.AccessSet(capability = cap, rule = null).json().put("rule", rule)) { r ->
+            if (r.optString("op") == Op.ERROR) toast(Wording.Access.failed(why = Msg.Error.from(r).said.orEmpty()))
+            r.optJSONObject("state")?.let { states[h] = it }
+        }
+
+    fun setting(cap: String) = MetaSetting("access_$cap", {
+        Wording.Access.setting(host = hosts().joinToString(", ") { it.second }.ifEmpty { Wording.NewSession.host },
+            capability = PhoneAccess.named(cap))
+    }, { said(cap) }, { "<host>: everybody|nobody|chosen: <names>; ..." }, { v -> coerce(cap, v) },
+        { v ->
+            for ((h, rule) in parse(cap, v)) {
+                val was = states[h]?.optJSONObject("rules")?.optJSONObject(cap)
+                if (!narrower(was, rule)) throw IllegalArgumentException("only narrower: show its row for the user to widen")
+                if (was?.toString() != rule.toString()) send(h, cap, rule)
+            }
+        },
+        "who in the mesh may use it, on each host; Meta may narrow a rule, the user widens one on its row",
+        row = { _, _ -> Rows(cap, null) }, changed = { v -> changed(cap, v) }, hostRows = { only -> Rows(cap, only) })
+
+    /** The hosts whose rule value changes (all it names, where it changes none, unknown ones too). */
+    private fun changed(cap: String, value: Any?): List<String> {
+        val given = parse(cap, value)
+        return given.filter { (h, rule) -> states[h]?.optJSONObject("rules")?.optJSONObject(cap)?.toString() != rule.toString() }
+            .keys.toList().ifEmpty { given.keys.toList() }.ifEmpty { named(value) }
+    }
+
+    /** The hosts value names, by id, whatever their parts say (one with no host: Meta's own). */
+    private fun named(value: Any?): List<String> {
+        val hs = hosts()
+        return value?.toString().orEmpty().split(";").map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { part ->
+            val first = part.split(":", limit = 2)[0].trim()
+            if (first.lowercase() in PhoneAccess.WHO + "unknown") metaHost()
+            else hs.firstOrNull { it.second.equals(first, true) || it.first == first }?.first
+        }.distinct()
+    }
+
+    /** A row for each host (only: those hosts'), titled "<host> / <capability>". */
+    @Composable
+    private fun Rows(cap: String, only: List<String>?) {
+        Column {
+            for ((h, _) in hosts()) {
+                if (only != null && h !in only) continue
+                androidx.compose.runtime.LaunchedEffect(h, cap) { ask(h) }
+                val st = states[h] ?: continue
+                val whole = PhoneAccess.capability(cap)
+                AccessRule(whole, null, st,
+                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(whole))) { name, rule ->
+                    send(h, name, rule)
+                }
+            }
+        }
+    }
 }
 
 /** Meta's look for what it shows (.meta-ui): rows in a tool card's outline, no fill, a rule between them. */
@@ -218,7 +349,7 @@ fun MarkNote(mark: Mark?) {
 @Composable
 fun FootButton(label: String, tip: String, text: Color, onClick: () -> Unit) {
     Text(label, style = Type.caption, color = text, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(4.dp)).tip(tip, onClick).padding(horizontal = 4.dp))
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).tip(tip, onClick.tapping(label, tip)).padding(horizontal = 4.dp))
 }
 
 /** The foot of Meta's page, as its box's status line: Clear, Copy, the working dots, the context meter. */
@@ -265,7 +396,7 @@ fun metaSendTip(): String {
 @Composable
 fun BarButton(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp),
+    Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick.tapping(label)).padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center) {
         Text(label, style = Type.bold, color = c.fg)
     }

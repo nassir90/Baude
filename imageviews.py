@@ -22,7 +22,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Graphene, Gsk, Gtk, Pa
 
 import pointers  # noqa: E402
 from baudelib import wording  # noqa: E402
-from widgets import IMAGE_POOL, fit_size, image_dims, scaled_texture, screen_scale, toast  # noqa: E402
+from widgets import IMAGE_POOL, fit_size, image_dims, insert_actions, scaled_texture, screen_scale, toast  # noqa: E402
 
 
 class Fade:
@@ -771,7 +771,7 @@ def make_image_interactive(widget, data, path=None, name=None, url=None):
         a = Gio.SimpleAction.new(action, None)
         a.connect("activate", lambda *_, fn=fn: fn())
         group.add_action(a)
-    widget.insert_action_group("img", group)
+    insert_actions(widget, "img", group)
     menu = Gio.Menu()
     menu.append(wording.say("common.view"), "img.view")
     if url:

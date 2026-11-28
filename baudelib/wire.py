@@ -196,7 +196,10 @@ SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long withou
 OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: the tunnel's this long to open)
 UNSUPPORTED = "unsupported_operation"  # (the schema's own refusals: their codes, and what each says)
 INVALID = "invalid_data_type"
-SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
+DENIED = "access_denied"  # (one a host's access rules refuse: baudelib.access)
+STALE = "stale_draft"  # (a draft written before its last send: not kept, so what was sent doesn't come back)
+SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type", DENIED: "access denied",
+        STALE: "written before the last send"}
 
 
 def takes(info, op):
@@ -411,7 +414,7 @@ TAKEN = frozenset(DEFS[n]["properties"]["op"]["const"] for n in MESSAGES if KIND
 
 
 def refused(code, req=None, detail=None):
-    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+    """One of the schema's own refusals (UNSUPPORTED, INVALID, DENIED), for request req: an error, the same from every host,
     and what was wrong (detail)."""
     return {"op": "error", "req": req, "error": SAID[code], "code": code, **({"detail": detail} if detail else {})}
 
@@ -830,11 +833,12 @@ def own_dir(path):
     return path
 
 
-def _hello(ch, timeout, what, here=False):
-    """(channel, the server's info) past hello, or OSError: what didn't answer. here: by its socket, on its machine."""
+def _hello(ch, timeout, what, here=False, as_=None):
+    """(channel, the server's info) past hello, or OSError: what didn't answer. here: by its socket, on its machine;
+    as_: from that chat there (a chat's own tools: hello's as)."""
     ch.sock.settimeout(timeout)
     ch.send({"op": "hello", "client": HEAD_CLIENT, "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {}),
-             **({"here": True} if here else {})})
+             **({"here": True} if here else {}), **({"as": as_} if as_ else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()
@@ -853,8 +857,9 @@ def own_socket(path):
         raise OSError(f"{path} isn't this user's own: not connected to")
 
 
-def connect_local(path=None, timeout=5.0):
-    """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given)."""
+def connect_local(path=None, timeout=5.0, as_=None):
+    """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given); as_:
+    hello's as."""
     path = path or socket_path()
     own_socket(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -864,7 +869,7 @@ def connect_local(path=None, timeout=5.0):
     except OSError:
         sock.close()
         raise
-    return _hello(Channel.over(sock), timeout, path, here=True)
+    return _hello(Channel.over(sock), timeout, path, here=True, as_=as_)
 
 
 def is_dest(dest):
@@ -968,12 +973,13 @@ def connect_mesh(host, path=None, timeout=5.0, as_=None, meta=False, agent=None)
 
 def reach(where, timeout=5.0, as_=None, meta=False, agent=None):
     """(channel, info) for a host process wherever it is (where: see this module's docstring); as_, meta, agent:
-    through the mesh, relay's as, as_meta and as_agent (on this machine, a request's own says it)."""
+    through the mesh, relay's as, as_meta and as_agent (on this machine, as_ is hello's as; a request's own says the
+    rest)."""
     via = (where or {}).get("via")
     if via == "local":
-        return connect_local(None, timeout)
+        return connect_local(None, timeout, as_)
     if via == "unix":
-        return connect_local(where["path"], timeout)
+        return connect_local(where["path"], timeout, as_)
     if via == "ssh":
         return connect_ssh(where["dest"], bool(where.get("strict")), max(timeout, 3.0))
     if via == "mesh":
@@ -1000,13 +1006,19 @@ SENDER_KINDS = ("bot", "chat", "subagent", "host")  # (who a message to a sessio
 _SENDER = re.compile(r'\A<baude-sender((?: [a-z_]+="[^"<>]*")*)>[^<]*</baude-sender>(?:\n\n|\n|\Z)')
 
 
+SENDER_OVER = ("finished", "stopped", "failed")  # (how a turn of a chat a task's run started ended: Sender's over)
+
+
 def clean_sender(sender):
-    """A sender as it's kept and said ({kind, name, host, host_name, session}: words, cut short), or None if it isn't
-    one."""
+    """A sender as it's kept and said ({kind, name, host, host_name, session, and a task's run's: bot, task, task_name,
+    run, over}: words, cut short), or None if it isn't one."""
     if not isinstance(sender, dict):
         return None
-    out = {k: " ".join(str(sender[k]).split())[:120] for k in ("name", "host", "host_name", "session")
+    out = {k: " ".join(str(sender[k]).split())[:120]
+           for k in ("name", "host", "host_name", "session", "bot", "task", "task_name", "run")
            if isinstance(sender.get(k), str) and sender[k].strip()}
+    if sender.get("over") in SENDER_OVER:
+        out["over"] = sender["over"]
     out["kind"] = sender.get("kind") if sender.get("kind") in SENDER_KINDS else "host"
     return out
 
@@ -1023,6 +1035,35 @@ def sender_name(sender):
     return wording.say("senders.on", who=who, where=where) if where and kind != "host" else who
 
 
+def sender_run(sender):
+    """The task's run a sender names, as its from line links it: (the run's Bot's session, its task, its run) on the
+    sender's host, or None. A task's own (a host sender) names its Bot by its session; a chat the run started names
+    it as its bot."""
+    if not sender.get("run") or not (sender.get("bot") or sender.get("session")):
+        return None
+    return sender.get("bot") or sender["session"], sender.get("task") or "", sender["run"]
+
+
+def sender_about(sender):
+    """What a from line says after who it's from, for a chat a task's run started: ["<task> run", "finished"]."""
+    out = []
+    if sender.get("task_name") and sender.get("run"):
+        out.append(wording.say("senders.task_run", task=sender["task_name"]))
+    if sender.get("over") in SENDER_OVER:
+        out.append(wording.say(f"task_notes.{sender['over']}"))
+    return out
+
+
+def from_task(here=True):
+    """What a start made inside a task's run carries, from the run's environment (baudelib/tasks.py): its Bot, so the
+    chat nests under it (spawned_by), and, on the run's own host (here), the run itself (task_run), which keeps the
+    chat in its record and tells its Bot as the chat's first turn ends. {} outside a task's run."""
+    bot, run, token = (os.environ.get(k) for k in ("BAUDE_SPAWNED_BY", "BAUDE_TASK_RUN", "BAUDE_TASK_TOKEN"))
+    if not is_id(bot or ""):
+        return {}
+    return {"spawned_by": bot, **({"task_run": {"run": run, "token": token}} if here and run and token else {})}
+
+
 def said_by(sender, content):
     """A user message's content (text, or blocks) as from sender, not the session's user, for its agent: its first
     line says so, in a tag, then a blank line and what was said. (Heads draw who it's from from the host's sender
@@ -1032,8 +1073,13 @@ def said_by(sender, content):
     if sender is None:
         return content
     attrs = "".join(f' {k}="{html.escape(v, quote=True)}"' for k, v in sender.items())
+    about = ""
+    if sender.get("task_name") and sender.get("run"):  # (a chat a task's run started: which, and how its turn ended)
+        how = {"finished": "it finished", "stopped": "it was stopped", "failed": "it failed"}.get(sender.get("over"))
+        about = (f". Your task “{sender['task_name']}” started that chat in its run {sender['run']}"
+                 + (f"; {how}, and this is what it said" if how else ""))
     head = (f"<baude-sender{attrs}>A message from {html.escape(sender_name(sender), quote=False)}, not from your user"
-            f"</baude-sender>\n\n")
+            f"{html.escape(about, quote=False)}</baude-sender>\n\n")
     if isinstance(content, str):
         return head + content
     blocks = list(content or [])

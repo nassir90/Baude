@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """A stand-in for kubectl (and helm) for the Kubernetes view's tests: a made-up cluster per context, answered the way
 kubectl answers. k3d-dev has a metrics API and one node; prod has neither a metrics API nor just one node, but has
-KEDA (its custom resources, which k3d-dev doesn't serve). Every call
+KEDA (its custom resources, which k3d-dev doesn't serve); crowded has fifteen namespaces on twelve nodes, a metrics API, and
+limits 2.3 times what its nodes can give pods. Every call
 is logged ($FAKE_KUBECTL_LOG), so the tests can check which commands ran (only reading ones, but for the deletes they
 confirm), and that a Secret's values were never asked for. A test can hold a context's answers back, or take its
-cluster down ($FAKE_KUBECTL_HOLD).
+cluster down ($FAKE_KUBECTL_HOLD). With $KUBECONFIG, its contexts are the ones there are, as a test adds and deletes
+them (each but prod a cluster like k3d-dev); a context that isn't there, or a file cut off as it's written, fails as
+kubectl does, and so does --server naming another server than its cluster's (nothing answers there).
 
 `logs` prints a few lines of a pod's container (its previous run's with --previous); with -f it then waits to be
 stopped, printing a line every $FAKE_KUBECTL_FOLLOW seconds if that's set (and never for more than two minutes).
-`exec -it` is a shell (this machine's sh) in the pod. `delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
+`exec -it` is a shell (this machine's sh) in the pod; `exec POD -- COMMAND` runs COMMAND here. `delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
 afterwards, or gone if it was forced."""
 import json
 import os
+import re
 import sys
 import time
 
@@ -36,43 +40,64 @@ def ctr(name="main", ready=True, restarts=0, waiting=None, exited=None, restarte
     return out
 
 
+def res(requests=None, limits=None):
+    """A container's resources: requests and limits, each (cpu, memory), either left out where it's None."""
+    out = {}
+    for key, pair in (("requests", requests), ("limits", limits)):
+        if pair:
+            out[key] = {k: v for k, v in zip(("cpu", "memory"), pair) if v is not None}
+    return out
+
+
 def pod(name, ns, minutes, phase="Running", containers=None, init=(), deleting=False, reason=None,
-        owner=("ReplicaSet", "web-7d9f")):
+        owner=("ReplicaSet", "web-7d9f"), resources=None):
+    """resources: each container's (res), by its name, init ones too."""
     containers = containers or [ctr()]
+    resources = resources or {}
     status = {"phase": phase, "containerStatuses": containers}
-    spec = {"nodeName": "node-1", "containers": [{"name": c["name"]} for c in containers]}
+    spec = {"nodeName": "node-1", "containers": [{"name": c["name"], "resources": resources.get(c["name"], {})}
+                                                 for c in containers]}
     if init:
-        status["initContainerStatuses"], spec["initContainers"] = list(init), [{"name": c["name"]} for c in init]
+        status["initContainerStatuses"], spec["initContainers"] = list(init), [
+            {"name": c["name"], "resources": resources.get(c["name"], {})} for c in init]
     if reason:
         status["reason"] = reason
     meta = {"name": name, "namespace": ns, "creationTimestamp": ts(minutes), "resourceVersion": "1",
-            "ownerReferences": [{"kind": owner[0], "name": owner[1]}] if owner else []}
+            "ownerReferences": [{"kind": owner[0], "name": owner[1]}] if owner else [],
+            **({"labels": {"app": owner[1].rsplit("-", 1)[0]}} if owner else {})}  # (web-7d9f's: app=web)
     if deleting:  # (each change a new resourceVersion, as the API server's: the watch tells changes by it; compared
         meta["deletionTimestamp"], meta["resourceVersion"] = ts(0), "2"  # whole, two processes' clocks differed)
     return {"metadata": meta, "spec": spec, "status": status}
 
 
+# (what they ask for and are held to: web's three pods alike; worker's memory limit and no CPU limit; the finished
+# and evicted pods' ask nothing of the node any more; api's init container asks for more CPU than its two containers)
+WEB = {"main": res(("100m", "128Mi"), ("500m", "256Mi"))}
 PODS = [
-    pod("web-7d9f-abcde", "shop", 5),
-    pod("web-7d9f-fghij", "shop", 3 * 24 * 60, containers=[ctr(restarts=2, restarted=20)]),  # (ready again lately)
+    pod("web-7d9f-abcde", "shop", 5, resources=WEB),
+    pod("web-7d9f-fghij", "shop", 3 * 24 * 60, containers=[ctr(restarts=2, restarted=20)],  # (ready again lately)
+        resources=WEB),
     pod("worker-5c4b-klmno", "jobs", 90, containers=[ctr(ready=False, restarts=7, waiting="CrashLoopBackOff")],
-        owner=("ReplicaSet", "worker-5c4b")),
+        owner=("ReplicaSet", "worker-5c4b"), resources={"main": res(("500m", "512Mi"), (None, "1Gi"))}),
     pod("batch-1-xyz", "jobs", 30, phase="Succeeded", containers=[ctr(ready=False, exited=("Completed", 0))],
-        owner=("Job", "batch-1")),
-    pod("old-web-pqrst", "shop", 600, deleting=True),
+        owner=("Job", "batch-1"), resources={"main": res(("200m", "256Mi"), ("1", "512Mi"))}),
+    pod("old-web-pqrst", "shop", 600, deleting=True, resources=WEB),
     pod("evicted-uvwxy", "jobs", 2000, phase="Failed", reason="Evicted",
-        containers=[ctr(ready=False, exited=("ContainerStatusUnknown", 137))]),
+        containers=[ctr(ready=False, exited=("ContainerStatusUnknown", 137))],
+        resources={"main": res(("1", "2Gi"), ("2", "4Gi"))}),
     pod("api-6f7c-mnopq", "shop", 2, containers=[ctr("api", ready=False), ctr("proxy")],  # (starting: api isn't ready)
-        init=[ctr("migrate", ready=False, exited=("Completed", 0))], owner=("ReplicaSet", "api-6f7c")),
+        init=[ctr("migrate", ready=False, exited=("Completed", 0))], owner=("ReplicaSet", "api-6f7c"),
+        resources={"api": res(("200m", "256Mi"), ("1", "512Mi")), "proxy": res(("50m", "64Mi")),
+                   "migrate": res(("300m", "128Mi"))}),
 ]
 METRICS = {"web-7d9f-abcde": ("250m", "128Mi"), "web-7d9f-fghij": ("1500000n", "64Mi"),
            "worker-5c4b-klmno": ("2", "1Gi"), "old-web-pqrst": ("10m", "32Mi"), "api-6f7c-mnopq": ("40m", "96Mi")}
 
 
-def node(name, role="control-plane"):
+def node(name, role="control-plane", cpu="4", memory="8023180Ki"):
     return {"metadata": {"name": name, "creationTimestamp": ts(9000),
                          "labels": {f"node-role.kubernetes.io/{role}": "true"}},
-            "status": {"nodeInfo": {"kubeletVersion": "v1.35.5"},
+            "status": {"nodeInfo": {"kubeletVersion": "v1.35.5"}, "allocatable": {"cpu": cpu, "memory": memory},
                        "addresses": [{"type": "InternalIP", "address": "10.0.0.2"}],
                        "conditions": [{"type": "Ready", "status": "True"}]}}
 SECRETS = [{"metadata": {"name": "db-creds", "namespace": "shop", "creationTimestamp": ts(100)},
@@ -305,7 +330,38 @@ def delete(rest):
     out(f'pod "{name}" deleted\n')
 
 
+# crowded: fifteen namespaces, the busiest first, on twelve nodes (16 cores and 64Gi in all); requests 12 cores and 40Gi, limits
+# 2.3 times allocatable (docs sets none, admin asks for nothing), each namespace's use a different share of its requests
+CROWDED_NS = ["shop", "search", "billing", "media", "auth", "ledger", "queue", "reports", "mail", "cache", "edge", "ml",
+              "docs", "admin", "jobs"]
+CROWDED_PODS, CROWDED_METRICS = [], {}
+_W = list(range(15, 0, -1))
+_LIMITED = [w if ns != "docs" else 0 for ns, w in zip(CROWDED_NS, _W)]
+for _i, (_ns, _w) in enumerate(zip(CROWDED_NS, _W)):
+    _req = (f"{round(12000 * _w / sum(_W))}m", f"{round(40960 * _w / sum(_W))}Mi") if _ns != "admin" else None
+    _lim = (f"{round(16000 * 2.3 * _LIMITED[_i] / sum(_LIMITED))}m",
+            f"{round(65536 * 2.3 * _LIMITED[_i] / sum(_LIMITED))}Mi") if _LIMITED[_i] else None
+    _use = (0.25, 0.6, 1.4, 0.9, 0.45, 1.1, 0.8, 0.3, 0.7, 1.6, 0.5, 0.95, 0.65, 0.2, 0.35)[_i]
+    _name = f"{_ns}-main-{_i:02d}x"
+    CROWDED_PODS.append(pod(_name, _ns, 60 + _i, owner=("ReplicaSet", f"{_ns}-main"),
+                            resources={"main": res(_req, _lim)}))
+    CROWDED_METRICS[_name] = (f"{round(12000 * _w / sum(_W) * _use * (1 if _req else 0.2))}m",
+                              f"{round(40960 * _w / sum(_W) * _use * (1 if _req else 0.2))}Mi")
+
+
+def crowded_nodes():  # (16 cores and 64Gi in all)
+    return [node(f"node-{i:02d}", "worker" if i > 1 else "control-plane", "2" if i <= 4 else "1",
+                 "8Gi" if i <= 4 else "4Gi") for i in range(1, 13)]
+
+
 def current(resource, context="k3d-dev"):
+    if context == "crowded" and resource in ("pods", "namespaces"):
+        return CROWDED_PODS if resource == "pods" else [
+            {"metadata": {"name": n, "creationTimestamp": ts(5000)}, "status": {"phase": "Active"}} for n in CROWDED_NS]
+    return _current(resource, context)
+
+
+def _current(resource, context="k3d-dev"):
     """A kind's objects now: a deleted pod Terminating, or not there at all if it was forced; KEDA's on prod."""
     items = PODS if resource == "pods" else OBJECTS.get(resource, []) + \
         (PROD_OBJECTS.get(resource, []) if context == "prod" else [])
@@ -317,11 +373,55 @@ def current(resource, context="k3d-dev"):
 
 
 def on_context(items, resource, context):
-    if context == "prod" and resource == "pods":
-        return items[:2]
+    if context == "crowded" and resource == "pods":
+        return [{**p, "spec": {**p["spec"], "nodeName": f"node-{i % 12 + 1:02d}"}} for i, p in enumerate(items)]
+    if context == "crowded" and resource == "nodes":
+        return crowded_nodes()
+    if context == "prod" and resource == "pods":  # (on prod's workers)
+        return [{**p, "spec": {**p["spec"], "nodeName": f"prod-{i}"}} for i, p in zip((2, 3), items[:2])]
     if context == "prod" and resource == "nodes":
-        return [node("prod-1")] + [node(f"prod-{i}", "worker") for i in (2, 3)]
+        return [node("prod-1", cpu="3800m", memory="15Gi")] + [node(f"prod-{i}", "worker", "7800m", "31Gi")
+                                                               for i in (2, 3)]
     return items
+
+
+def jsonpath(template, o):
+    """kubectl's -o jsonpath for the templates the view gives it: {range PATH[*]}…{end}, {.a.b} (nothing where it's
+    missing, a map or list as JSON) and {"text"} (its escapes as JSON's)."""
+    import re
+    parts = re.findall(r'\{([^{}]*)\}|([^{}]+)', template)
+
+    def at(x, path):
+        for k in path.strip(".").split(".") if path.strip(".") else []:
+            x = x.get(k) if isinstance(x, dict) else None
+        return x
+
+    def run(i, x, outp):
+        while i < len(parts):
+            inner, text = parts[i]
+            i += 1
+            if text:
+                outp.append(text)
+            elif inner.startswith("range "):
+                path = inner[len("range "):].removesuffix("[*]")
+                depth, j = 1, i
+                while depth:
+                    depth += parts[j][0].startswith("range ") - (parts[j][0] == "end")
+                    j += 1
+                for item in at(x, path) or []:
+                    run(i, item, outp)
+                i = j
+            elif inner == "end":
+                return
+            elif inner.startswith('"'):
+                outp.append(json.loads(inner))
+            else:
+                v = at(x, inner)
+                outp.append("" if v is None else json.dumps(v, separators=(",", ":")) if isinstance(v, (dict, list))
+                            else str(v))
+    outp = []
+    run(0, o, outp)
+    return "".join(outp)
 
 
 def watch(resource, context):
@@ -348,6 +448,41 @@ def watch(resource, context):
         time.sleep(0.2)
 
 
+def kubeconfig_contexts():
+    """The contexts named in $KUBECONFIG's files, as kubectl reads them (each but prod a cluster like k3d-dev: a test
+    can add and delete contexts as tools do), with their clusters' servers: {name: server}; None without a $KUBECONFIG
+    file; (path, line) for a file that can't be read as YAML (one cut off as it's written)."""
+    import re
+    if not os.environ.get("KUBECONFIG"):
+        return None
+    contexts, servers, read = {}, {}, False
+    for path in os.environ["KUBECONFIG"].split(os.pathsep):
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError:
+            continue
+        read = True
+        section, item = None, {}
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.strip() and not re.match(r"^\s*(- )?[\w.@/:-]+:( .*)?$|^\s*- [^:]+$", line):
+                return path, n
+            if not line.startswith((" ", "-")):
+                section = line.split(":")[0]
+                continue
+            if line.startswith("-"):
+                item = {}
+            if m := re.match(r"^\s*(?:- )?(name|server|cluster): (\S+)$", line):
+                item[m.group(1)] = m.group(2)
+            if "name" in item and section == "clusters" and "server" in item:
+                servers[item["name"]] = item["server"]
+            elif "name" in item and section == "contexts":
+                contexts[item["name"]] = item.get("cluster")
+        if text and not text.endswith("\n"):
+            return path, len(text.splitlines())
+    return {name: servers.get(cluster) for name, cluster in contexts.items()} if read else None
+
+
 def main():
     args = sys.argv[1:]
     with open(os.environ.get("FAKE_KUBECTL_LOG", os.devnull), "a") as f:
@@ -356,9 +491,16 @@ def main():
         out(json.dumps([{"name": "web", "namespace": "shop", "revision": "3", "updated": "2026-10-22 10:00:00",
                          "status": "deployed", "chart": "web-1.2.0", "app_version": "1.2.0"}]))
     context = args[args.index("--context") + 1] if "--context" in args else "k3d-dev"
-    if context not in ("k3d-dev", "prod"):
-        sys.stderr.write(f'error: context "{context}" does not exist\n')
-        sys.exit(1)
+    known = kubeconfig_contexts()
+    if known is not None and not isinstance(known, dict):  # (a kubeconfig caught half written)
+        fail(f'error: error loading config file "{known[0]}": yaml: line {known[1]}: could not find expected \':\'')
+    if context not in (known if known is not None else ("k3d-dev", "prod", "crowded")):
+        fail(f"error: context was not found for specified context: {context}")
+    server = next((a.split("=", 1)[1] for a in args if a.startswith("--server=")), None)
+    if server is not None:  # (a cluster deleted, or made again elsewhere: nothing answers at the server asked for)
+        args = [a for a in args if not a.startswith("--server=")]
+        if known is not None and known.get(context) != server:
+            fail(f"Unable to connect to the server: dial tcp {server.split('//')[-1]}: connect: connection refused")
     # a test's folder ($FAKE_KUBECTL_HOLD): a file named after the context holds its answers back while it's there;
     # one named <context>.down makes it a cluster that doesn't answer at all
     if hold := os.environ.get("FAKE_KUBECTL_HOLD"):
@@ -376,6 +518,8 @@ def main():
         os.makedirs(home, exist_ok=True)
         os.chdir(home)
         os.execve("/bin/sh", ["sh"], {"PATH": "/usr/bin:/bin", "PS1": f"root@{pod}:/app# ", "TERM": "xterm-256color"})
+    if rest[:1] == ["exec"] and "--" in rest and not {"psql", "arangosh"} & set(rest):  # (exec POD -- COMMAND: run
+        os.execvp(rest[rest.index("--") + 1], rest[rest.index("--") + 1:])            # here, as if in the pod)
     if rest[:1] == ["exec"] and "arangosh" in " ".join(rest):  # (arangosh in an ArangoDB pod)
         script, program = rest[-3], rest[-1]
         if '"$ARANGO_ROOT_PASSWORD"' not in script or "@@" not in program and "@" in program.replace("@@", ""):
@@ -427,8 +571,13 @@ def main():
         logs(rest)
     if rest[:1] == ["delete"]:
         delete(rest)
+    if rest[:1] == ["apply"] and rest[1:3] == ["-f", "-"]:  # (said as kubectl says it; nothing's kept)
+        text = sys.stdin.read()
+        kinds = re.findall(r"^kind:\s*(\S+)", text, re.M)
+        names = re.findall(r"^\s+name:\s*(\S+)", text, re.M)
+        out("".join(f"{k.lower()}/{n} configured\n" for k, n in zip(kinds, names)) or "")
     if rest[:1] != ["get"]:
-        sys.stderr.write(f"fake kubectl: only get, api-resources, logs and delete here, not {rest[:1]}\n")
+        sys.stderr.write(f"fake kubectl: only get, api-resources, logs, apply and delete here, not {rest[:1]}\n")
         sys.exit(2)
     rest = rest[1:]
     if rest[:1] == ["--raw"]:
@@ -439,10 +588,14 @@ def main():
                        "/apis/batch/v1/cronjobs"):  # (a kind's list, every namespace: items carry no kind)
             out(json.dumps({"kind": "List", "items": OBJECTS.get(rest[1].rsplit("/", 1)[1], [])}))
         if rest[1].endswith("/pods"):
+            pods, metrics = (CROWDED_PODS, CROWDED_METRICS) if context == "crowded" else (PODS, METRICS)
             out(json.dumps({"items": [{"metadata": {"name": n, "namespace": p["metadata"]["namespace"]},
                                        "containers": [{"name": "main", "usage": {"cpu": c, "memory": m}}]}
-                                      for n, (c, m) in METRICS.items()
-                                      for p in PODS if p["metadata"]["name"] == n]}))
+                                      for n, (c, m) in metrics.items()
+                                      for p in pods if p["metadata"]["name"] == n]}))
+        if context == "crowded":
+            out(json.dumps({"items": [{"metadata": {"name": n["metadata"]["name"]},
+                                       "usage": {"cpu": "700m", "memory": "2Gi"}} for n in crowded_nodes()]}))
         out(json.dumps({"items": [{"metadata": {"name": "node-1"}, "usage": {"cpu": "500m", "memory": "2Gi"}}]}))
     resource = rest[0]
     fmt = next((a for a in rest if a.startswith("go-template=")), None) or \
@@ -456,6 +609,16 @@ def main():
     if resource in PROD_RESOURCES and context != "prod":  # (no KEDA here)
         fail(f'error: the server doesn\'t have a resource type "{resource.split(".")[0]}"')
     items = current(resource, context)
+    if "-l" in rest:  # (a selector: key=value and key!=value, each of them)
+        def matches(o, selector=rest[rest.index("-l") + 1]):
+            labels = (o.get("metadata") or {}).get("labels") or {}
+            for part in selector.split(","):
+                k, eq, v = re.split(r"(!=|==|=)", part, maxsplit=1) if "=" in part else (part, None, None)
+                if eq is None and k not in labels or eq == "!=" and labels.get(k) == v or \
+                        eq in ("=", "==") and labels.get(k) != v:
+                    return False
+            return True
+        items = [o for o in items if matches(o)]
     if "--watch" in rest:
         watch(resource, context)
     if resource == "pods" and os.environ.get("FAKE_KUBECTL_PG"):  # (a cluster with Postgres in a pod)
@@ -485,6 +648,19 @@ def main():
         out(f"apiVersion: v1\nkind: Object\nmetadata:\n  name: {name}\n  namespace: "
             f"{hit['metadata'].get('namespace', '')}\nstatus:\n  phase: {hit.get('status', {}).get('phase', '')}\n")
     items = on_context(items, resource, context)
+    for sel in (a.split("=", 1)[1] for a in rest if a.startswith("--field-selector=")):  # (status.phase!=Failed,…)
+        for term in sel.split(","):
+            path, value = term.split("!=")
+            items = [o for o in items if jsonpath("{." + path + "}", o) != value]
+    if fmt.startswith("jsonpath="):
+        out(jsonpath(fmt[len("jsonpath="):], {"items": items}))
+    if fmt.startswith("custom-columns="):  # (NAME:.metadata.name,…, with --no-headers: a line each, by spaces)
+        def at(o, path):
+            for k in path.strip(".").split("."):
+                o = o.get(k) if isinstance(o, dict) else None
+            return "<none>" if o is None else str(o)
+        paths = [c.split(":", 1)[1] for c in fmt[len("custom-columns="):].split(",")]
+        out("".join("   ".join(at(o, p) for p in paths) + "\n" for o in items))
     if fmt == "name":  # (node/node-1)
         out("".join(f"{resource[:-1]}/{o['metadata']['name']}\n" for o in items))
     out(json.dumps({"apiVersion": "v1", "kind": "List", "items": items}))

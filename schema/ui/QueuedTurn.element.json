@@ -1,16 +1,19 @@
 {
-  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it.",
+  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it. On the phone, a message is also queued when it's sent while the chat's host isn't reached, with a small dim cloud left of its bubble till the host is back. A message sent while the host wasn't reached stays in the queue, on disk, till the host says it took it; one the host says no to stays there with a warning in place of the cloud, saying why, and goes again only by its send-now button.",
   "apps": [
     "baude",
     "phone"
   ],
   "opens": [
-    "Enter in the composer (with text or attachments) while a turn runs"
+    "Enter in the composer (with text or attachments) while a turn runs",
+    "Sending while the chat's host isn't reached (the phone)"
   ],
   "code": [
     "chatparts.py:QueuedTurn",
     "windowproc.py:WindowProc.queue_message",
     "windowproc.py:WindowProc.queue_send",
+    "windowproc.py:WindowProc.send_at_turn",
+    "windowdrafts.py:WindowDrafts.move_foreground",
     "windowproc.py:WindowProc.queue_edit",
     "windowproc.py:WindowProc.queue_drop",
     "windowproc.py:WindowProc.flush_queue",
@@ -22,10 +25,20 @@
     "windowdrafts.py:WindowDrafts.left_turn_ended",
     "Queue.kt:QueuedRow",
     "Queue.kt:Queue.sendLeft",
-    "Mesh.kt:Mesh.sendQueued"
+    "Mesh.kt:Mesh.sendQueued",
+    "Queue.kt:Queue.resend",
+    "Queue.kt:Queue.putBackTried",
+    "Queue.kt:Queue.taken",
+    "Queue.kt:Queue.refused",
+    "baudelib/hostqueue.py:change",
+    "baudelib/hostqueue.py:turn_over",
+    "windowdrafts.py:WindowDrafts.host_queue_in",
+    "Mesh.kt:Mesh.queueIn"
   ],
   "copy": [
-    "chat_turns"
+    "chat_turns",
+    "hosts.waits_for",
+    "held_send.not_sent"
   ],
   "parts": [
     {
@@ -86,7 +99,29 @@
         },
         {
           "by": "click ↑",
-          "does": "Interrupts the running turn, then sends this message and every queued message before it, together as one message (their texts joined by a blank line, their attachments together). Tooltip \"Send now: interrupt the chat, then send this and the queued messages before it\"."
+          "does": "Sends this message and every queued message before it at once, together as one message (their texts joined by a blank line, their attachments together), to the turn going on, which isn't stopped: claude, Codex and pi take it in between the turn's steps and go on; Apple's on-device model, which answers in one call, takes it once its turn is over. In a Claude Code chat, once the host has taken the message (a refused one moves nothing), each of the turn's own commands and subagents running in the foreground is moved to the background (Claude Code's background_tasks, one request naming each call; calls waiting on a permission and the commands a background subagent runs for itself are left alone), where it goes on: the turn's step that waits on it ends, so the turn takes the message in now instead of once they're done, and stops none of them; their cards read running in background. Codex and pi have no way to move a running call: a message sent while one runs is taken in once it ends, and nothing is stopped. The sent message is drawn as sent where the chat has got to. With a revert waiting to be made, the revert is made first, as sending does, stopping the turn, and the messages go after it. Tooltip \"Send now: send this and the queued messages before it, without stopping the chat\".",
+          "decisions": [
+            {
+              "said": "Agents still seem to stop on send queeud message, this is not ideal",
+              "rule": "Every app's send-now on a queued message gives it to the agent's turn going on without stopping it, for every agent that can take a message mid-turn; one that can't takes it as its turn ends",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#292"
+                }
+              ]
+            },
+            {
+              "said": "Getting a queued message into a Claude chat without it killing all the chat's running subagents is very hard, close to impossible, and a massive problem",
+              "rule": "Every app's send-now on a queued message moves the agent's foreground commands and subagents to the background first, where its agent can (Claude Code), so the message reaches the agent at once and every subagent keeps running; an agent that can't move them takes the message in once the running call ends, stopping nothing",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#298"
+                }
+              ]
+            }
+          ]
         },
         {
           "by": "click the revert icon",
@@ -102,17 +137,39 @@
     },
     {
       "name": "turn stopped (Esc / stop button)",
-      "decisions": [{"said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.", "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#208"}]}],
-      "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself (all of it as one message, or up to the one whose ↑ was pressed)."
+      "decisions": [
+        {
+          "said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.",
+          "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted",
+          "decided": "2026-11-24",
+          "source": [
+            {
+              "issue": "BaudeInternal#208"
+            }
+          ]
+        }
+      ],
+      "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself: all of it as one message."
     },
     {
       "name": "another chat opened",
       "shows": "The queue stays with the chat it was written in, kept beside that chat's draft (on disk on the phone, over a restart on the desktop), and is drawn under its conversation again, as it was, when the chat is opened again. A new chat's queue goes into its box instead.",
-      "decisions": [{"said": "Going to another chat and back un-queues a queued message; queued messages should persist across chats (paraphrased)", "rule": "Every app keeps a chat's queued messages with that chat when another is opened, draws them again when it's opened, and sends them to it when its turn ends meanwhile", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#176"}]}]
+      "decisions": [
+        {
+          "said": "Going to another chat and back un-queues a queued message; queued messages should persist across chats (paraphrased)",
+          "rule": "Every app keeps a chat's queued messages with that chat when another is opened, draws them again when it's opened, and sends them to it when its turn ends meanwhile",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#176"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "turn ends while another chat is open",
-      "shows": "The left chat's queue is sent to it as its turn ends, by itself or stopped, as if it were open: all of it as one message, or up to the one whose ↑ stopped the turn. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
+      "shows": "The left chat's queue is sent to it as its turn ends, by itself or stopped, as if it were open: all of it as one message. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
     },
     {
       "name": "in history",
@@ -122,5 +179,27 @@
   "scenes": [
     "46-queue-kept",
     "46b-queue-sent-elsewhere"
+  ],
+  "decisions": [
+    {
+      "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+      "rule": "Every app that queues while its host isn't reached gives each queued message its own uuid as it's written, sends each by that uuid once the host is back and the chat's transcript has been read up to date (so one the host already took is seen and not sent), and puts a message whose link went before the host answered back in the queue by the same uuid, never in the box with a not-sent line: a host takes a message once, whatever the link did.",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#243"
+        }
+      ]
+    },
+    {
+      "said": "Queued messages should be shared across the mesh with an elected leader, the same mechanism as drafts; too often something shows in one view of a chat and not on the rest of the mesh (paraphrased)",
+      "rule": "Every app keeps a host chat's queue on the chat's host, as its draft is: any head on any machine that opens the chat shows the same queued messages, and a message queued, deleted, edited or sent now on one head goes from every other. The chat's host is the queue's leader: only it sends the queue, as the turn ends (all of it as one message; up to the one whose send-now stopped the turn; kept past a turn a revert stopped), and at once for a message queued as no turn's going, so it is sent once whichever heads are open, or none. Attachments go with the message. A message its host won't take (QUEUE_CHARS_MAX), or one queued while the host isn't reached, stays the head's own and goes as before.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#296"
+        }
+      ]
+    }
   ]
 }

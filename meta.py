@@ -150,7 +150,7 @@ def models(live=False):
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     _CLAUDE_SAID.clear()
     _CLAUDE_SAID.update((m["value"], m) for m in listed)  # (for model_entry: no settings read for each it's asked)
-    out = [(m["value"], m.get("displayName") or m["value"],
+    out = [(m["value"], m.get("displayName") or providerslib.model_name(m["value"]),
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
     out += [(m["value"], m["displayName"], m.get("supportedEffortLevels") or None, None)
@@ -177,6 +177,24 @@ def available(value=None):
     One that's gone (its host left the mesh, its model removed) is listed still, as unavailable."""
     value = model() if value is None else value
     return model_program(value) == "claude" or model_entry(value, models(live=True)) is not None
+
+
+def subscription_off(value=None):
+    """What's said over Meta's box where the subscription a model (Meta's, if none's given) runs on here is disabled
+    (Claude's or Codex's: this machine's host's pick for its provider), or None."""
+    import sqlite3
+    from baudelib import accounts
+    program = model_program(model() if value is None else value)
+    if program not in accounts.PROVIDERS:
+        return None
+    try:
+        profile = accounts.selected(program)
+        if not accounts.disabled(accounts.usage_key(program, profile)):
+            return None
+        name = (accounts.account(profile) or {}).get("name")
+    except (OSError, sqlite3.Error):
+        return None
+    return wording.say("subscriptions.disabled_chat", name=name or wording.say("subscriptions.cli_default"))
 
 
 def local_name(value):
@@ -944,7 +962,8 @@ def model_row(chat):
         entry = model_entry(model(), offered) or (offered[0] if offered else None)
         picker.quiet = True
         try:
-            picker.set_choices([(m[0], m[1]) for m in offered])
+            known = claude_described([m for m in offered if m[3] is None]) + list(providerslib.entries().values())
+            picker.set_choices([(m[0], m[1]) for m in offered], {m[0]: providerslib.model_slug(m[0], known) for m in offered})
             picker.select(entry[0] if entry else None)
         finally:
             picker.quiet = False
@@ -1136,4 +1155,5 @@ def shared_settings(win, chat, app, zoom_default):
                 bool, note=f"on Claude's models, {NAME} runs shell commands and edits files, from its next message; "
                 "the user's to turn on or off", meta_sets=False),
     ]
-    return {s.name: s for s in out}
+    import accessview
+    return {s.name: s for s in out} | accessview.meta_settings()

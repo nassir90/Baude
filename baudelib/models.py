@@ -375,6 +375,29 @@ def codex_exe():
     return shutil.which(os.environ.get("BAUDE_CODEX", "codex"))
 
 
+ANTIGRAVITY_DEFAULT = {"value": "antigravity/default", "displayName": "Antigravity (default model)"}
+
+
+def antigravity_exe():
+    return shutil.which(os.environ.get("BAUDE_ANTIGRAVITY", "agy"))
+
+
+def antigravity_choices(options):
+    """Models returned by agy's ACP session config, including grouped choices."""
+    choices = [ANTIGRAVITY_DEFAULT]
+    seen = set()
+    for option in options:
+        for entry in option.get("options", [option]) if isinstance(option, dict) else ():
+            value = entry.get("value")
+            if not isinstance(value, str) or not value or value in seen:
+                continue
+            seen.add(value)
+            choices.append({"value": f"antigravity/{value}", "resolvedModel": value,
+                            "displayName": entry.get("name") or value,
+                            "description": entry.get("description") or ""})
+    return choices
+
+
 def model_program(value):
     """The program a model runs on: Claude Code, Codex, apple-claude, or pi-claude."""
     if not isinstance(value, str) or value in ("opus", "sonnet", "haiku", "fable") or value.startswith("claude-"):
@@ -383,6 +406,8 @@ def model_program(value):
         return "apple" if agent[1] == APPLE_MODEL["value"] else "pi"
     if isinstance(value, str) and value.startswith("codex/"):
         return "codex"
+    if isinstance(value, str) and value.startswith("antigravity/"):
+        return "antigravity"
     if value == APPLE_MODEL["value"]:
         return "apple"
     if isinstance(value, str) and value.startswith(SERVED):
@@ -467,6 +492,8 @@ def pi_exe():
 # claude: the others' are kept for them where they're needed, as the headless server does). steers: whether a message
 # sent at a turn is taken into it as it goes on (apple-claude's model answers in one call: it takes it after)
 PROGRAMS = {
+    "antigravity": {"exe": "antigravity_exe", "modes": True, "effort": False, "first": None,
+                    "resumes": True, "transcript": False, "steers": False},
     "codex": {"exe": "codex_exe", "modes": True, "effort": True, "first": None, "resumes": True,
               "transcript": False, "steers": True},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,

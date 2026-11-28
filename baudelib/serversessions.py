@@ -11,7 +11,7 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, errorbook, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    accounts, agentproxy, antigravity, autofix, chattools, claude, codex, emissiontools, errorbook, meshtools, models, multiplextools, notes, transcripts, wire, wording,
     deps, desktopchats, hostlogin, hostqueue, hostresume, toolnames, worktree,
 )
 from baudelib.serverstate import (
@@ -252,7 +252,7 @@ class ServerSessions:
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
         told = None
-        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex", "apple"):  # (who it is, and its memory, each
+        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex", "apple", "antigravity"):  # (who it is, and its memory, each
             mem = self.bot_memory(s)                                              # start)
             told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
         if told is not None and run["program"] in ("claude", "pi"):
@@ -297,7 +297,12 @@ class ServerSessions:
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
             agentproxy.PiSession.release(agentproxy.pi_sessions(), s.meta.get("cli_id") or s.id)  # elsewhere no more)
-        if run["program"] == "codex":
+        if run["program"] == "antigravity":
+            s.proc = antigravity.AntigravityProc(
+                lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
+                s.meta["cwd"], s.meta["model"], resume=run["resume"], exe=run["exe"], mode=run["mode"],
+                env={**s.env, **(self.env or {})}, on_models=self.antigravity_model_update, instructions=told)
+        elif run["program"] == "codex":
             profile = s.meta.get("profiles", {}).get("codex", "")
             # The server keeps the display history. Codex resumes its own thread using its native ID.
             s.proc = codex.CodexProc(

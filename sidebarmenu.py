@@ -45,6 +45,8 @@ class SidebarMenu:
         info, sid = row.info, GLib.Variant.new_string(row.info["id"])
         top = not getattr(row, "depth", 0) and not info.get("fork_parent")  # (a Bot's a top-level chat)
         menu = Gio.Menu()
+        active = (info["id"] == self.win.session_id and self.win.session_state() in ("working", "waiting")) or \
+            background_proc(info.get("id"), type(self.win)) is not None
         items = [(wording.say("common.rename_ellipsis"), "rename"),
                  (wording.say("sidebar.unarchive") if info["id"] in self.archived_ids() else wording.say("sidebar.archive"),
                   "unarchive" if info["id"] in self.archived_ids() else "archive"),
@@ -56,17 +58,18 @@ class SidebarMenu:
             rename = (wording.say("common.rename_ellipsis"), "rename")
             items = [(wording.say("common.delete"), "hide")] if info.get("dead") or \
                 info["remote"].state != "alive" else \
-                [rename] + ([(wording.say("sidebar.unarchive"), "unarchive")] if archived else [] if active else
-                            [(wording.say("sidebar.archive"), "archive")]) + \
+                [rename,
+                 (wording.say("sidebar.unarchive"), "unarchive") if archived else
+                 (wording.say("sidebar.archive"), "archive")] + \
                 ([(wording.say("common.stop"), "stop")] if active else []) + \
-                [(wording.say("trash.move_dots"), "trash")]  # (Archive stops it: not at a turn)
+                [(wording.say("trash.move_dots"), "trash")]
         items.insert(1 if items[0][1] == "rename" else 0, (wording.say("sidebar.move_to_group"), None))  # (any chat's, on a host or not)
         if can_be_bot(info) and (top or info.get("bot")):  # (a Bot lives on its chat's host: one there, only)
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
-        if info.get("bot") and can_rotate(info) and info.get("remote_state") not in ("working", "waiting"):
-            # (after Bot Settings…; not at a turn, as Archive isn't)
+        if info.get("bot") and can_rotate(info):
+            # (after Bot Settings…; greyed out while at a turn, as Archive is)
             at = next((i + 1 for i, (_label, action) in enumerate(items) if action == "make_bot"), 1)
             items.insert(at, (wording.say("sidebar.rotate"), "rotate"))
         if info.get("bot") and info.get("remote") is not None and info["remote"].state == "alive" and \
@@ -75,6 +78,8 @@ class SidebarMenu:
         if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
                 info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
             items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
+        self.actions.lookup_action("archive").set_enabled(not active)
+        self.actions.lookup_action("rotate").set_enabled(not active)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))

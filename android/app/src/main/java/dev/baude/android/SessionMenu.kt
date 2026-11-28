@@ -139,18 +139,18 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
         }
         if (!gone) MenuChoice(Wording.Common.renameEllipsis, false) { dismiss(); renaming = true }
         if (!gone && s.bot != null) MenuChoice(Wording.Sidebar.newSession, false) { dismiss(); newBotSession(h, s, openChat) }
-        val canRotate = !gone && !active && s.bot != null && takes(h, "rotate") // (not at a turn, as Archive isn't)
+        val canRotate = !gone && s.bot != null && takes(h, "rotate")
         fun rotate() {
             dismiss()
             Mesh.ask(h, Msg.Rotate(session = sid).json()) { r ->
                 if (r.optString("op") != "rotated") toast(Wording.Trash.hostRefused(host = Mesh.label(h), op = "rotate", why = said(r)))
             }
         }
-        if (canRotate && !canBot) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
+        if (canRotate && !canBot) MenuChoice(Wording.Sidebar.rotate, false, enabled = !active) { rotate() }
         if (!gone && canBot && (top || s.bot != null)) {
             if (s.bot != null) {
                 MenuChoice(Wording.Sidebar.botSettingsEllipsis, false) { dismiss(); botting = true }
-                if (canRotate) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
+                if (canRotate) MenuChoice(Wording.Sidebar.rotate, false, enabled = !active) { rotate() }
                 MenuChoice(Wording.Sidebar.unbot, false) {
                     dismiss()
                     Mesh.ask(h, Msg.Bot(session = sid, bot = null).json().put("bot", JSONObject.NULL)) { r ->
@@ -169,7 +169,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
                 Mesh.ask(h, Msg.Unarchive(session = sid).json()) { r ->
                     if (r.optString("op") != "unarchived") toast(Wording.Trash.hostRefused(host = Mesh.label(h), op = "unarchive", why = said(r)))
                 }
-            } else if (!active) MenuChoice(Wording.Sidebar.archive, false) {
+            } else MenuChoice(Wording.Sidebar.archive, false, enabled = !active) {
                 dismiss()
                 Mesh.ask(h, Msg.Archive(session = sid).json()) { r ->
                     if (r.optString("op") != "archived") toast(Wording.Trash.hostRefused(host = Mesh.label(h), op = "archive", why = said(r)))

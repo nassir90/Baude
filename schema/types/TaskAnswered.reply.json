@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "answer_task's answer: the ask answered, its run going on.",
+  "properties": {
+    "op": {
+      "const": "task_answered",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The Bot's session id."
+    },
+    "run": {
+      "type": "string",
+      "description": "The run's id."
+    },
+    "task": {
+      "type": "string",
+      "description": "The run's task, by its name."
+    },
+    "values": {
+      "type": "object",
+      "description": "A form's values, as they were taken (checked against its fields)."
+    },
+    "text": {
+      "type": "string",
+      "description": "The answer to an ask with no form."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "run",
+    "task"
+  ],
+  "additionalProperties": false
+}

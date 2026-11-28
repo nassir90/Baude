@@ -146,7 +146,8 @@ class Control(private val b: Browser, private val pageJs: String, private val re
     }
 
     private val INPUT = setOf("click", "drag", "hover", "type", "key", "scroll", "form_input", "navigate", "new_tab",
-        "close_tab", "select_tab", "answer_prompt", "resize") // (what changes the page: done in the order it came)
+        "close_tab", "select_tab", "answer_prompt", "resize", "copy", "paste") // (what changes the page: done in the
+        // order it came)
 
     private val OPS: Map<String, (JSONObject, (JSONObject) -> Unit) -> Unit> = mapOf(
         "tabs" to ::opTabs, "select_tab" to ::opSelectTab, "new_tab" to ::opNewTab, "close_tab" to ::opCloseTab,
@@ -154,7 +155,8 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         "find" to ::opFind, "get_text" to ::opGetText, "javascript" to ::opJavascript, "click" to ::opClick,
         "drag" to ::opDrag, "hover" to ::opHover, "type" to ::opType, "key" to ::opKey, "scroll" to ::opScroll,
         "console" to ::opConsole, "network" to ::opNetwork, "resize" to ::opResize, "form_input" to ::opFormInput,
-        "prompts" to ::opPrompts, "answer_prompt" to ::opAnswerPrompt, "sites" to ::opSites)
+        "prompts" to ::opPrompts, "answer_prompt" to ::opAnswerPrompt, "sites" to ::opSites,
+        "copy" to ::opCopy, "paste" to ::opPaste)
 
     fun run(op: String, msg: JSONObject, answer: (JSONObject) -> Unit) {
         val fn = OPS[op] ?: return answer(error("no such request: $op"))
@@ -450,6 +452,33 @@ class Control(private val b: Browser, private val pageJs: String, private val re
 
     /** text typed into the focused field (or ref's, focused first), a key press a character at a time, as a keyboard
      * would type it (a character no key here makes: put in as the page's own editing would). */
+    /** The text selected in the page (in the focused field, its selection there; none from a password's), for a
+     * watcher's own clipboard (its ⌘C or Ctrl+C); cut: taken out of the page too, as cutting does. */
+    private fun opCopy(msg: JSONObject, answer: (JSONObject) -> Unit) {
+        val t = tab(msg)
+        js(t, "const el = document.activeElement; let text = '';" +
+            "if (el && el.type === 'password') return '';" +
+            "if (el && 'value' in el && typeof el.selectionStart === 'number')" +
+            "  text = el.value.slice(el.selectionStart, el.selectionEnd);" +
+            "else text = String(getSelection());" +
+            "if (text && ${msg.optBoolean("cut")}) document.execCommand('delete');" +
+            "return text", answer, { text -> answer(describe(t).put("text", text ?: "")) })
+    }
+
+    /** text, from a watcher's own clipboard (its ⌘V or Ctrl+V), pasted where the page has its caret: offered the page
+     * as a paste (its own handler can take it), else put in as its editing would type it. */
+    private fun opPaste(msg: JSONObject, answer: (JSONObject) -> Unit) {
+        val t = tab(msg)
+        js(t, "const text = ${JSONObject.quote(msg.optString("text"))}, el = document.activeElement;" +
+            "const data = new DataTransfer(); data.setData('text/plain', text);" +
+            "const ev = new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});" +
+            "if (!(el || document.body).dispatchEvent(ev)) return true;" +
+            "if (!em.editable(el)) return false;" +
+            "if (!document.execCommand('insertText', false, text) && 'value' in el)" +
+            "  em.setValue(el, el.value.slice(0, el.selectionStart) + text + el.value.slice(el.selectionEnd));" +
+            "return true", answer, { ok -> answer(describe(t).put("pasted", ok == true)) })
+    }
+
     private fun opType(msg: JSONObject, answer: (JSONObject) -> Unit) {
         val t = tab(msg)
         val ref = msg.optString("ref").takeIf { it.isNotEmpty() }

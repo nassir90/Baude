@@ -25,11 +25,12 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, telemetry, wire,
+    access, accounts, codex, deciders, desktopchats, emissionlink, inbox, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
 from baudelib.serverstate import (
-    AlreadyRunning, DRAFT_S, EMISSIONS_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
+    AlreadyRunning, DRAFT_S, EMISSIONS_S, MULTIPLEX_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
     kept_sessions, lock_path, state_home, trash,
 )
 from baudelib.serverrun import ServerRunning
@@ -94,6 +95,7 @@ class Server(ServerRunning, ServerSessions):
                 self.sessions[meta["id"]] = Session(self, meta)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
+        self.settle_rotations()  # (a Bot's rotation the host stopped in the middle of: finished, or undone)
         self.desktop = desktopchats.DesktopChats(self)  # (this machine's Claude Desktop chats, listed to heads too)
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
@@ -116,6 +118,9 @@ class Server(ServerRunning, ServerSessions):
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
+        # (a restart kept till nothing blocks it: {owners: what asked for it, head or update, to}; the heads holding it
+        # while they show what it waits for)
+        self.pending_restart, self.restart_holds = None, set()
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
         # the apps connected here, by the code they run (heads that have subscribed, and this machine's Emissions:
         # info's heads, and this host's record's for the mesh); when each commit was made, as git here has it
@@ -130,9 +135,17 @@ class Server(ServerRunning, ServerSessions):
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
         self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
+        self.deciders = deciders.Deciders(self.state_dir)  # (its decision models' servers: baudelib/deciders.py)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
-        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
-        # chat events, samples and line profiles: baudelib/telemetry.py)
+        self.multiplex_pids = set()  # (the processes of this machine's Multiplex windows, likewise)
+        self.emission_pids = set()  # (the processes of this machine's Emissions, as they last said: sampled too)
+        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log,
+                                             found=self.found_procs, commit=self.commit)  # (its machine's chat events, samples and line
+        # profiles: baudelib/telemetry.py)
+        self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
+        self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
+        self.inbox = inbox.Inbox(self)  # (what its Bots' tasks ask of a person: baudelib/inbox.py)
+        self.settle_bot_folders()  # (each Bot's folder by its name)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -247,11 +260,13 @@ class Server(ServerRunning, ServerSessions):
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
                 "init": self.me.get("init") or None, "commit": self.commit, "made": self.made,
-                **self.mesh.here_behind(), "update": self.update,
+                **self.mesh.here_behind(), "update": self.update, "restart": self.restart_state(),
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
                 "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)
-                "telemetry": self.telemetry.state()}  # (on or off, and what each process here profiles: its apps follow it)
+                "telemetry": self.telemetry.state(),  # (on or off, and what each process here profiles: its apps follow it)
+                "front": self.telemetry.front(),  # (the chats in front on this machine: no head anywhere notifies of them)
+                "tool_names": toolnames.table(self.me.get("mcp_servers") or ())}  # (how its MCP tools are named)
 
     def made_of(self, commit):
         """When commit was made, in seconds, as git here has it (None: it hasn't it), kept once asked."""
@@ -281,13 +296,37 @@ class Server(ServerRunning, ServerSessions):
             self.mesh.republish()
 
     def _emissions(self):
-        """This machine's Emissions, and the code each runs, asked every EMISSIONS_S (they're no heads: the host
-        process reaches them, emissionlink)."""
-        while not self.stopped.wait(EMISSIONS_S):
-            found = [{"client": "emission", "commit": c} for c in emissionlink.running_commits()]
+        """This machine's Emissions, and the code each runs, asked at once and then every EMISSIONS_S (they're no
+        heads: the host process reaches them, emissionlink)."""
+        while True:
+            infos = emissionlink.running()
+            self.emission_pids = {i["pid"] for i in infos if isinstance(i.get("pid"), int) and i["pid"] > 0}
+            found = [{"client": "emission", "commit": i["commit"] if isinstance(i.get("commit"), str) else None}
+                     for i in infos]
             if found != self.emissions:
                 self.emissions = found
                 self.heads_look()
+            if self.stopped.wait(EMISSIONS_S):
+                return
+
+    def _multiplexes(self):
+        """The processes of this machine's Multiplex windows, asked at once and then every MULTIPLEX_S, each
+        briefly (those of Baude's and Record's own, already sampled, aren't asked)."""
+        while True:
+            try:
+                skip = set(self.telemetry.pids)
+                infos = [i for _path, i in multiplexlink.processes(timeout=1, skip=skip) if isinstance(i, dict)]
+                self.multiplex_pids = {i["pid"] for i in infos if i.get("app") == "multiplex"
+                                       and isinstance(i.get("pid"), int) and i["pid"] > 0}
+            except Exception as e:  # noqa: BLE001 (what couldn't be found: the next time's)
+                self.log(f"multiplex: {type(e).__name__}: {e}")
+            if self.stopped.wait(MULTIPLEX_S):
+                return
+
+    def found_procs(self):
+        """{pid: app} of this machine's processes that tell it no telemetry of their own, for its samples: its
+        Emissions' and Multiplex's windows' (as they last said)."""
+        return {**dict.fromkeys(self.multiplex_pids, "multiplex"), **dict.fromkeys(self.emission_pids, "emission")}
 
     def mesh_changed(self):
         """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with
@@ -305,7 +344,8 @@ class Server(ServerRunning, ServerSessions):
 
     def running(self):
         """(lock held) Every command its sessions' claudes are running (Session.commands): [{session, what}]."""
-        return [{"session": s.id, "what": c["what"]} for s in self.sessions.values() for c in s.commands()]
+        return [{"session": s.id, "what": c["what"]} for s in self.sessions.values() for c in s.commands()] + \
+            self.tasks.busy()  # (and its tasks' runs)
 
     def delete(self, s, reply):
         """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,
@@ -331,9 +371,10 @@ class Server(ServerRunning, ServerSessions):
         with self.lock:
             path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
             program = models.program(s.meta.get("model"))["name"]
-            names = {s.meta.get("cli_id") or s.id, s.id}
+            names = {s.meta.get("cli_id") or s.id, s.id} - \
+                {o.meta.get("cli_id") for o in self.sessions.values() if o is not s}  # (a Bot's past thread's: its own)
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None,
-                 bot_dir(self.state_dir, s.id),  # (a Bot's, or a chat's that was one: its memory and its picture)
+                 bot_dir(self.state_dir, s.meta),  # (a Bot's, or a chat's that was one: its memory and its picture)
                  self.senders_path(s.id)]  # (who its messages were from, with them)
         pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
         if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)
@@ -363,6 +404,7 @@ class Server(ServerRunning, ServerSessions):
             for c in list(s.viewers):  # (attached to it: it's gone, for good)
                 c.send({"op": "deleted", "session": s.id})
             self.log(f"deleted {s.id}")
+            self.inbox.chat_gone(s.id)  # (its model's asks still waiting: stopped)
             self.changed()
         reply("deleted", session=s.id, trashed=went)
 
@@ -414,3 +456,10 @@ class Server(ServerRunning, ServerSessions):
         it hasn't taken up (desktopchats), as Desktop's list was last read."""
         with self.lock:
             return self.listing(archived) + sorted(self.desktop.listings(archived), key=lambda i: -(i["said"] or 0))
+
+    def shown_to(self, conn, listing):
+        """(lock held) Of a listing, the chats conn may read (access manage_read): those it's told of."""
+        if conn.member is None:
+            return listing
+        return [x for x in listing if self.access.allowed(
+            conn, "manage_read", self.sessions.get(x["id"]) or self.desktop.chats.get(x["id"]))]

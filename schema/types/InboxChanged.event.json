@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An ask raised, put anew, answered, withdrawn, stopped, routed or removed: told every subscribed head that may manage its Bot, as a draft's change is. One that's answered, withdrawn or removed (removed: true) leaves every Inbox.",
+  "properties": {
+    "op": {
+      "const": "inbox_changed",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "$ref": "InboxAsk.json",
+      "description": "The ask as it is now."
+    },
+    "removed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "It's gone from the host (a stopped one removed)."
+    }
+  },
+  "required": [
+    "op",
+    "ask"
+  ],
+  "additionalProperties": false
+}

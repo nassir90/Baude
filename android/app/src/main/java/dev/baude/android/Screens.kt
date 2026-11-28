@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -105,7 +106,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val session = Mesh.session(at, sid)
     val working = isWorking(chat)
     val readOnly = Settings.isReadOnly(sid) || isArchived(at, sid) || // (archived: till it's unarchived)
-        session?.elsewhere == true // (Claude Desktop's, Desktop writing it now: till it's done, ChatBanner says so)
+        session?.elsewhere == true || // (Claude Desktop's, Desktop writing it now: till it's done, ChatBanner says so)
+        !chat.chrome.writes.value // (its host lets this phone only read it)
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -123,9 +125,41 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     }
     LaunchedEffect(chat, chat.draft.value) { // (shared from another app: after what's written)
         val shared = chat.draft.value ?: return@LaunchedEffect
-        text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
+        val now = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
+        if (chat.draftRestoring) chat.putText = toMarkdown(now) // (what was kept here, put back: not written now)
+        chat.draftRestoring = false
+        text = now
         chat.draft.value = null
     }
+    LaunchedEffect(chat, text) { // (its host's draft: dirty as it's written, saved a moment after typing stops, at
+        chat.typed = text          // once as the box empties)
+        val markdown = toMarkdown(text)
+        if (chat.sender != null || chat.reverting != null) return@LaunchedEffect
+        if (chat.boxText.value != null) return@LaunchedEffect // (its host's draft not in the box yet: what's there isn't it)
+        if (markdown == chat.draftText) { // (written back to what its host has)
+            chat.draftTyping = false
+            if (chat.draftFlight == 0) {
+                chat.draftDirty = false
+                Mesh.releaseHeld(chat)
+            }
+            return@LaunchedEffect
+        }
+        if (markdown == chat.putText) return@LaunchedEffect // (as it was put there, not written)
+        chat.draftTypedIn = chat.draftEpoch // (written in the epoch its host's last said, or after this box's own send)
+        if (markdown.isNotBlank()) chat.draftSent = null
+        chat.draftDirty = true
+        chat.draftFailed = false
+        chat.draftTries = 0
+        if (!Mesh.keepsDraft(chat)) {
+            chat.draftTyping = false
+            return@LaunchedEffect
+        }
+        chat.draftTyping = true
+        if (markdown.isNotBlank()) kotlinx.coroutines.delay(Mesh.DRAFT_SAVE_MS)
+        chat.draftTyping = false
+        Mesh.saveDraft(chat, markdown)
+    }
+    androidx.compose.runtime.DisposableEffect(chat) { onDispose { Mesh.flushDraft(chat) } } // (left: saved now)
     val list = remember(chat) { androidx.compose.foundation.lazy.LazyListState() }
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
     val placeKey = if (chat.sender == null) "${chat.hostId}/${chat.sid}" else null // (a host's chat's place is kept)
@@ -152,6 +186,17 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     if (field.text != text) { // (put in from outside: its bullets made as typed ones are)
         field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)))
         if (field.text != text) text = field.text
+    }
+    LaunchedEffect(chat, chat.boxText.value) { // (its host's draft, in place of what's written: the caret and
+        val put = chat.boxText.value ?: return@LaunchedEffect // selection carried over the change)
+        val was = field
+        val at = { o: Int -> Mesh.movedOffset(was.text, put, o) }
+        field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(put,
+            androidx.compose.ui.text.TextRange(at(was.selection.start), at(was.selection.end)), null))
+        text = field.text
+        chat.typed = field.text
+        chat.putText = toMarkdown(field.text)
+        chat.boxText.value = null
     }
     val host = chat.sender == null // (Baude's own commands, the / and @ lists: a host's chat's)
     val marks = remember(chat) { Marks() }
@@ -216,6 +261,14 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             follow = !list.canScrollForward
         }
     }
+    LaunchedEffect(chat) { // (scrolled to its end, its last line drawn, or not: what's on screen seen, Mesh.tellSeen)
+        androidx.compose.runtime.snapshotFlow {
+            chat.loaded.value && list.layoutInfo.totalItemsCount > 0 && !list.canScrollForward && !list.isScrollInProgress
+        }.collect { end ->
+            chat.atEnd = end
+            if (end) Mesh.tellSeen(chat)
+        }
+    }
     LaunchedEffect(chat, chat.loaded.value) {
         if (!chat.loaded.value && chat.sender == null) return@LaunchedEffect
         kotlinx.coroutines.delay(1000)
@@ -272,15 +325,21 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         if (found == null) return@LaunchedEffect
         found.second?.let { chat.calls.opened[it] = true }
         follow = false
-        list.animateScrollToItem(found.first)
+        list.animateScrollToItem(found.first + earlierRows(chat))
     }
-    LaunchedEffect(chat) { // (scrolled up to its first lines: what's before them read and put above, readEarlier)
+    LaunchedEffect(chat) { // (scrolled up to its first lines, its host up: what's before them read and put above, readEarlier)
         androidx.compose.runtime.snapshotFlow {
-            if (chat.loaded.value && placed && chat.earlier.value && list.firstVisibleItemIndex < 3) chat.lines.size else -1
+            Mesh.tick.value
+            val up = Mesh.conn(chat.hostId)?.state == "up"
+            if (chat.loaded.value && placed && chat.earlier.value && up && list.firstVisibleItemIndex - earlierRows(chat) < 3) chat.lines.size else -1
         }.collect { if (it >= 0) Mesh.readEarlier(chat) }
     }
     androidx.compose.runtime.DisposableEffect(chat) { // (what's read before put above: what's on screen stays there)
-        chat.prepended = { n -> if (n > 0) list.requestScrollToItem(list.firstVisibleItemIndex + n, list.firstVisibleItemScrollOffset) }
+        chat.prepended = { n, had -> // (the first line in view where it was, under the spinner or not: earlierRows)
+            val top = if (had) 1 else 0
+            val first = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index >= top }
+            if (first != null && (n > 0 || top != earlierRows(chat))) list.requestScrollToItem(first.index - top + earlierRows(chat) + n, -first.offset)
+        }
         onDispose { chat.prepended = null }
     }
     Mesh.tick.value
@@ -293,7 +352,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val matches = remember(findQuery, chat.lines.size) { findMatches(chat, findQuery) }
     val findAt = (Find.at[findKey] ?: 0).coerceIn(0, maxOf(0, matches.size - 1))
     LaunchedEffect(findQuery, findAt, matches.size) { // (stepped to: scrolled into view)
-        matches.getOrNull(findAt)?.let { follow = false; list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
+        matches.getOrNull(findAt)?.let { follow = false; list.animateScrollToItem(itemIndex(chat, it.lineIndex) + earlierRows(chat), -with(density) { findBarHeight.toPx().toInt() }) }
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalImageOpener provides openImage,
         LocalImageItem provides { key: String -> Viewer.item(chat, key) }, LocalFind provides findQuery,
@@ -308,14 +367,20 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
             val shown = if (taken != null) chat.lines.take(taken) else chat.lines
+            if (earlierRows(chat) > 0) item(key = "earlier") { // (what's before its lines, read as it's scrolled up to)
+                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(16.dp), contentAlignment = Alignment.Center) {
+                    if (chat.readingEarlier) Spinner() // (only while it's asked for, or asked again soon)
+                }
+            }
             val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
             val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
             drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
-                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
+                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id },
+                background = if (working && program(session?.model) == "claude") { call -> moveToBackground(chat, call) } else null) { line ->
                 val uuid = line.uuid
                 androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
-                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { on -> revealed = if (on) uuid else null }) {
+                    waits = uuid != null && session?.taskAsks.orEmpty().contains(uuid), revert = if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { on -> revealed = if (on) uuid else null }) {
                         revealed = null
                         if (reverting?.asked == true) return@RevertOffer
                         reverting = Reverting(uuid, reverting?.draft ?: text)
@@ -333,8 +398,9 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
-            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
+            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
+            if (session?.resumeAt != null && chat.sender == null) item(key = "limit-resume") { ResumeLine(chat) }
         }
         SummaryPin(list, Gap.chatH + side, Modifier.align(Alignment.TopStart))
         over?.invoke(this, list, Gap.chatH + side)
@@ -388,14 +454,14 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val pad = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp)
             val lift = ((line - Gap.composerButton) / 2).coerceAtLeast(0.dp)
             val busy = isWorking(chat)
-            val conn = Mesh.conn(chat.hostId)
-            val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
+            val gone = chat.sender == null && Stopping.line(chat.hostId) != null // (its host not reached: what's sent waits
+                                                                                  // in its queue till it is)
             val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
-                !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
+                !(chat.sender == null && (exhausted(chat) || subscriptionOff(chat))) && reverting?.asked != true
             val sendable = ready || (chat.sender == null && isLocal(text))
             val send = {
                 val typed = text.trim()
-                val local = host && localCommand(chat, typed, busy, { text = ""; marks.at = -1 }, openPage, open)
+                val local = host && localCommand(chat, typed, busy, { Mesh.boxSent(chat); text = ""; marks.at = -1 }, openPage, open)
                 if (!local) {
                     val r = reverting
                     val markdown = toMarkdown(text)
@@ -405,6 +471,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                     } else if (r != null) commitRevert(chat, r, markdown, files.toList()) { ok -> if (ok) text = "" }
                     else {
                         Queue.submit(chat, busy, markdown, files.toList())
+                        Mesh.boxSent(chat) // (a send of its own: its host's draft emptied, and nothing from before it back)
                         text = ""
                         files.clear()
                     }
@@ -596,21 +663,23 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
 fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
+    val writes = chat.chrome.writes.value // (its host lets this phone only read it: nothing to answer with)
     if (ask.tool == "AskUserQuestion" && questions != null) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
-                skip = { Mesh.answer(chat, ask, allow = false) })
+                skip = { Mesh.answer(chat, ask, allow = false) }, enabled = writes)
         }
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button(Wording.Common.allow, suggested = true) { Mesh.answer(chat, ask, allow = true) }
+            Button(Wording.Common.allow, suggested = true, enabled = writes) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
-            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolDisplay(ask.tool).first)) {
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolTitle(ask.tool)),
+                enabled = writes) {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }
-            Button(Wording.Common.deny, destructive = true) { Mesh.answer(chat, ask, allow = false) }
+            Button(Wording.Common.deny, destructive = true, enabled = writes) { Mesh.answer(chat, ask, allow = false) }
         }
     }
 }
@@ -618,7 +687,7 @@ fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Cla
 /** claude's questions (AskUserQuestion), as Baude's QuestionForm: each its options (one picked, or several if it
  * says so) and Other, to write your own. Answer sends {question: what's picked, comma-joined}; Skip, none. */
 @Composable
-fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
+fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit, enabled: Boolean = true) {
     val c = LocalBaude.current
     val qs = (0 until questions.length()).mapNotNull { questions.optJSONObject(it) }.filter { it.optString("question").isNotBlank() }
     val picked = remember { mutableStateListOf<Set<String>>().apply { repeat(qs.size) { add(emptySet()) } } }
@@ -659,8 +728,8 @@ fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Un
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Button(Wording.Asks.answer, suggested = true, enabled = ready()) { if (ready()) answer(answers()) }
-        Button(Wording.Asks.skip, onClick = skip)
+        Button(Wording.Asks.answer, suggested = true, enabled = enabled && ready()) { if (ready()) answer(answers()) }
+        Button(Wording.Asks.skip, enabled = enabled, onClick = skip)
     }
 }
 
@@ -763,16 +832,18 @@ suspend fun toEnd(list: androidx.compose.foundation.lazy.LazyListState, glide: B
 val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
 
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
- * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
- * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
+ * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top (a link to that chat, if it
+ * names one: a task's, to its run on its Bot's Tasks page), and what the store says is shown of it in place of its
+ * text if it says (shown: a held answer sent, drawn as the held one was). waits: a task's ask whose run waits for its
+ * answer (its Bot's task_asks), said on its from line. */
 @Composable
-fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null) {
+fun Said(line: Line, from: Msg.StoredSender? = null, waits: Boolean = false, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
+                FromLine(from, waits)
                 SelectionContainer {
                     val shown = from.shown
                     Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))
@@ -781,6 +852,50 @@ fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null
         }
         else -> SaidLine(line, revert)
     }
+}
+
+/** A message's from line (SenderTurn's): "from <who>", a link to that chat if it names one (a task's: to its run);
+ * a chat a task's run started, then " · <task> run" (a link to the run, on its Bot's Tasks page) and " · finished"
+ * (or stopped, failed), as wire.sender_about says it; a task's ask whose run waits for its answer (waits), then
+ * " · its run is waiting for this answer" (a link to the run), while it waits. */
+@Composable
+fun FromLine(from: Msg.StoredSender, waits: Boolean = false) {
+    val c = LocalBaude.current
+    val host = from.host?.ifBlank { null }
+    val session = from.session?.ifBlank { null }
+    val run = from.run?.ifBlank { null }
+    val bot = from.bot?.ifBlank { null } ?: session
+    val link = TextLinkStyles(SpanStyle(color = c.accent, textDecoration = TextDecoration.Underline))
+    val text = buildAnnotatedString {
+        val who = Wording.Common.fromWho(author = senderName(from))
+        if (host != null && session != null) {
+            withLink(LinkAnnotation.Clickable("sender", link) {
+                if (from.bot.isNullOrBlank()) openSender(host, session, from.task, run) else openSender(host, session, null, null)
+            }) { append(who) }
+        } else append(who)
+        val task = from.taskName?.ifBlank { null }
+        if (task != null && run != null) {
+            append(" · ")
+            if (host != null && bot != null) withLink(LinkAnnotation.Clickable("run", link) {
+                openSender(host, bot, from.task, run)
+            }) { append(Wording.Senders.taskRun(task = task)) }
+            else append(Wording.Senders.taskRun(task = task))
+        }
+        when (from.over) {
+            "finished" -> Wording.TaskNotes.finished
+            "stopped" -> Wording.TaskNotes.stopped
+            "failed" -> Wording.TaskNotes.failed
+            else -> null
+        }?.let { append(" · "); append(it) }
+        if (waits && run != null) {
+            append(" · ")
+            if (host != null && bot != null) withLink(LinkAnnotation.Clickable("waiting", link) {
+                openSender(host, bot, from.task, run)
+            }) { append(Wording.Senders.runWaiting) }
+            else append(Wording.Senders.runWaiting)
+        }
+    }
+    Text(text, style = Type.caption, color = c.dim, textAlign = TextAlign.End)
 }
 
 @Composable

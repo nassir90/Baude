@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's access rules, and a chat's own if session's given (refused from a member access_read doesn't allow).",
+  "properties": {
+    "op": {
+      "const": "access",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A chat of the host's: its own rule for managing it too."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

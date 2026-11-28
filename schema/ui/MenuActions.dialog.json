@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Restart Daemon, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Database Schemas and the menu itself are elsewhere).",
+  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Restart Daemon, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Databases and the menu itself are elsewhere).",
   "apps": [
     "baude",
     "record"
@@ -94,7 +94,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "asks this machine's host process to stop and start again once no command is running on it (it answers busy while one is; asked again every 5 s). A model turn going on is cut short (\"Cut short by a restart\", with Continue). Its chats are kept and resume as they're next written to. Toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once the new one is there. With no host process running, one is started."
+          "does": "asks this machine's host process to stop and start again once no command is running on it (it answers busy while one is; asked again every 5 s). A model turn going on is cut short (\"Cut short by a restart\", with Continue). Its chats are kept and resume as they're next written to. Toast \"Restarting the daemon once N things are done\" with Details while it waits (Sidebar's \"Daemon restart toast\"), \"Daemon restarted\" once the new one is there. With no host process running, one is started."
         }
       ]
     },

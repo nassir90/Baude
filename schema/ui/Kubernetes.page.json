@@ -1,5 +1,5 @@
 {
-  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and pods' followed logs and shells in them under both, a tab each. Read-only except for pod deletes, each asked first, and what's typed in a pod's shell. It reads the clusters of the host picked in the window's host dropdown, through that host's host process, and can move out to a window of its own and back.",
+  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories under Home (the whole stack's CPU and memory), a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and pods' followed logs and shells in them under both, a tab each. Read-only except for pod deletes, each asked first, and what's typed in a pod's shell. It reads the clusters of the host picked in the window's host dropdown, through that host's host process, and can move out to a window of its own and back.",
   "apps": [
     "baude",
     "record"
@@ -25,7 +25,16 @@
     "kubehost.py:Host",
     "kubehost.py:Follow",
     "viewwindow.py:Out",
-    "viewwindow.py:ViewWindow"
+    "viewwindow.py:ViewWindow",
+    "kubehome.py:KubeHome",
+    "kubeview.py:KubeView.read_summary",
+    "baudelib/hostkube.py:_summary",
+    "kubedata.py:kube_summary",
+    "kubedata.py:kube_pod_asks",
+    "kubeview.py:ColumnFilters",
+    "kubeview.py:kube_filterable",
+    "android/.../ColumnFilters.kt:ColumnFilters",
+    "android/.../KubeTable.kt:KubeTable"
   ],
   "copy": [
     "kube",
@@ -50,20 +59,45 @@
         },
         {
           "name": "context picker",
-          "shows": "A drop-down of every kubeconfig context (clusters no context names are not listed). Shows the picked context's name, truncated in the middle past about 32 characters. The one used last is picked on open, else the kubeconfig's current one, else the first. No \"(current)\" suffix.",
+          "shows": "A button showing the picked context's name, truncated in the middle past about 32 characters (\"Choose a context\", dim, when none is picked because the one shown was removed); it opens a list of every kubeconfig context (clusters no context names are not listed), sorted by name with numbers by their value (slice-2 before slice-10), the picked one ticked. With more than 15 contexts the list has a search box (\"Find a context\": every word typed in the name; \"No contexts match\" when none does) and contexts sharing the start of their name up to the first - _ . : / or @ are grouped under that start, dim, with a rule before a context on its own after a group. The list follows the host's kubeconfig live: contexts added or deleted by other tools appear and go within about a second, a row at a time, without the list being rebuilt, losing its place or closing. The one used last is picked on open (only if it is still the same cluster: same name and server), else the kubeconfig's current one, else the first. No \"(current)\" suffix.",
           "copy": [
-            "kube.context_tip"
+            "kube.context_tip",
+            "kube.pick_context",
+            "kube.find_context",
+            "kube.no_context_match"
           ],
           "actions": [
             {
               "by": "pick another context",
-              "does": "Switches to that cluster: the table fades, the logs close and their kubectl stops, the YAML closes, any watch stops, then the cluster's resources, namespaces and node count are read and the page is read again. Each context remembers the namespaces shown in it; the context is remembered across sessions."
+              "does": "Switches to that cluster: the table fades, the logs close and their kubectl stops, the YAML closes, any watch stops, then the cluster's resources, namespaces and node count are read and the page is read again. Each cluster (context name plus its server) remembers the namespaces shown in it; the context is remembered across sessions with its server."
+            },
+            {
+              "by": "key Up / Down, Enter in the search",
+              "does": "Moves through the contexts shown; Enter picks the highlighted one."
+            }
+          ],
+          "phone": {
+            "does": "Tapped, the context list opens in the page, in the table's place, with Back (not as a popup): the same list, search and groups, the picked one ticked; picking one shows it, picking the one shown goes back to its table.",
+            "why": "a list of 27 and more contexts with a search needs the page's height, which a popup on a phone doesn't have",
+            "decided": "2026-11-26"
+          },
+          "decisions": [
+            {
+              "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+              "rule": "Every app's context picker follows the host's kubeconfig live (pushed by the host, never needing a refresh), sorted, grouped by name prefix and searchable once there are more than 15, and updated row by row without flicker.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+                }
+              ]
             }
           ]
         },
         {
           "name": "namespaces button",
-          "shows": "A button with a down arrow showing which namespaces are shown: \"All namespaces\", the one name, two names joined by a comma, or \"3 namespaces\" (n namespaces) from three up. Its tooltip is \"Namespaces shown (any of them at once)\", or, with more than two chosen, the full comma-joined list of names.",
+          "shows": "A button with a down arrow showing which namespaces are shown: \"All namespaces\", the one name, two names joined by a comma, or \"3 namespaces\" (n namespaces) from three up. Its tooltip is \"Namespaces shown (any of them at once)\", or, with more than two chosen, the full comma-joined list of names. With none chosen it reads \"0 namespaces\".",
           "copy": [
             "kube.all_namespaces",
             "kube.n_namespaces",
@@ -75,12 +109,12 @@
               "does": "Opens a popover: an \"All namespaces\" check, a separator, then a scrolling list (up to about 420 px tall) of a check per namespace of the cluster, sorted by name (plus any shown namespace the cluster didn't list, such as one opened from a link)."
             },
             {
-              "by": "tick \"All namespaces\"",
-              "does": "Shows every namespace's objects (clears the chosen set)."
+              "by": "click \"All namespaces\"",
+              "does": "While every namespace is shown (it and every namespace checked): unchecks them all, and no namespace's objects are shown. Otherwise: checks every namespace and shows every namespace's objects."
             },
             {
               "by": "tick or untick a namespace",
-              "does": "Adds it to or removes it from the set shown, in the order picked; the table fades and is filtered (nothing is read again). Any number can be on at once. With none ticked it is the same as All namespaces."
+              "does": "Adds it to or removes it from the set shown, in the order picked; the table fades and is filtered (nothing is read again). Any number can be on at once. Unticking one while all are shown shows all the rest; every one ticked is All namespaces (ticked too); none ticked shows no namespace's objects. Every namespace is ticked while All namespaces is (GroupByMenu.menu.json's decision of 2026-11-26)."
             }
           ]
         },
@@ -128,7 +162,7 @@
           "actions": [
             {
               "by": "click",
-              "does": "The view moves to a window of its own titled as its heading, all of it as it was (its context, its watch, its dock's tabs); the window under it is left showing what the view covered. The window has a header bar of its own (its window controls, on macOS its traffic lights) over the view, whose bar leaves out the room for them. Opening the view again brings that window up, as it is: nothing is read again (the tabs, the watch and the diagram go on) unless another host is picked. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."
+              "does": "The view moves to a window of its own titled as its heading, all of it as it was (its context, its watch, its dock's tabs); the window under it is left showing what the view covered. The view's bar becomes that window's header bar: its controls sit in the window's title bar beside the window's own controls (on macOS its traffic lights), with no band above the view; there the bar leaves out Move to Its Own Window, its × and the traffic lights' room, as the window has its own. Back over the window it came from, the bar is as it was. Opening the view again brings that window up, as it is: nothing is read again (the tabs, the watch and the diagram go on) unless another host is picked. Closing that window puts the view back over the window it came from, shown. Closing the window it came from closes it too."
             }
           ],
           "decisions": [
@@ -141,12 +175,22 @@
                   "issue": "BaudeInternal#188"
                 }
               ]
+            },
+            {
+              "said": "The Kubernetes view out in its own window should use the window's top bar, not leave a band of empty space at the top (paraphrased)",
+              "rule": "In every app, a view moved out to a window of its own (Kubernetes, Databases, and any view built the same way) puts its bar's controls in that window's title bar or header bar, with nothing empty above the view; back over the window it came from, its bar is as it was",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#250"
+                }
+              ]
             }
           ]
         },
         {
           "name": "close",
-          "shows": "A round × button, tooltip \"Close (Esc)\"",
+          "shows": "A round × button, tooltip \"Close (Esc)\". Hidden while the view is out (its window has its own close).",
           "copy": [
             "images.close"
           ],
@@ -161,7 +205,7 @@
     },
     {
       "name": "sidebar of categories",
-      "shows": "A left column about 230 px wide (scrolls vertically) listing Freelens' categories. A category with several kinds is a heading row (the category's icon, its name, and a down arrow, or a right arrow when folded) with its kinds nested under it, indented to line up with the heading's name. A category of one kind is just that kind's row carrying the category's icon (Nodes, Namespaces, Events). One row is selected: the page shown. Pods is the page on first open. A kind this cluster doesn't serve is dimmed and can't be picked; its tooltip is \"<context> doesn't serve <kind>\". Categories and kinds, in order: Nodes (shown only when the cluster has more than one node, or when it's the page shown); Workloads: Pods, Deployments, DaemonSets, StatefulSets, ReplicaSets, Replication Controllers, Jobs, CronJobs, Rollouts (Argo, only where installed); Config: ConfigMaps, Secrets, Resource Quotas, Limit Ranges, Horizontal Pod Autoscalers, Vertical Pod Autoscalers, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configurations, Validating Webhook Configurations, Validating Admission Policies, Validating Admission Policy Bindings; KEDA (only on a cluster with KEDA): Scaled Objects, Scaled Jobs, Trigger Authentications, Cluster Trigger Authentications; Network: Services, Endpoints, Endpoint Slices, Ingresses, Ingress Classes, Network Policies, HTTP Routes (Gateway API), Ingress Routes (Traefik), Virtual Services (Istio); Storage: Persistent Volume Claims, Persistent Volumes, Storage Classes; Namespaces; Events; Helm: Releases; User Management: Service Accounts, Cluster Roles, Roles, Cluster Role Bindings, Role Bindings; Certificates (cert-manager, only where installed): Certificates, Issuers, Cluster Issuers; Monitoring (Prometheus Operator, only where installed): Service Monitors, Pod Monitors, Prometheus Rules; Custom Resources: Definitions. The optional custom-resource kinds' rows, and a category's heading when none of its kinds is served, are not listed at all on a cluster that lacks them (rather than dimmed).",
+      "shows": "A left column about 230 px wide (scrolls vertically) listing Freelens' categories. A category with several kinds is a heading row (the category's icon, its name, and a down arrow, or a right arrow when folded) with its kinds nested under it, indented to line up with the heading's name. A category of one kind is just that kind's row carrying the category's icon (Nodes, Namespaces, Events). One row is selected: the page shown. Home is the page on first open (a link that opens the view on a kind opens on that kind). A kind this cluster doesn't serve is dimmed and can't be picked; its tooltip is \"<context> doesn't serve <kind>\". Categories and kinds, in order: Home (its own row, a house icon, first); Nodes (shown only when the cluster has more than one node, or when it's the page shown); Workloads: Pods, Deployments, DaemonSets, StatefulSets, ReplicaSets, Replication Controllers, Jobs, CronJobs, Rollouts (Argo, only where installed); Config: ConfigMaps, Secrets, Resource Quotas, Limit Ranges, Horizontal Pod Autoscalers, Vertical Pod Autoscalers, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configurations, Validating Webhook Configurations, Validating Admission Policies, Validating Admission Policy Bindings; KEDA (only on a cluster with KEDA): Scaled Objects, Scaled Jobs, Trigger Authentications, Cluster Trigger Authentications; Network: Services, Endpoints, Endpoint Slices, Ingresses, Ingress Classes, Network Policies, HTTP Routes (Gateway API), Ingress Routes (Traefik), Virtual Services (Istio); Storage: Persistent Volume Claims, Persistent Volumes, Storage Classes; Namespaces; Events; Helm: Releases; User Management: Service Accounts, Cluster Roles, Roles, Cluster Role Bindings, Role Bindings; Certificates (cert-manager, only where installed): Certificates, Issuers, Cluster Issuers; Monitoring (Prometheus Operator, only where installed): Service Monitors, Pod Monitors, Prometheus Rules; Custom Resources: Definitions. The optional custom-resource kinds' rows, and a category's heading when none of its kinds is served, are not listed at all on a cluster that lacks them (rather than dimmed).",
       "actions": [
         {
           "by": "click a kind",
@@ -177,7 +221,108 @@
         "why": "The owner: on the phone the categories' headings should be a bit bigger and their rows a bit narrower",
         "decided": "2026-11-22"
       },
-      "decisions": [{"said": "On the phone, the category headings should be a bit bigger and the rows under them a bit narrower (paraphrased)", "rule": "Every app draws a category's heading row bolder and taller than the kind rows under it, its name at the body's size, and keeps the kind rows compact", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#181"}]}]
+      "decisions": [
+        {
+          "said": "On the phone, the category headings should be a bit bigger and the rows under them a bit narrower (paraphrased)",
+          "rule": "Every app draws a category's heading row bolder and taller than the kind rows under it, its name at the body's size, and keeps the kind rows compact",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "issue": "BaudeInternal#181"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Home",
+      "shows": "In the table's place while Home is picked (the YAML pane and the dock as ever), scrolling: two cards side by side (one above the other where there isn't room), CPU then Memory, each with a rule round it and rounded corners. A card's head: its name (bold) and, at the right, dim, what every node can give pods together (their allocatable: \"4 cores\", \"7.7GiB\"; tooltip \"What the nodes can give pods (their allocatable)\"). Under it three rows, Requested, Used and Limits: the word (its tooltip says what it adds up), a bar 10 px tall with round ends whose track stands for the most of allocatable, requested, used and limits: the amount filled in its colour up to allocatable (Requested in the accent, Used green, Limits grey), any part past allocatable a segment of its own in orange (square where it meets the rest), and a tick at allocatable whenever the track goes past it, the amount (CPU in cores to two places, \"1.10\"; memory as the table's, \"704.0MiB\"; \"N/A\" for Used without a metrics API; \"–\" for Limits when no container sets one) and its share (\"27%\") dim. No bars when the nodes can't be listed. When any of them is 5% or more past allocatable, a line in orange under the rows says how far the most over is: \"Limits 2.3× allocatable\" (never \"1.0×\"). Under them, how it went, 48 px tall: Used as a green line and Requested as a dashed line in the accent, over the history the host keeps, each sample at its time across the 30 minutes up to the newest, so a stretch with none (the host off, the cluster unreachable) is a gap in the lines; across it, flat at their values now, Allocatable dashed in the card's text colour and Limits dashed in the Limits bar's grey. Its top stands for allocatable (and 8% more) once the most used or requested reaches a quarter of allocatable, and till it falls under a fifth (so one that hovers about a quarter doesn't flip between the two), so the lines read against what the nodes can give; under that, for the most they reached (and 15% more), so a small use's ups and downs still show, and allocatable is then out of view. A reference line is drawn only while it's within the top (limits past it, as on an overcommitted cluster, aren't drawn; the bars and the over line say it). Nothing is drawn with fewer than two samples. Pointing at it (the desktop: hover; the phone: a long press, then dragged across, so a scroll across it shows nothing) marks the sample nearest in time with a thin vertical line and a dot on each line, and shows its time (HH:MM:SS), Used, Requested, Limits and Allocatable, one a line (limits and allocatable as now; \"N/A\" where there's none, as on the card): the desktop in its tooltip, the phone in a dark bubble above the history that follows the finger and goes when it lifts; in a gap the desktop's tooltip is \"Used (and requested, dashed) over the last 30 minutes, against allocatable and limits (dashed) now\". Under the cards a table of the namespaces shown, a row each: Namespace, Pods, CPU requested, CPU used, CPU limits, CPU % of requests, CPU % of limits, Memory requested, Memory used, Memory limits, Memory % of requests, Memory % of limits (used as a share of what's requested and of the limits, as Grafana's CPU Quota table and k9s; \"–\" where nothing is requested or no limit is set), its head dim and bold, numbers to the right. On a cluster of more than one node (as the Nodes row), a table of the nodes under it: Node, Pods, CPU requested, CPU used, CPU limits, CPU allocatable, Memory requested, Memory used, Memory limits, Memory allocatable; pods not yet on a node are a row of their own, \"Unscheduled\", with no allocatable (\"–\"). Both tables come sorted by CPU used, most first (then most requested), the heading sorted by marked with a small arrow (rows alike keep the host's order, either way, in both apps); a table of more than 11 rows shows the first 10 as sorted and an \"Other (n)\" row adding up the rest (its name dim and not a link; its shares the shares of its sums over the rows that have what each is a share of: % of limits adds up only the rows with limits, top and bottom). The host lays the columns out (schema/types KubeShareColumn: each its kind, so an app sorts by it and adds rows up) and gives each row's numbers (KubeShare keys). Each 10 s read changes the tables' texts in place (a row added or gone, another order, or new columns, lays them out anew). The filter keeps the rows any cell of which has its text, before the first 10 are taken. The tables scroll sideways when they're wider than the room. The host adds it up (kube's summary; schema/types KubeSummary): every app asks and draws its answer (schema/ui README: apps are thin clients). A read under the Kubernetes read rule, as list is. Requested and limits are the pods' that hold on to their node (not Succeeded or Failed ones), each pod's as the scheduler reckons it (the sidecar KEP's order): its containers' and sidecars' summed, or, if more, the most any init container needs while it runs beside the sidecars started before it; plus its overhead (a request's always, a limit's only where a limit is set); a limit is the sum of those set, as kubectl describe node adds them. The host reads only what that needs: kubectl get pods with a field selector leaving out Succeeded and Failed ones, -o jsonpath of each pod's namespace, name, node and overhead and its containers' and init containers' resources and restartPolicy. Used is the metrics API's pods (metrics-server) summed, so it adds up with the namespaces' and nodes' rows; without one it's N/A and the status line says so. Allocatable is every node's status.allocatable summed; a node's row is against its own. History: from the first time Home is read for a context, the host samples it every 10 s until its process ends, whether Home is open or not (only contexts Home has been read for), each namespace's requested and used, for 30 minutes, in its own memory (none kept on disk; a host restarted starts again); the totals of the namespaces shown are worked out from them. A context's history is kept for its cluster as the kubeconfig watcher knows it (kube_key: the context's name and its server): a context gone from the kubeconfig isn't read, and its history is dropped once the watcher reads the kubeconfig whole without it (or with another server under its name: a name reused for another cluster begins a new history, and KubeSummary began tells an app to drop the samples it holds from before it); a kubeconfig caught half written never drops one. The sampling thread ends when no context is left; a context not read for a day is let go too. Each context is read on its own thread, one read at a time: a context whose read hasn't come back isn't read again, and a cluster that hangs holds up no other; a Home read while the sampler reads that context waits for that read, so no sample is taken twice or kept out of order. Nothing that goes wrong stops the sampler. A read that fails is tried again 10 s later, then twice as far apart each time in a row, up to 5 minutes; while it waits, Home is answered with the last failure without asking the cluster. The wait ends at once when that context's kubeconfig entry changes, and Refresh (desktop and phone) asks with fresh, which reads the cluster now, past both the wait and the read the host keeps for 5 s; a read that succeeds ends the wait. An app asks only for the samples after the newest it has (since) and keeps the last 30 minutes'.",
+      "copy": [
+        "kube.cores",
+        "kube.allocatable_tip",
+        "kube.requested",
+        "kube.requested_tip",
+        "kube.used",
+        "kube.used_tip",
+        "kube.limits",
+        "kube.limits_tip",
+        "kube.history_tip",
+        "kube.only_namespace",
+        "kube.unscheduled",
+        "kube.allocatable",
+        "kube.over_allocatable",
+        "kube.other"
+      ],
+      "actions": [
+        {
+          "by": "pick namespaces (the bar's namespaces button)",
+          "does": "The totals, the history and the namespaces table are those namespaces' (the host adds them up again); allocatable stays every node's."
+        },
+        {
+          "by": "click a namespace's name (a link, tooltip \"Only <namespace>'s\")",
+          "does": "Shows only that namespace, as a namespace link in a table does."
+        },
+        {
+          "by": "click (the phone: tap) a table's column heading",
+          "does": "Sorts that table by it, most first for numbers and A to Z for names; again, the other way. Rows without a number go last either way. The first 10 and the Other row follow the order."
+        },
+        {
+          "by": "hover the history (the phone: hold a finger on it, or drag it across)",
+          "does": "A line and dots at the sample nearest in time, its time, Used, Requested, Limits and Allocatable shown (the desktop: tooltip; the phone: a bubble above it, gone when the finger lifts)."
+        },
+        {
+          "by": "none (the view open on Home)",
+          "does": "Read again every 10 s, as a list that isn't watched is; Refresh reads it at once."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "A home page that records the total memory and CPU requests, usage and limits used by the whole stack (paraphrased)",
+          "rule": "Every app's Kubernetes view opens on Home, the first row of its sidebar: the stack's CPU and memory requested, used and limits, each against what the nodes can give pods, with a short history, by namespace and by node, as the host adds them up",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#251"
+            }
+          ]
+        },
+        {
+          "said": "Keep sampling a context every 10 s from the first time Home is read for it until the host process exits, whether or not Home is open; sample only clusters the user has opened on Home (paraphrased)",
+          "rule": "Every host samples Home's totals for each context Home has been read for every 10 s, open or not, and every app plots the samples by their time so a stretch without any shows as a gap",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#251"
+            }
+          ]
+        },
+        {
+          "said": "Look up examples of how AWS, freelens, grafana do the graphing stuff and let me know if htere's any improvement",
+          "rule": "Every app's Home reads against capacity as Freelens, Grafana and AWS Container Insights do: the history has dashed Allocatable and Limits lines at their values now and shows a sample's time, used, requested and limits when pointed at (hover, or a finger held and dragged); a card's bars are scaled to the most of allocatable, used, requested and limits, with a tick at allocatable, the part past it a segment of its own and a line saying how far over (\"Limits 2.3× allocatable\"); the namespaces table has used as a share of requests and of limits for CPU and memory (\"–\" where there's none), is sorted by CPU used with sortable headings, and a namespaces' or nodes' table of more than 10 rows shows the top 10 and an \"Other (n)\" row",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "5d1d4b21-4eda-4d3b-ad2d-77ac0a89bb19"
+            }
+          ]
+        },
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "Every host keeps a context's Home history for the cluster and server the kubeconfig names for it: a context gone from the kubeconfig stops being sampled and its history is dropped at once, a name reused for another cluster begins a new history, and reads that keep failing are tried again further and further apart (to 5 minutes), not every 10 s",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "table",
@@ -270,6 +415,50 @@
             {
               "by": "double-click or press Enter on a Custom Resource Definitions row",
               "does": "Adds a row for that definition's kind to the sidebar (under Definitions), selects it, and shows that kind's objects with the columns the definition declares."
+            }
+          ]
+        },
+        {
+          "name": "column filter",
+          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0; a value with a count of 0 is greyed (dim) but can still be ticked. A filter on a column the table doesn't show (the Node column on a cluster of one node) hides nothing until the column is back.",
+          "copy": [
+            "kube.filter_column",
+            "kube.value_count",
+            "kube.no_value",
+            "fixes.all"
+          ],
+          "actions": [
+            {
+              "by": "click the funnel (the phone: hold the heading, or tap its funnel while it filters)",
+              "does": "Opens a popover: an \"All\" check, a separator, then a check per value of the column in the rows the other filters leave (and any value hidden), sorted by name, each \"Value (n)\" with how many rows have it; an empty cell is \"(none)\". The namespaces button's checklist."
+            },
+            {
+              "by": "untick or tick a value",
+              "does": "Hides or shows the rows with that value at once (nothing is read again); remembered in the settings for the kind (kube_hidden, Docker's docker_hidden: {kind: {column title: [values hidden]}}). All ticks every value; unticking All hides every row."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "WE should be able to hover over container status, click a filter button on the right aligned and then see a chckbox dropdown to filter by the set of strings i.e. I usually want to filter out Succeeded / Failed nad only see running jobs.",
+              "rule": "Every app's resource tables (Kubernetes' kinds, Docker's pages) let a column of a few words be filtered by its values: a filter button at the column heading's right end (shown on hover, kept and in the accent while it filters; on a touch screen, holding the heading opens it and the funnel sits just after the title while it filters) opens All over a check per value with its row count; unticked values' rows are hidden, together with the namespaces picked and the filter box, and the status line counts the rows shown. The values hidden are remembered per kind (or Docker page) across refreshes and restarts, so hiding Succeeded and Failed pods stays.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+                }
+              ]
+            },
+            {
+              "said": "UX -- in the filter column fileds with no elements should be slighlt grayed out but still clickavble",
+              "rule": "In every app's column filter, a value no row has (a count of 0) is drawn greyed, as a dim label, and stays a check that can be ticked or unticked.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "d58d44a8-1c67-40ed-9a24-27be89804cb4"
+                }
+              ]
             }
           ]
         }
@@ -466,7 +655,7 @@
         },
         {
           "name": "shell tab",
-          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. It starts (and starts again) only once the host says the cluster is still the one shown, its server too, and kubectl exec is pointed at that server, so a shell never opens in a cluster deleted and made again under the same context name; one that fails within its first seconds on a kubeconfig caught half written is run once more. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
           "copy": [
             "kube.shell",
             "kube.container",
@@ -489,26 +678,49 @@
     },
     {
       "name": "status line",
-      "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\"), the context's name, \"live\" while the list is watched, the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only) and finally \"read-only but for the deletes you confirm\". The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\".",
+      "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\") and the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only). The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\". On Home: a fresh note, then the metrics note, nothing else.",
       "copy": [
         "kube.count",
         "kube.count_of",
         "kube.in_namespaces",
-        "kube.live",
         "kube.metrics",
         "kube.no_metrics",
-        "kube.read_only",
         "kube.connecting",
         "kube.reading",
         "kube.finding",
         "kube.cant_watch",
         "kube.owner_missing",
         "kube.no_page"
+      ],
+      "decisions": [
+        {
+          "said": "\"Read-only but for the deletes you confirm\" / \"<context name> (obvious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+          "rule": "Every app's Kubernetes status line is the count (\"36 pods\") and, for Pods and Nodes, the metrics note (after a fresh note, if any), and nothing else while it shows a list: no context name (the bar has it), no \"live\", no read-only note",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#252"
+            }
+          ]
+        }
       ]
     },
     {
       "name": "live updating",
-      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed)."
+      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more (a watch, twice at most, then it counts as failed); one whose context has gone is answered as removed. Pod deletes and logs, like shells, are pointed at the server the context was shown with. Home's history is kept per cluster (name and server) and dropped when the context goes or its server changes. Databases follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
+      "decisions": [
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "Every app reads the host's kubeconfig as tools rewrite it: changes are noticed cheaply and pushed, a half-written file is never taken for the whole, and a kubectl call that hit one is retried once.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "keys",
@@ -531,7 +743,27 @@
     }
   ],
   "states": [
-    {"name": "kubectl missing", "shows": "kubectl isn't on the host the view reads (as its host says, or this machine): the table is replaced by the missing-dependency state (schema/ui README: a missing dependency is shown one way): a package icon, \"Kubernetes needs kubectl\", the host's own install command with Copy, and Try Again, which clears the missing state first and then reads the host's contexts again (the table is back once kubectl is there). Nothing kubectl reads is read meanwhile; the status line is empty.", "copy": ["deps.needs", "common.try_again", "kube.copied_try_again"], "decisions": [{"said": "Think about guidance for installing what Baude depends on (claude, codex, vte3, kubectl, docker) and how Baude behaves when they aren't there (paraphrased)", "rule": "Every app's Kubernetes view on a host without kubectl shows the missing-dependency state with that host's install command, never kubectl's own error", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#184"}]}]},
+    {
+      "name": "kubectl missing",
+      "shows": "kubectl isn't on the host the view reads (as its host says, or this machine): the table is replaced by the missing-dependency state (schema/ui README: a missing dependency is shown one way): a package icon, \"Kubernetes needs kubectl\", the host's own install command with Copy, and Try Again, which clears the missing state first and then reads the host's contexts again (the table is back once kubectl is there). Nothing kubectl reads is read meanwhile; the status line is empty.",
+      "copy": [
+        "deps.needs",
+        "common.try_again",
+        "kube.copied_try_again"
+      ],
+      "decisions": [
+        {
+          "said": "Think about guidance for installing what Baude depends on (claude, codex, vte3, kubectl, docker) and how Baude behaves when they aren't there (paraphrased)",
+          "rule": "Every app's Kubernetes view on a host without kubectl shows the missing-dependency state with that host's install command, never kubectl's own error",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#184"
+            }
+          ]
+        }
+      ]
+    },
     {
       "name": "no kubeconfig context",
       "shows": "The table area is empty and the status line says \"No kubeconfig context to show: <where>.\" where <where> is the kubeconfig path(s) (shortened with ~), or \"~/.kube/config (there is none)\" when no file is set up. Nothing is read."
@@ -594,6 +826,47 @@
     {
       "name": "another host",
       "shows": "The bar names the host picked; its contexts, its clusters' objects, YAML, logs and shells are read and run there by its host process. A host that can't be reached says \"<host>: <why>\" in the status line."
+    },
+    {
+      "name": "cluster removed",
+      "shows": "The context shown went from the kubeconfig (a tool deleted its cluster, or made another under the same name, i.e. another server): the table, Home or the error is replaced by a dim server icon, \"This cluster was removed\" and a context button (\"Choose a context\") to pick another; the bar's picker shows \"Choose a context\" too. The status line says \"<context> was removed from the kubeconfig\". Its watch, Home, metrics refresh and any read in flight stop; no kubectl error or spinner is shown. Docked log tabs of that cluster stop following and say \"cluster removed\"; a shell tab writes \"<context> was removed from the kubeconfig: this shell has ended.\" in its terminal and ends kubectl exec, its text kept. An open delete dialog closes. No other context is picked automatically, even when one of the same name comes back: that is another cluster, and its remembered namespaces start fresh.",
+      "copy": [
+        "kube.removed",
+        "kube.removed_status",
+        "kube.removed_state",
+        "kube.removed_shell",
+        "kube.pick_context"
+      ],
+      "decisions": [
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "When the cluster shown is deleted from the kubeconfig, every app says so calmly with a picker to choose another, stops everything reading it, tells an open shell, and never falls back to another cluster by itself (acting on the wrong cluster is dangerous). A context recreated under the same name is a new cluster: nothing kept of the old one is used.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "The context's name, \"live\" and \"read-only but for the deletes you confirm\" in the status line",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner: \"Read-only but for the deletes you confirm\" / \"<context name> (obvious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#252"
+        }
+      ]
     }
   ],
   "decisions": [
@@ -615,6 +888,9 @@
     "38e-kubernetes-shell",
     "38e-kubernetes-dock",
     "38e-kubernetes-host",
-    "38e-kubernetes-window"
+    "38e-kubernetes-window",
+    "38e-kubernetes-home",
+    "38e-kubernetes-home-prod",
+    "38e-kubernetes-home-crowded"
   ]
 }

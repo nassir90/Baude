@@ -20,6 +20,9 @@ private val NEEDS_LOGIN = Regex("Please run /login|\\brun /login\\b|claude (?:au
 
 fun needsLogin(text: String?): Boolean = !text.isNullOrEmpty() && NEEDS_LOGIN.containsMatchIn(text)
 
+/** A sign-in that was there and ran out, as claude says it (hostlogin.EXPIRED): not one there's never been. */
+val EXPIRED = Regex("\\b(?:expired|time limit|cannot be renewed|can't be renewed)\\b", RegexOption.IGNORE_CASE)
+
 /** The error of a message of claude's that signing in again would fix (hostlogin.login_error), or null: a turn's
  * result, if it's an error; the message it writes in place of a reply, said to be the sign-in's or saying so. */
 fun loginError(m: JSONObject): String? {

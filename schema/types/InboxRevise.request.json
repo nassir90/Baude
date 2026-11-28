@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A new version of a waiting ask: its task's script's (run, token), the asking chat's or Bot's (its own tools; a Bot's after a message from the ask's box), or one that may manage it. A script's, or the asking chat's own, on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.",
+  "properties": {
+    "op": {
+      "const": "inbox_revise",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "run": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The asking run's id: a script's."
+    },
+    "token": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its run's token: a script's."
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's called in the Inbox's list (its body's first line, if none)."
+    },
+    "body": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it says now (Markdown)."
+    },
+    "pictures": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "InboxPictureData.json"
+      },
+      "description": "Its pictures, each by the name its body and buttons use."
+    },
+    "buttons": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "InboxButton.json"
+      },
+      "description": "Its buttons now."
+    },
+    "form": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Fields to fill (as a task's form has them): their values go with the button pressed."
+    }
+  },
+  "required": [
+    "op",
+    "ask"
+  ],
+  "additionalProperties": false
+}

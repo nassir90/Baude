@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A container's or a Compose project's log, followed (logs): one a connection, the answers docker_text till docker_end or the connection goes (docker is stopped then).",
+  "properties": {
+    "op": {
+      "const": "docker_follow",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": [
+        "logs"
+      ],
+      "description": "What to follow."
+    },
+    "context": {
+      "type": "string",
+      "description": "The context, by its name."
+    },
+    "page": {
+      "type": "string",
+      "description": "The category's page, by its key: a container's or a Compose project's."
+    },
+    "id": {
+      "type": "string",
+      "description": "The container's id, or the Compose project's name."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

@@ -15,18 +15,21 @@ class Chrome {
     val cost = mutableStateOf(0.0)
     var costSeen = 0.0                              // (the last total claude gave: spent_since)
     val lastTurn = mutableStateOf("")
-    val usage = mutableStateOf<JSONObject?>(null)   // (what its session said of its context)
+    val categories = mutableStateOf<org.json.JSONArray?>(null)   // (what the tokens of its context are: askCategories)
+    val usage = mutableStateOf<JSONObject?>(null)   // (what Meta's session said of its context: a chat's is listed)
     val outgrown = mutableStateOf(false)            // (a turn ended saying the prompt's too long)
     val retrying = mutableStateOf<JSONObject?>(null) // (an api_retry, till what it says next)
     val tasks = mutableStateMapOf<String, JSONObject>() // (a task's id: its fields, replaced whole as they change)
     val taskOrder = mutableStateListOf<String>()    // (the tasks' ids, in the order each was first heard)
     val missing = mutableStateOf(false)             // (its host answered the attach: no such session)
+    val writes = mutableStateOf(true)               // (its host answered the attach: false, this phone only reads it)
     var interrupting = 0L                           // (an interrupt waiting: its token)
-    var contextSoon = false                         // (the meter asked again a moment from now)
     var turnSent: Pair<String, List<Picked>>? = null // (what this phone sent for the turn going, text and files: Send again's)
     var restartAfterTurn = false                    // (signed in while it ran: its claude started again once it's over)
-    var loginAsked = false                          // (the turn's sign-in card's there: one a turn)
     var loginStandsIn = false                       // (its card's in for the error the transcript has yet to give)
+    var keepsLogin = true                           // (its host keeps its sign-in, attach's answer says: else its card's
+    var loginAsked = false                          // worked out here, once a turn (loginAsked), as older hosts' heads did)
+    var loginTurns = 0L                             // (its turns that failed so, counted here: Logins.ask)
 }
 
 /** What claude's retrying, and what a host said as it stopped, per host: what it said and when (elapsed ms), kept
@@ -90,12 +93,9 @@ fun spentSince(chrome: Chrome, m: JSONObject): Double {
 /** (the chat open) What its host says of it as it's heard: results, tasks, usage, retries; and its host back. */
 fun chrome(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
     if (at != chat.hostId) return@l
-    when (msg.optString("op")) {
-        "connected" -> refreshContext(chat)
-        Op.CLAUDE -> {
-            val said = Msg.Claude.from(msg)
-            if (said.session.orEmpty() == chat.sid) said.msg?.let { heard(chat, it) }
-        }
+    if (msg.optString("op") == Op.CLAUDE) {
+        val said = Msg.Claude.from(msg)
+        if (said.session.orEmpty() == chat.sid) said.msg?.let { heard(chat, it) }
     }
 }
 
@@ -111,11 +111,8 @@ private fun heard(chat: Chat, m: JSONObject) {
                 val id = t.str("task_id") ?: continue
                 put(c, id, merge(c.tasks[id] ?: JSONObject().put("status", "running"), t))
             }
-            "codex_context", "baude_context" -> m.optJSONObject("usage")?.let { showUsage(chat, it) }
-            "compact_boundary" -> {
-                if (top) CompactMarks.heard(chat, m)
-                refreshContext(chat)
-            }
+            "codex_context", "baude_context" -> {} // (its host lists it: Session's context)
+            "compact_boundary" -> if (top) CompactMarks.heard(chat, m)
             "status" -> if (top) CompactMarks.heard(chat, m)
             "commands_changed" -> SlashCommands.changed(chat, m.optJSONArray("commands"))
             "api_retry" -> if (top) c.retrying.value = m
@@ -124,10 +121,7 @@ private fun heard(chat: Chat, m: JSONObject) {
                 text = listOf(m.opt("content"), m.opt("text")).firstNotNullOfOrNull { (it as? String)?.ifBlank { null } }.orEmpty())
                 .takeIf { it.isNotEmpty() }?.let { chat.lines.add(Line("note", it)) } // (claude_events: nothing, for the rest)
         }
-        "assistant", "user" -> {
-            if (type == "assistant" && !c.loginAsked) loginAsk(chat, m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
-            if (type == "assistant" || carriesResult(m)) contextSoon(chat)
-        }
+        "assistant" -> if (!c.keepsLogin && !c.loginAsked) loginAsk(chat, m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
     }
     if (top && type in setOf("stream_event", "assistant")) c.retrying.value = null
 }
@@ -142,9 +136,6 @@ private fun repositoryChanged(chat: Chat, m: JSONObject) {
         ?.takeIf { it != Mesh.session(chat.hostId, chat.sid)?.cwd?.trimEnd('/') }
     chat.lines.add(Line("gitnote", JSONObject().put("text", said).put("branch", branch).put("folder", folder ?: "").toString()))
 }
-
-private fun carriesResult(m: JSONObject) = m.optJSONObject("message")?.optJSONArray("content").list()
-    .any { it.optString("type") == "tool_result" }
 
 private fun merge(into: JSONObject, from: JSONObject, skip: Set<String> = emptySet()): JSONObject {
     val o = JSONObject(into.toString())
@@ -161,7 +152,6 @@ private fun loginAsk(chat: Chat, m: JSONObject): String? =
  * of; the context asked again. */
 private fun result(chat: Chat, m: JSONObject) {
     val c = chat.chrome
-    Telemetry.ended(chat, m)
     c.cost.value += spentSince(c, m)
     val u = m.optJSONObject("usage") ?: JSONObject()
     val used = u.optInt("input_tokens") + u.optInt("cache_read_input_tokens") + u.optInt("cache_creation_input_tokens")
@@ -169,7 +159,7 @@ private fun result(chat: Chat, m: JSONObject) {
         seconds = String.format(Locale.ROOT, "%.1f", m.optDouble("duration_ms", 0.0) / 1000), used = fmtTokens(used),
         written = fmtTokens(u.optInt("output_tokens")))
     if (m.optBoolean("is_error") && OVERFLOW.containsMatchIn(m.optString("result"))) c.outgrown.value = true
-    if (!c.loginAsked) loginAsk(chat, m)?.let { Logins.ask(chat, it) } // (in place of the error: a card to sign in again)
+    if (!c.keepsLogin && !c.loginAsked) loginAsk(chat, m)?.let { Logins.ask(chat, it) } // (in place of the error)
     c.loginAsked = false
     c.turnSent = null
     if (c.restartAfterTurn) { // (signed in while it ran: its claude there started again on it now)
@@ -179,7 +169,6 @@ private fun result(chat: Chat, m: JSONObject) {
     c.interrupting = 0
     c.retrying.value = null
     CompactMarks.turnEnded(chat)
-    refreshContext(chat)
 }
 
 /** A background task's event (on_task_event): its fields kept, its status as the event says. */
@@ -209,7 +198,7 @@ fun runningTasks(c: Chrome): List<JSONObject> = c.tasks.values.filter { it.optSt
 
 // ---- context
 
-/** The context's usage asked of the chat's session (a stopped one's host answers {}, which changes nothing). */
+/** Meta's context's usage asked of its session (unlisted: ephemeral); a chat's is its listing's (contextShown). */
 fun refreshContext(chat: Chat, model: String? = null) {
     val at = chat.hostId
     if (!takes(at, "control")) return
@@ -219,14 +208,12 @@ fun refreshContext(chat: Chat, model: String? = null) {
     }
 }
 
-/** The meter asked again a moment from now, at most once a second, while a turn runs (refresh_context_soon). */
-private fun contextSoon(chat: Chat) {
-    val c = chat.chrome
-    if (c.contextSoon || !isWorking(chat)) return
-    c.contextSoon = true
-    Mesh.later(1000) {
-        c.contextSoon = false
-        refreshContext(chat)
+/** What the tokens of a chat's context are, asked of its host (a session's listing has its count only). */
+fun askCategories(chat: Chat) {
+    val at = chat.hostId
+    if (!takes(at, "control")) return
+    controlAnswer(at, chat.sid, JSONObject().put("subtype", "get_context_usage")) { r, _ ->
+        r?.optJSONArray("categories")?.let { chat.chrome.categories.value = it }
     }
 }
 
@@ -247,6 +234,7 @@ fun showUsage(chat: Chat, usage: JSONObject, model: String? = null) {
 fun interrupt(chat: Chat) {
     val c = chat.chrome
     chat.stopAsked = true
+    Mesh.queueUptoHost(chat) // (↑'s, on one its host has: its host sends them as the turn ends)
     if (c.interrupting != 0L) return
     val token = SystemClock.elapsedRealtime()
     c.interrupting = token

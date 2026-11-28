@@ -1,11 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "One of a subscription's limits, as Claude Code's get_usage says it.",
+  "description": "One of a subscription's limits, as Claude Code's get_usage says it, or Codex's App Server's rate limits (account/rateLimits/read).",
   "properties": {
     "name": {
       "type": "string",
       "description": "Which limit (Five hour, Seven day…)."
+    },
+    "key": {
+      "type": "string",
+      "description": "The limit's own name in Claude Code's usage (five_hour, seven_day…); a Codex limit's, by its window's length (five_hour and seven_day as Claude's, else 2_hour, 3_day…)."
+    },
+    "resets": {
+      "type": "number",
+      "description": "When it resets, in seconds since 1970 (left out where the usage doesn't say)."
     },
     "percent": {
       "type": "number",

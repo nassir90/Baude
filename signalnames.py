@@ -256,6 +256,10 @@ class Signal(SignalTools, SignalResolve, SignalCode, Names):
         elif not self._chat.behind:  # (else what's new is read with the rest)
             self._chat_read(self._chat, self._chat.read())
 
+    def unfollow(self, win):
+        """A window gone: the chat it showed is no longer one of those followed (shown), and the window isn't held."""
+        self._shown.pop(win, None)
+
     def shown(self):
         """The transcripts of the chats its windows show now: what each last followed (follow's win), of the windows
         that still listen to it."""

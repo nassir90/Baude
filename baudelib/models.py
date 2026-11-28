@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 
-from baudelib import wording
+from baudelib import icons, wording
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (apple-claude/ and pi-claude/ are beside baudelib/)
 
@@ -417,6 +417,23 @@ def claude_names(m):
     return {f + long for f in map(_folded, said) if f}
 
 
+_NAMES = [(re.compile(m, re.IGNORECASE), a) for m, a in icons.model_names()]
+
+
+def id_name(value):
+    """A model's id as it reads as a name where no host lists it (schema/icons/models/families.json's names):
+    claude-opus-4-7 is "Opus 4.7", gpt-5.4-codex "GPT 5.4 codex"; None where none says."""
+    for pattern, said in _NAMES if isinstance(value, str) else ():
+        if hit := pattern.fullmatch(value):
+            return re.sub(r"\{(\d+)\}", lambda g: _part(hit.group(int(g.group(1)))), said)
+    return None
+
+
+def _part(text):
+    text = re.sub(r"[-_]", " ", text or "")
+    return text[:1].upper() + text[1:]
+
+
 def claude_match(value, listed, fallback=False):
     """The row of listed (Claude's, as claude lists them: never two of them made one) a model said another way is:
     its own; else the first that goes by one of its names (claude_names: opus, "Opus 5.5 · …" in its description, for
@@ -445,15 +462,17 @@ def pi_exe():
 # Manual only). effort: whether it takes --effort. first: how a new conversation is given its id (claude's --session-id;
 # apple-claude and pi-claude take the id they report from --resume). resumes: whether a later run carries the
 # conversation on (apple-claude remembers nothing). transcript: whether it keeps a Claude Code transcript of it (only
-# claude: the others' are kept for them where they're needed, as the headless server does)
+# claude: the others' are kept for them where they're needed, as the headless server does). steers: whether a message
+# sent at a turn is taken into it as it goes on (apple-claude's model answers in one call: it takes it after)
 PROGRAMS = {
     "codex": {"exe": "codex_exe", "modes": True, "effort": True, "first": None, "resumes": True,
-              "transcript": False},
+              "transcript": False, "steers": True},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,
-               "transcript": True},
+               "transcript": True, "steers": True},
     "apple": {"exe": "apple_exe", "modes": False, "effort": False, "first": "--resume", "resumes": False,
-              "transcript": False},
-    "pi": {"exe": "pi_exe", "modes": False, "effort": True, "first": "--resume", "resumes": True, "transcript": False},
+              "transcript": False, "steers": False},
+    "pi": {"exe": "pi_exe", "modes": False, "effort": True, "first": "--resume", "resumes": True, "transcript": False,
+           "steers": True},
 }
 
 

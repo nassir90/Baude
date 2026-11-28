@@ -96,22 +96,44 @@ def provider_name(pid, settings=None):
     return str(pid)
 
 
-def model_name(value):
-    """A model's name, known or not, the same whatever runs it and wherever: "qwen3:4b" for "ollama/qwen3:4b". Its
-    provider and host are the provider picker's to say."""
+DEFAULTS = ("default", "codex/default")  # (aliases of a host's default model, not models: never a model's name)
+
+
+def model_name(value, listed=()):
+    """A model's name, known or not, the same in every app whatever runs it and wherever: as listed (a host's models,
+    {value, displayName, resolvedModel}) or this machine's providers name it, by its value or what it's said to be
+    (claude-opus-5-5 is opus, "Opus 5.5"); else as its id reads (models.id_name: claude-opus-4-7 is "Opus 4.7"); else
+    its name to what serves it ("qwen3:4b" for "ollama/qwen3:4b"). Its provider and host are the provider picker's to
+    say; its slug (model_slug) is shown only on hover."""
+    every = [m for m in listed or () if isinstance(m, dict) and isinstance(m.get("value"), str)]
+    listed = [m for m in every if m["value"] not in DEFAULTS]  # (a default's by its own value only)
+    hit = next((m for m in every if m["value"] == value), None) or \
+        next((m for m in listed if m.get("resolvedModel") == value), None) or \
+        modelslib.claude_match(value, [m for m in listed if provider_of(m["value"]) is None and
+                                       not m["value"].startswith("codex/")])
+    if hit is not None and hit.get("displayName"):
+        return hit["displayName"]
     for p in found():
         for m in p["models"]:
             if m["value"] == value:
                 return m["displayName"]
     if (agent := modelslib.proxied(value)) is not None:  # (another host's, run there)
         there = next((m for m in mesh_agents() if m["value"] == value), None)
-        return there["displayName"] if there else model_name(agent[1])
+        return there["displayName"] if there else model_name(agent[1], listed)
     pid = provider_of(value)
     if pid == "ollama":
         return value[len("ollama/"):]
     if pid and pid.startswith("openai/"):
         return value.split("/", 2)[2]
-    return value
+    return modelslib.id_name(value) or value
+
+
+def model_slug(value, listed=()):
+    """A model's slug, what its server or claude calls it (claude-opus-5-5 for opus, qwen3:4b for ollama/qwen3:4b), as
+    listed says, else its value: shown only on hover over its name (model_name)."""
+    hit = next((m for m in listed or () if isinstance(m, dict) and m.get("value") == value), None) or {}
+    said = hit.get("resolvedModel") or hit.get("id")
+    return said if isinstance(said, str) and said else value
 
 
 def entries():

@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from baudelib import meshtools, wire
+from baudelib import meshtools, toolnames, wire
 
 NAME = "emission"
 HOST_WAIT_S = 85  # (the host's wait on Emission's answer: a page's load is 30 s of it at most)
@@ -99,7 +99,10 @@ OPS = {"tabs_context": "tabs", "tabs_create": "new_tab", "navigate": "navigate",
        "prompts": "prompts", "answer_prompt": "answer_prompt"}  # (each tool's op: the ops keep their own names)
 ARGS = {"tabId": "tab", "ref_id": "ref"}  # (the tools' arguments, named as Claude in Chrome's: the ops' names for them)
 NAMING_TABS = ("tabs", "prompts")  # (an answer's lists whose entries name a tab: tabId there, as at its top)
-HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
+HOST_OPS = {*OPS.values(), "sites", "select_tab", "copy", "paste"}  # (what a host passes on to a Bot's Emission: its
+# tools' requests, and a Browser page's copy and paste, nothing else)
+PANE_OPS = {"tabs", "navigate", "new_tab", "close_tab", "select_tab", "click", "hover", "drag", "type", "key", "scroll",
+            "answer_prompt", "copy", "paste"}  # (what a Browser pane does with someone's own Emission window it watches: ☰ → Browser elsewhere)
 
 
 class Browser:
@@ -290,8 +293,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
             cancels.pop(key(mid), None)
         if result is not None and not cancelled.is_set():  # (a cancelled call's answered with nothing, as MCP has it)
             send({"jsonrpc": "2.0", "id": mid, "result": result})
-    listed = [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props,
-                                                            **({"required": req} if req else {})}}
+    listed = [{"name": n, **({"title": t} if (t := toolnames.TITLES[NAME].get(n)) else {}), "description": d,
+               "inputSchema": {"type": "object", "properties": props, **({"required": req} if req else {})}}
               for n, (d, props, req) in SCHEMAS.items()]
 
     def take(msg):
@@ -306,7 +309,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": NAME, "title": toolnames.SERVERS[NAME], "version": "1"}}})
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed}})
         elif method == "tools/call":

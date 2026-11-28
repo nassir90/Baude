@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a Bot's tasks run now, by hand.",
+  "properties": {
+    "op": {
+      "const": "run_task",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "id": {
+      "type": "string",
+      "description": "The task's id."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Its form, filled."
+    },
+    "waited": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Its Bot waits for the run's end in a tool call (its own run_task, wait true): it isn't told the run finished."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "id"
+  ],
+  "additionalProperties": false
+}

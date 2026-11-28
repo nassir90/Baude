@@ -71,15 +71,17 @@ object Groups {
 
     /** A group listed, if groups are picked (Baude's put_in): a chat made in g is shown. */
     fun putIn(g: String) {
-        if (HomePrefs.groups.isNotEmpty() && g !in HomePrefs.groups) {
+        if ((HomePrefs.groups.isNotEmpty() || HomePrefs.noGroups.value) && g !in HomePrefs.groups) {
             HomePrefs.groups.add(g)
+            HomePrefs.allIfEvery()
+            HomePrefs.noGroups.value = false
             HomePrefs.save()
         }
     }
 }
 
-/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, Bot items,
- * Move to Group ▸ (its list in place of the items, a back row first), Archive, Stop, Move to Trash…; Delete alone
+/** A session row's menu (Baude's show_menu), opened at the finger by a long-press: Rename…, Bot items (Rotate among them),
+ * Move to Group ▸ (its list in place of the items, a back row first), Archive, Stop, Access…, Move to Trash…; Delete alone
  * while its host's gone. at: where it was pressed, in the row. */
 @Composable
 fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
@@ -91,6 +93,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     var trashing by remember { mutableStateOf(false) }
     var botting by remember { mutableStateOf(false) }
     var grouping by remember { mutableStateOf(false) }
+    var accessing by remember { mutableStateOf(false) }
     LaunchedEffect(open) { if (!open) page = "items" }
     fun said(r: JSONObject) = Msg.Error.from(r).said.orEmpty()
     val alive = Mesh.conn(h)?.state == "up" && !off(h)
@@ -98,7 +101,8 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     val top = item.depth == 0 && s.forkFrom.isNullOrBlank()
     val active = !dead(h) && s.state in listOf("working", "waiting")
     val archived = s.archived == true
-    val canBot = alive && takes(h, "bot") && program(s.model) in listOf("claude", "pi")
+    val canBot = alive && takes(h, "bot") && (s.bot != null || program(s.model) in listOf("claude", "pi", "codex")) // (a Bot on
+    // any model: its settings)
     Popover(open, dismiss, offset = at, ticks = if (page == "groups") Ticks.END else Ticks.NONE) {
         if (page == "groups") {
             MenuBack(Wording.Sidebar.moveToGroup) { page = "items" }
@@ -111,9 +115,18 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
             return@Popover
         }
         if (!gone) MenuChoice(Wording.Common.renameEllipsis, false) { dismiss(); renaming = true }
+        val canRotate = !gone && !active && s.bot != null && takes(h, "rotate") // (not at a turn, as Archive isn't)
+        fun rotate() {
+            dismiss()
+            Mesh.ask(h, Msg.Rotate(session = sid).json()) { r ->
+                if (r.optString("op") != "rotated") toast(Wording.Trash.hostRefused(host = Mesh.label(h), op = "rotate", why = said(r)))
+            }
+        }
+        if (canRotate && !canBot) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
         if (!gone && canBot && (top || s.bot != null)) {
             if (s.bot != null) {
                 MenuChoice(Wording.Sidebar.botSettingsEllipsis, false) { dismiss(); botting = true }
+                if (canRotate) MenuChoice(Wording.Sidebar.rotate, false) { rotate() }
                 MenuChoice(Wording.Sidebar.unbot, false) {
                     dismiss()
                     Mesh.ask(h, Msg.Bot(session = sid, bot = null).json().put("bot", JSONObject.NULL)) { r ->
@@ -142,6 +155,8 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
                 dismiss()
                 Mesh.conn(h)?.request(Msg.Stop(session = sid).json()) {}
             }
+            if (s.takenUp != false) MenuChoice(Wording.Access.accessEllipsis, false) { dismiss(); accessing = true } // (a
+            // Claude Desktop chat only listed: the host's rule, till it's written in)
             MenuChoice(Wording.Trash.moveDots, false) { dismiss(); trashing = true }
         }
     }
@@ -149,4 +164,5 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     if (trashing) MoveToTrash(item) { trashing = false }
     if (botting) BotSettings(item) { botting = false }
     if (grouping) GroupName(new = true, moveKey = "$h/$sid") { grouping = false }
+    if (accessing) ChatAccess(item) { accessing = false }
 }

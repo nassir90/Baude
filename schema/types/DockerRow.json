@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An object's row.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "What it's asked for by: a container's, image's, volume's or network's id, a Compose project's name."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's text."
+    },
+    "keys": {
+      "type": "array",
+      "items": {},
+      "description": "Each column's sort key: a number or text."
+    },
+    "tones": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's tone (ok, warn, bad), or empty."
+    },
+    "tips": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's tooltip, or empty (an age's: its time in full)."
+    },
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What each column's filter goes by, where it isn't the column's text, else empty (a container's Status: its state, Running or Exited, where the text says for how long)."
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What can be done to it as it is: start, stop, restart, remove."
+    },
+    "logs": {
+      "type": "boolean",
+      "description": "It has a log to follow (docker_follow)."
+    },
+    "shell": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "A running container's: the command that opens a shell in it (bash if it has it, else sh), for a terminal on the host; else empty."
+    },
+    "running": {
+      "type": "boolean",
+      "description": "A container that's running, or a Compose project with one running."
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "additionalProperties": false
+}

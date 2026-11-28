@@ -1,5 +1,5 @@
 {
-  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), a Dependencies page (what that host and the app need, each there or not) and a Telemetry page (what that host keeps: its turns' tokens, its machine, its chats' activity, line profiles), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), a Dependencies page (what that host and the app need, each there or not), a Telemetry page (what that host keeps: its turns' tokens, its machine, its chats' activity, line profiles) and an Access page (who in the mesh may use what of that host's), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
   "apps": [
     "baude"
   ],
@@ -29,7 +29,7 @@
     "fixes"
   ],
   "phone": {
-    "does": "The pages fill the screen one at a time, switched by a bar along its bottom (icon over title), as the narrow dialog's switcher; a sideways swipe also moves to the next or previous page, the page following the finger and settling on lifting (half the width, or a flick), stopping at General and Telemetry, and the bar's raised page follows the swipe. Tapping a page in the bar slides to it",
+    "does": "The pages fill the screen one at a time, switched by a bar along its bottom (icon over title), as the narrow dialog's switcher; a sideways swipe also moves to the next or previous page, the page following the finger and settling on lifting (half the width, or a flick), stopping at General and Access, and the bar's raised page follows the swipe. Tapping a page in the bar slides to it",
     "why": "One column at a time on a phone; the owner asked to swipe between the Settings pages, as between a chat's pages",
     "decided": "2026-11-25"
   },
@@ -85,6 +85,25 @@
           "source": [
             {
               "issue": "BaudeInternal#205"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Access page",
+      "shows": "The dialog's fifth page, after Telemetry: who in the mesh may use each of the picked host's capabilities. Described in Access.dialog.json. The dialog is 820 wide, so its five pages' names fit the switcher (the phone's bar scrolls the page shown into view).",
+      "copy": [
+        "access.title"
+      ],
+      "decisions": [
+        {
+          "said": "Mesh ACLs are configured in Settings (paraphrased)",
+          "rule": "Every app's Settings has an Access page after Telemetry",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
             }
           ]
         }

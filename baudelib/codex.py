@@ -3,8 +3,10 @@ import itertools
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import threading
+import time
 from collections import deque
 
 from baudelib import accounts, wording
@@ -12,8 +14,9 @@ from baudelib.claude import ClaudeProc
 from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
 
 
-def permission_params(mode, *, turn=False, read_only=False):
-    """Manual and automatic review use the same workspace sandbox."""
+def permission_params(mode, *, turn=False, read_only=False, writable=()):
+    """Manual and automatic review use the same workspace sandbox; writable: folders it may write besides its own
+    (a Bot's memory's), a turn's (a thread's are its config's: writable_config)."""
     if read_only:
         return {"approvalPolicy": "on-request", "approvalsReviewer": "user",
                 **({"sandboxPolicy": {"type": "readOnly", "networkAccess": False}} if turn
@@ -26,9 +29,17 @@ def permission_params(mode, *, turn=False, read_only=False):
     elif full:
         params["sandboxPolicy"] = {"type": "dangerFullAccess"}
     else:
-        params["sandboxPolicy"] = {"type": "workspaceWrite", "writableRoots": [],
+        params["sandboxPolicy"] = {"type": "workspaceWrite", "writableRoots": list(writable),
                                    "networkAccess": False, "excludeTmpdirEnvVar": False, "excludeSlashTmp": False}
     return params
+
+
+def writable_config(mode, writable, read_only=False):
+    """A thread's config (thread/start's, thread/resume's) for the folders it may write besides its own
+    (permission_params's writable): only where it writes in a workspace sandbox."""
+    if read_only or not writable or mode == "bypassPermissions":
+        return {}
+    return {"sandbox_workspace_write": {"writable_roots": list(writable)}}
 
 
 LEVELS = ("TRACE", "DEBUG", "INFO", "WARN", "ERROR")
@@ -91,6 +102,19 @@ def stderr_notice(line, model=None):
     return "error", f"Codex: {plain(message)}"
 
 
+USED = ("inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens")  # (a TokenUsageBreakdown's: its
+# inputTokens has its cached and cache-written ones in it, its outputTokens its reasoning)
+
+
+def turn_usage(before, now):
+    """A turn's tokens, the thread's totals before it (before) and after (now), in a Claude Code result's usage's
+    shape: input not read from a cache or written to it apart from those that were."""
+    d = {k: max(0, (now or {}).get(k, 0) - (before or {}).get(k, 0)) for k in USED} if now else dict.fromkeys(USED, 0)
+    return {"input_tokens": max(0, d["inputTokens"] - d["cachedInputTokens"] - d["cacheWriteInputTokens"]),
+            "cache_read_input_tokens": d["cachedInputTokens"],
+            "cache_creation_input_tokens": d["cacheWriteInputTokens"], "output_tokens": d["outputTokens"]}
+
+
 def user_input(content):
     if not isinstance(content, (str, list)):
         raise ValueError("Codex input must be text or a list of content blocks")
@@ -136,6 +160,7 @@ class AppServer(ClaudeProc):
         self.lock = threading.RLock()
         self.ids, self.requests = itertools.count(1), {}
         self.said, self.said_lock = {}, threading.Lock()  # (notes shown: text → kind)
+        self.error_code = None  # (the code of the last error Codex answered a request with)
         self.profile = accounts.selected("codex") if profile is None else profile
         auth = ["-c", 'cli_auth_credentials_store="file"'] if self.profile else []
         self.p = subprocess.Popen([exe, *auth, "app-server", "--listen", "stdio://"], cwd=cwd,
@@ -209,6 +234,7 @@ class AppServer(ClaudeProc):
         if callbacks:
             done, failed = callbacks
             if "error" in msg:
+                self.error_code = msg["error"].get("code")  # (what the failed callback may ask about)
                 failed(msg["error"].get("message") or "Codex request failed")
             else:
                 done(msg.get("result") or {})
@@ -261,12 +287,51 @@ def list_models(exe, env=None, timeout=15, profile=None):
             app.p.wait()
 
 
+SIGN_IN_ERRORS = ("codex account authentication required", "chatgpt authentication required")  # (what Codex says of a sign-in with no ChatGPT plan: an API key's, or none)
+
+
+def rate_limits(exe, env=None, timeout=20, profile=""):
+    """A Codex subscription's (profile's; "": the CLI's own sign-in, its CODEX_HOME) rate limits as its App Server reads
+    them, without starting a thread: the snapshot's primary and secondary windows ({usedPercent, windowDurationMins,
+    resetsAt}), None where Codex says its sign-in has none (an API key's, or none). Any other failure, a timeout
+    included, raises RuntimeError."""
+    from queue import Empty, Queue
+
+    outcome = Queue()
+    app = AppServer(exe, None, env, lambda code: outcome.put(RuntimeError(f"App Server exited ({code})")),
+                    lambda _: None, profile)
+
+    def failed(error):
+        said = error.lower()
+        auth = app.error_code == -32600 and any(text in said for text in SIGN_IN_ERRORS)
+        outcome.put(None if auth else RuntimeError(error))
+
+    try:
+        app.initialize(lambda: app.rpc("account/rateLimits/read", {"excludeResetCreditDetails": True}, outcome.put, failed),
+                       lambda error: outcome.put(RuntimeError(error)))
+        try:
+            result = outcome.get(timeout=timeout)
+        except Empty:
+            raise RuntimeError("Codex rate limits timed out") from None
+        if isinstance(result, Exception):
+            raise result
+        snapshot = (result or {}).get("rateLimits")
+        return snapshot if isinstance(snapshot, dict) else None
+    finally:
+        app.kill()
+        try:
+            app.p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            app.p.kill()
+            app.p.wait()
+
+
 class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
                  catalog=(), mode="default", meta_system=None, meta_servers=None, dispatch=None,
-                 recover_empty=False, profile=None):
+                 recover_empty=False, profile=None, servers=None, instructions=None, writable=()):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
         self.req_ids = itertools.count(1)
@@ -275,15 +340,21 @@ class CodexProc(AppServer):
         self.model, self.catalog = model, catalog
         self.read_only = ephemeral and not self.meta_only
         self.mode = "default" if self.read_only else codex_mode(mode)
+        self.writable = list(writable)  # (folders it may write besides its own: a Bot's memory's)
         self.effort = codex_effort(catalog, model, effort)
         self.init_rid = "codex-initialize"
         self.asks, self.streams, self.patches = {}, {}, {}
         self.tools = set()
         self.inputs = deque()
+        self.steers = []  # (messages sent as a turn's being started: given it once it has (steer))
         self.indices = itertools.count()
         self.thread = self.turn = None
         self.last_text = ""
         self.starting = self.interrupting = False
+        self.limits = self.limit_reset = None  # (its last rate-limit snapshot; when a limit that stopped its turn resets)
+        self.limits_at = self.turn_at = 0.0  # (when that snapshot was read; when its turn began)
+        self.used_from = self.used = None  # (the thread's tokens before this turn's first call, and now: its turn's,
+        # the difference, however often a total's told)
         super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
                          lambda line: self.emit("_stderr", text=line), profile)
         params = {"cwd": cwd, **permission_params(self.mode, read_only=self.read_only)}
@@ -293,6 +364,12 @@ class CodexProc(AppServer):
             params.update(threadId=resume, excludeTurns=True)
         elif ephemeral:
             params["ephemeral"] = True
+        config = {**({"mcp_servers": servers} if servers else {}),  # (MCP servers of the host's: chattools, the
+                  **writable_config(self.mode, self.writable, self.read_only)}  # mesh's)
+        if config:
+            params["config"] = config
+        if instructions:  # (after Codex's own, each start: a Bot's who it is, its memory)
+            params["developerInstructions"] = instructions
 
         def opened(result):
             self.thread = result["thread"]["id"]
@@ -365,17 +442,45 @@ class CodexProc(AppServer):
         elif method == "turn/started":
             with self.lock:
                 self.turn = params["turn"]["id"]
+                self.turn_at = time.time()
                 self.starting = False
                 if self.interrupting:
                     self.interrupt()
+                else:
+                    for msg in self.steers:
+                        self.steer(msg)
+                self.steers.clear()
             self.emit("system", subtype="codex_turn_started", session_id=self.thread)
         elif method == "turn/completed":
             turn = params["turn"]
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
+            if error and status != "interrupted":
+                self.limit_reset = self.stopped_by_limit(turn)
             self.finish(error, turn.get("durationMs"), interrupted=status == "interrupted")
+        elif method == "account/rateLimits/updated":  # (its subscription's limits, as a turn's answer said them)
+            snapshot = params.get("rateLimits")
+            if isinstance(snapshot, dict) and snapshot.get("limitId") in (None, "codex"):
+                self.limits, self.limits_at = snapshot, time.time()  # (its default bucket's latest: when a limit that
+                # stops a turn resets)
+            key = accounts.usage_key("codex", self.profile)
+            try:
+                if isinstance(snapshot, dict) and accounts.codex_exhausted(snapshot):
+                    from baudelib import hostresume
+                    reset = hostresume.codex_reset(snapshot)
+                    if accounts.exhausted(key, hostresume.after(reset) if reset is not None else None) and \
+                            self.on_disabled is not None:
+                        self.on_disabled(key, reset)
+            except (OSError, sqlite3.Error):
+                pass
         elif method == "thread/tokenUsage/updated":
             usage = params.get("tokenUsage") or {}
+            total, last = usage.get("total"), usage.get("last")
+            if isinstance(total, dict) and isinstance(last, dict):
+                with self.lock:
+                    if self.used_from is None:
+                        self.used_from = {k: (total.get(k) or 0) - (last.get(k) or 0) for k in USED}
+                    self.used = {k: total.get(k) or 0 for k in USED}
             used = (usage.get("last") or {}).get("totalTokens")
             if isinstance(used, int):
                 with self.lock:
@@ -390,11 +495,30 @@ class CodexProc(AppServer):
             with self.lock:
                 self.asks.pop(params.get("requestId"), None)
 
+    def stopped_by_limit(self, turn):
+        """When the usage limit that stopped a failed turn resets (seconds since 1970), or None where a limit didn't
+        stop it: its error says so, or the snapshot of its rate limits read since the turn began (not an earlier
+        turn's) says one's reached; where none was read since, they're asked for."""
+        from baudelib import hostresume, models
+        said = "usageLimitExceeded" in json.dumps((turn.get("error") or {}).get("codexErrorInfo"))
+        fresh = self.limits if self.limits_at >= self.turn_at else None
+        if fresh is None and said and (exe := models.codex_exe()):
+            try:
+                fresh = rate_limits(exe, timeout=10, profile=self.profile)
+            except RuntimeError:
+                fresh = None
+        if not said and not (isinstance(fresh, dict) and fresh.get("rateLimitReachedType")):
+            return None
+        return hostresume.codex_reset(fresh)
+
     def result(self, error=None, duration=None, interrupted=False):
         # (a turn stopped ends as Claude Code's does: error_during_execution, Baude's chat says it stopped, not failed)
         subtype = "error_during_execution" if interrupted else "error" if error else "success"
+        with self.lock:
+            used = turn_usage(self.used_from, self.used)
+            self.used_from = self.used = None
         self.emit("result", subtype=subtype, result=error or self.last_text,
-                  is_error=bool(error), duration_ms=duration or 0, num_turns=1)
+                  is_error=bool(error), duration_ms=duration or 0, num_turns=1, usage=used)
 
     def finish(self, error, duration=None, interrupted=False):
         # Keep advance() blocked while the host accounts for this turn's result.
@@ -410,6 +534,8 @@ class CodexProc(AppServer):
         self.last_text = ""
         with self.lock:
             self.starting = False
+            self.inputs.extend(self.steers)  # (sent as a turn that never started was: turns of their own)
+            self.steers.clear()
         self.advance()
 
     def advance(self):
@@ -434,12 +560,30 @@ class CodexProc(AppServer):
                     if self.effort:
                         params["effort"] = self.effort
                     if not self.meta_only:
-                        params.update(permission_params(self.mode, turn=True, read_only=self.read_only))
+                        params.update(permission_params(self.mode, turn=True, read_only=self.read_only,
+                                                        writable=self.writable))
                     self.starting = True
                     self.forget("error", "raw")  # (a turn's own: one that comes back on a later turn is said again)
                     self.rpc("turn/start", params, lambda _: None, self.finish)
                     return
             self.result(error)
+
+    def steer(self, msg):
+        """(lock held) A message sent at the turn going on given to it (turn/steer): Codex takes it in as the turn goes
+        on, with no turn of its own; one the turn's over before it's taken (or that Codex won't take into it)
+        runs as the next turn."""
+        def refused(_error):
+            with self.lock:
+                self.inputs.append(msg)
+            self.advance()
+        try:
+            params = {"threadId": self.thread, "expectedTurnId": self.turn,
+                      "input": user_input(msg["message"]["content"])}
+        except (KeyError, ValueError):
+            return refused(None)  # (said as the turn it runs as fails, advance)
+        if msg.get("uuid"):
+            params["clientUserMessageId"] = msg["uuid"]
+        self.rpc("turn/steer", params, lambda _: None, refused)
 
     def interrupt(self):
         self.interrupting = not self.turn and (self.starting or bool(self.inputs))
@@ -493,6 +637,11 @@ class CodexProc(AppServer):
                 and params.get("itemId") in self.patches:
             name, inp = "Codex file changes", {"changes": self.patches[params["itemId"]],
                                                "reason": params.get("reason") or ""}
+        elif method == "mcpServer/elicitation/request" and isinstance(meta := params.get("_meta"), dict) and \
+                meta.get("codex_approval_kind") == "mcp_tool_call" and isinstance(meta.get("tool_name"), str):
+            # (an MCP tool asked about: Claude Code's name for it, as its own ask's)
+            name = f'mcp__{params.get("serverName")}__{meta["tool_name"]}'
+            inp = meta.get("tool_params") if isinstance(meta.get("tool_params"), dict) else {}
         else:
             self.reject(rid, f"Unsupported Codex request: {method}")
             return
@@ -504,8 +653,12 @@ class CodexProc(AppServer):
 
     def send(self, msg):
         kind = msg.get("type")
-        if kind == "user":
+        if kind == "user":  # (at a turn: given it, steer; else a turn of its own)
             with self.lock:
+                if self.turn and not self.interrupting:
+                    return self.steer(msg)
+                if self.starting and self.thread and not self.interrupting and not self.inputs:
+                    return self.steers.append(msg)
                 self.inputs.append(msg)
             self.advance()
         elif kind == "control_response":
@@ -516,6 +669,9 @@ class CodexProc(AppServer):
                 if params is not None:
                     allow = (response.get("response") or {}).get("behavior") == "allow"
                     decision = "accept" if allow else "decline"
+                    if "_meta" in params:  # (an MCP tool's: an elicitation's answer)
+                        self.write({"id": rid, "result": {"action": decision, "content": None}})
+                        return
                     if params.get("availableDecisions") and decision not in params["availableDecisions"]:
                         decision = "cancel"
                     self.write({"id": rid, "result": {"decision": decision}})

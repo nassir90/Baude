@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Something the user did in an app, a few kept before an error (its breadcrumbs): what was on screen and the part used, by their schema/ui names.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When, in seconds since the epoch."
+    },
+    "action": {
+      "enum": [
+        "click",
+        "menu",
+        "open"
+      ],
+      "description": "What was done: a button or row clicked (or activated from the keyboard), a menu's item picked, or a screen opened (a tab, a page, a dialog, a side panel's page)."
+    },
+    "screen": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The schema/ui entity it was on (\"Telemetry.dialog\"), null where it has none."
+    },
+    "part": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The entity's part used, by its name there (\"Collect Telemetry\"), null where it isn't one of its parts."
+    },
+    "widget": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What was used where it isn't a part schema/ui names: its copy key, else its icon's name, else its kind of widget."
+    }
+  },
+  "required": [
+    "at",
+    "action"
+  ],
+  "additionalProperties": false
+}

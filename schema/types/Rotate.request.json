@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Bot's conversation archived as a past thread of its own (\"<Bot> / <its title>\", read-only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.",
+  "properties": {
+    "op": {
+      "const": "rotate",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The Bot's session id."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "The model the Bot carries on on, of whatever program (null: its own). Given, a Bot with nothing said yet is moved onto it without a past thread."
+    },
+    "effort": {
+      "type": ["string", "null"],
+      "description": "Its effort on model, if model's program has one (null: the Bot's own)."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

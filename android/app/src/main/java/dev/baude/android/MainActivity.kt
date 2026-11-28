@@ -17,7 +17,7 @@ class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
     /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
-    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "terminal")
+    private val OVER = setOf("feedback", "settings", "subscriptions", "changelog", "mesh", "fixes", "databases", "kubernetes", "docker", "terminal")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,25 +51,29 @@ class MainActivity : ComponentActivity() {
                     "chat" -> androidx.compose.runtime.key(now[1], now[2]) { // (another chat: its own pages, from Chat)
                         ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
                             feedback = { go(listOf("feedback", now[1], now[2])) },
-                            screen = { go(listOf(it, now[1], now[2])) })
+                            screen = { go(listOf(it, now[1], now[2])) },
+                            tool = { s, h -> go(listOf(s, h, now[1], now[2])) }) // (another host's, over the chat)
                     }
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) })
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
-                    "settings" -> SettingsScreen(::back, feedback = {
+                    "settings", "subscriptions" -> SettingsScreen(::back, feedback = {
                         go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))
-                    }, chat = now.drop(1))
+                    }, chat = now.drop(1), page = if (now[0] == "subscriptions") 1 else 0)
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
                     "databases" -> DatabaseScreen(now[1], ::back)
                     "kubernetes" -> KubeScreen(now[1], ::back)
+                    "docker" -> DockerScreen(now[1], ::back)
                     "terminal" -> TerminalScreen(now[1], ::back)
+                    "inbox" -> InboxScreen(::back, open = { h, s -> go(listOf("chat", h, s)) }, ask = { h, id -> go(listOf("ask", h, id)) })
+                    "ask" -> androidx.compose.runtime.key(now[1], now[2]) { AskScreen(now[1], now[2], ::back) }
                     "fixes" -> FixesScreen(::back, feedback = { go(listOf("feedback") + now.drop(1) + "fixes") })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         changelog = { go(listOf("changelog")) }, fixes = { go(listOf("fixes")) },
-                        tool = { screen, host -> go(listOf(screen, host)) },
-                        note = { if (Shares.pending.value != null) ShareBanner(::back) })
+                        tool = { screen, host -> go(listOf(screen, host)) }, subscriptions = { go(listOf("subscriptions")) },
+                        inbox = { go(listOf("inbox")) }, note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()
             }
@@ -99,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private fun go(to: List<String>) {
         val now = screen.value
-        if ((now[0] == "chat" || now[0] in OVER && now.size == 3) && to[0] != "chat" && to[0] !in OVER) Mesh.close()
+        if ((now[0] == "chat" || now[0] in OVER && now.size >= 3) && to[0] != "chat" && to[0] !in OVER) Mesh.close()
         screen.value = if (to[0] == "contacts") listOf("contacts") else to
         if (to[0] !in OVER) Shares.returns = false // (a screen over it, and back: still the shared one)
         val shared = Shares.pending.value
@@ -126,6 +130,14 @@ class MainActivity : ComponentActivity() {
         }
         if (now[0] in OVER && now.size == 3) { // (back to the chat it was opened from)
             screen.value = listOf("chat", now[1], now[2])
+            return
+        }
+        if (now[0] in OVER && now.size == 4) { // (another host's, opened over a chat: back to that chat)
+            screen.value = listOf("chat", now[2], now[3])
+            return
+        }
+        if (now[0] == "ask") { // (an ask opened from the Inbox: back to it)
+            screen.value = listOf("inbox")
             return
         }
         if (now[0] == "chat") Mesh.close()
@@ -163,6 +175,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Mesh.shown = true
+        Mesh.tellSeen() // (the chat open, in front again: seen, if what's read of it reaches its turn's end)
         Telemetry.resumed()
     }
 

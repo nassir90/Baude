@@ -59,15 +59,17 @@ def ask(path, msg, timeout=30):
     return got
 
 
-def processes(timeout=3):
-    """[(path, its info: {pid, app, opens})] for each process listening here; a socket whose process is gone is
-    removed."""
+def processes(timeout=3, skip=()):
+    """[(path, its info: {pid, app, opens})] for each process listening here (but those whose pids are in skip: not
+    asked); a socket whose process is gone is removed."""
     out = []
     try:
         names = sorted(n for n in os.listdir(folder()) if n.endswith(".sock"))
     except OSError:
         return out
     for name in names:
+        if name.removesuffix(".sock").isdigit() and int(name.removesuffix(".sock")) in skip:
+            continue
         path = os.path.join(folder(), name)
         try:
             out.append((path, ask(path, {"op": "info"}, timeout)))

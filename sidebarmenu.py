@@ -26,8 +26,8 @@ from widgets import load_settings, save_settings, toast  # noqa: E402,F401
 
 from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
-    HERE_HOST, background_proc, bot_picture, can_be_bot, chat_group, host_key, network, remote_info, remote_name,
-    stopping_said,
+    HERE_HOST, background_proc, bot_picture, can_be_bot, can_rotate, chat_group, host_key, network, remote_info,
+    remote_name, stopping_said,
 )
 
 
@@ -65,6 +65,13 @@ class SidebarMenu:
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
+        if info.get("bot") and can_rotate(info) and info.get("remote_state") not in ("working", "waiting"):
+            # (after Bot Settings…; not at a turn, as Archive isn't)
+            at = next((i + 1 for i, (_label, action) in enumerate(items) if action == "make_bot"), 1)
+            items.insert(at, (wording.say("sidebar.rotate"), "rotate"))
+        if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
+                info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
+            items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -116,7 +123,7 @@ class SidebarMenu:
                 return
             if bot:
                 info["remote"].request({"op": "bot", "session": info["id"], "bot": {"name": name, "picture": None}},
-                                       self.bot_set)
+                                       lambda reply: self.bot_set(info, reply))
             else:
                 self.rename(info, entry.get_text())
         dlg.connect("response", answered)
@@ -198,20 +205,55 @@ class SidebarMenu:
             sent = {"name": name}
             if pick["data"] is not None:
                 sent["picture"] = base64.b64encode(pick["data"]).decode() if pick["data"] else ""
-            info["remote"].request({"op": "bot", "session": info["id"], "bot": sent}, self.bot_set)
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": sent},
+                                   lambda reply: self.bot_set(info, reply))
         dlg.connect("response", answered)
         self.dialog = dlg
         dlg.present(self.win)
         entry.grab_focus()
 
+    def ask_access(self, info):
+        """Access…: a chat's own rule for who in the mesh may manage it, on its host (accessview.chat_dialog)."""
+        if info is not None and info.get("remote") is not None:
+            import accessview
+            bot = info.get("bot") or {}
+            accessview.chat_dialog(self.win, info["remote"], info["id"], bot.get("name") or info.get("title"))
+
     def unbot(self, info):
         """Turn Back into a Chat: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
         if info is not None and info.get("remote") is not None:
-            info["remote"].request({"op": "bot", "session": info["id"], "bot": None}, self.bot_set)
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": None},
+                                   lambda reply: self.bot_set(info, reply))
 
-    def bot_set(self, reply):
+    def rotate(self, info):
+        """Rotate: a Bot's conversation archived on its host as a past thread ("<Bot> / <its title>"), and the Bot
+        carried on in a new, empty one: listed so as the host answers; a window with the Bot open shows the new one
+        (on_network: its listed rotated)."""
+        if info is None or info.get("remote") is None:
+            return
+        r = info["remote"]
+
+        def done(reply):
+            if reply.get("op") != "rotated":
+                toast(self, wording.say("trash.host_refused", host=remote_name(r), op="rotate",
+                                        why=baudelib.wire.said(reply)))
+                return
+            for listed in (reply.get("session"), reply.get("thread")):
+                if isinstance(listed, dict) and baudelib.wire.is_id(listed.get("id") or ""):
+                    if listed.get("rotated") != (r.sessions.get(listed["id"]) or {}).get("rotated"):
+                        r.forget_mirror(listed["id"])
+                    r.sessions[listed["id"]] = listed
+            r.network.changed()
+        r.request({"op": "rotate", "session": info["id"]}, done)
+
+    def bot_set(self, info, reply):
+        """A host answered Make Bot…, Bot Settings…, a Bot's Rename… or Turn Back into a Chat: listed as it answered
+        (as renamed_remote lists a rename), not as it was till the host next says what it has."""
         if reply.get("op") == "error":
             return self.win.note(wording.say("bot_settings.failed", why=baudelib.wire.said(reply)))
+        listed = reply.get("session")
+        if isinstance(listed, dict) and listed.get("id") == info["id"]:
+            info["remote"].sessions[info["id"]] = listed
         self.fill()
 
     def rename(self, info, title):
@@ -487,9 +529,11 @@ class SidebarMenu:
         claude going on in the background: working, or waiting while it asks you something."""
         if (p := background_proc(info.get("id"), type(self.win))) is not None:
             return "waiting" if p.asks else "working"
-        if info.get("remote") is not None:  # (a network session: as its server last said)
+        if info.get("remote") is not None:  # (a network session: as its server last said; between turns, done while
+            # its last turn's end hasn't been seen on any head of the mesh)
             return "inactive" if info.get("dead") else \
-                {"working": "working", "waiting": "waiting"}.get(info.get("remote_state"), "inactive")
+                {"working": "working", "waiting": "waiting"}.get(info.get("remote_state"),
+                                                                 "done" if info.get("unseen") else "inactive")
         path = info.get("path")
         try:
             mtime = os.stat(path).st_mtime

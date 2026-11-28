@@ -163,7 +163,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.Listing(all: List<JSO
         } else LazyColumn(Modifier.fillMaxSize()) {
             if (listed.isEmpty()) item { Empty(if (Fixes.firstRead && Fixes.lastRead == 0L) Wording.Fixes.loading else Wording.Fixes.nothingOngoing) }
             items(listed, key = { Fixes.key(it) }) { row ->
-                Column(Modifier.fillMaxWidth().heightIn(min = 38.dp).clickable { open(Fixes.key(row)) }.padding(horizontal = 12.dp, vertical = 4.dp),
+                Column(Modifier.fillMaxWidth().heightIn(min = DENSE_ROW).clickable { open(Fixes.key(row)) }.padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(row.optString("title"), style = Type.body, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

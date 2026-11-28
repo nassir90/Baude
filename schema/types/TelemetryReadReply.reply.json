@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "telemetry_read's answer, each list the earliest first.",
+  "description": "telemetry_read's answer, each list the earliest first (errors the latest first).",
   "properties": {
     "op": {
       "const": "telemetry_read",
@@ -43,6 +43,27 @@
       },
       "description": "Its line profiles."
     },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryError.json"
+      },
+      "description": "The errors of the processes on its machine that happened in the stretch, the last to happen first."
+    },
+    "counters": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCounters.json"
+      },
+      "description": "Its processes' counts, a row a process a minute."
+    },
+    "counted": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCount.json"
+      },
+      "description": "Its processes' counts added up over the stretch, by process, kind and name, the most times first."
+    },
     "usage": {
       "anyOf": [
         {
@@ -53,6 +74,20 @@
         }
       ],
       "description": "Its turns added up."
+    },
+    "truncated": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "events",
+          "metrics",
+          "profiles",
+          "counters",
+          "errors",
+          "counted"
+        ]
+      },
+      "description": "Each list cut short by limit (the latest kept): a read is never cut short without saying so."
     }
   },
   "required": [

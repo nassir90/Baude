@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A turn's end, as its host keeps it: what every head's notification of it is known by, and what's seen of a chat is said in.",
+  "properties": {
+    "uuid": {
+      "type": "string",
+      "description": "The uuid of the message the turn ended with (its result's, as its agent said it; the host's own where it said none)."
+    },
+    "size": {
+      "type": "integer",
+      "description": "Its transcript's size as the turn ended: a head that shows that much of it shows the turn's end."
+    }
+  },
+  "required": ["uuid", "size"],
+  "additionalProperties": false
+}

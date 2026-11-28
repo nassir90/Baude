@@ -1,17 +1,20 @@
 """windowdrafts — what each of a Baude window's chats keeps (WindowDrafts): its draft, its model, the inference
 providers, the stream-json protocol, compaction, its title, background tasks and artifacts.
 """
+import base64
 import json
 import os
+import time
 import urllib.parse
 import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
 from baudelib.transcripts import history_item, session_file, transcript_model
+from baudelib import wire
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
-from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib import toolnames, wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from baudelib.models import model_program  # noqa: E402,F401
 from lookup import signal_place
 
@@ -23,17 +26,18 @@ from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
-from chatparts import SenderTurn, UserTurn  # noqa: E402
+from chatparts import QueuedTurn, SenderTurn, UserTurn  # noqa: E402
 from widgets import discard, load_settings, save_settings  # noqa: E402,F401
 from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402,F401
 from codeview import CodePage  # noqa: E402,F401
 from startup import LAUNCHER  # noqa: E402
 from signalrefs import TOOL_NAMES  # noqa: E402
-from toolcards import ARTIFACT_URL, STOP_SAID_RE, ThinkingView, ToolCard, api_error_label  # noqa: E402
+from toolcards import ARTIFACT_URL, STOP_SAID_RE, ThinkingView, ToolCard, api_error_label, tool_label  # noqa: E402
 from baudelib.hostlogin import login_error  # noqa: E402
 from chatinput import Attachment, attachment_widget  # noqa: E402
 from sessionlist import HERE_HOST, THIS_MACHINE, local_host, main_folder, network, on_main, remote_name  # noqa: E402
 from sidequestion import SideQuestion  # noqa: E402
+from composerview import ComposerMarkdown  # noqa: E402
 
 
 class WindowDrafts:
@@ -110,6 +114,7 @@ class WindowDrafts:
         ahead = "\n\n".join(t for t in texts if t)
         draft = widgets.typed_text(self.input).strip()
         self.set_box("\n\n".join(p for p in (ahead, draft) if p), [len(ahead)] * 2, list(atts) + self.attachments)
+        self.draft_typed()  # (put there by hand: dirty, saved to its host)
 
     @staticmethod
     def join_drafts(first, then):
@@ -135,13 +140,18 @@ class WindowDrafts:
     def keep_draft(self, key, queue=None):
         """The box's draft kept as key's, its queue with it (queue: queue_state's), with one another window left there
         (join_drafts), and the box emptied for the next chat's. An empty box and no queue keep nothing and drop
-        nothing: a draft this window took is gone already (take_draft), and one there is another window's."""
+        nothing: a draft this window took is gone already (take_draft), and one there is another window's. A host's
+        chat's typing not yet saved goes to its host first (flush_host_draft); dirty: its host hadn't taken it yet."""
         text, atts = widgets.typed_text(self.input), list(self.attachments)
+        dirty = self.flush_host_draft()
+        epoch, base = (self.hd.get("typed_in", 0), self.hd.get("base", "")) if self.hd_open() else (0, "")
+        self.hd = {"sid": None}  # (its host's draft no longer this box's)
         if text.strip() or atts or queue:
-            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts,
-                     **({"queue": queue} if queue else {})}
+            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts, "dirty": dirty,
+                     "epoch": epoch, "base": base, **({"queue": queue} if queue else {})}
             if (other := self.DRAFTS.pop(key, None)) is not None:
-                draft = self.join_drafts(other, draft)
+                draft = {**self.join_drafts(other, draft), "epoch": epoch, "base": base}
+                draft["dirty"] = dirty or bool(other.get("dirty"))
             self.DRAFTS[key] = draft
             while len(self.DRAFTS) > self.MAX_DRAFTS:  # (the longest left go)
                 del self.DRAFTS[next(iter(self.DRAFTS))]
@@ -149,12 +159,425 @@ class WindowDrafts:
 
     def take_draft(self):
         """The chat just opened: its draft (keep_draft) in the box, and its queue under the conversation, if it was left
-        with them."""
+        with them; a host's chat's text as its host keeps it (open_host_draft)."""
         if draft := self.DRAFTS.pop(self.draft_key(), None):
             self.QUEUE_SEEN.pop(self.draft_key(), None)  # (its queue this window's again: sent as its turn ends here)
             self.set_box(draft["text"], draft["caret"], draft["attachments"])
             self.put_queue(draft.get("queue"))
             self.completer.hide()
+        self.open_host_draft(draft)
+
+    # ---- a host's chat's draft: its text kept by its host (draft_save), the same in every head that opens the chat,
+    # on any machine. What's written here and its host hasn't taken yet is dirty: typed, pasted or put back in the
+    # box by hand, till its host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once
+    # as the box is emptied (a message sent or queued) and as the chat's left; another head's save comes as
+    # "_draft" (h_draft). The last write wins: one that comes while this box is dirty or has a save on its way is
+    # held (hd's held), and put in once it's neither, if its host had it after this box's. Typing its host never took
+    # is never replaced by another's write: a save it refused as too long (DRAFT_CHARS_MAX) stays this box's, not
+    # saved again, another's write held as before; one it couldn't be given is saved again DRAFT_RETRY_MS later, twice
+    # as long each time, DRAFT_RETRIES times, another's write held meanwhile, and as the chat's attached again.
+    # Each Enter that empties the box is a send of its own (enter_id): its save empties its host's draft and starts
+    # the draft's next epoch. Nothing written before a send comes back: its host refuses a save of an earlier epoch
+    # (stale_draft), and every box drops a write of one; typing here from before another head's send keeps only
+    # what was typed here, what its host had then (and has sent) taken out of it (rebase).
+    # Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's attached stays this app's (files on this
+    # machine: DRAFTS)
+    DRAFT_SAVE_MS, DRAFT_RETRY_MS, DRAFT_RETRIES = 400, 1000, 3
+    hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), dirty,
+    # flight (saves on their way), held (another's, held), failed (its last save not given to its host, nothing typed
+    # since: saved again), tries (saves made again since one was last taken), epoch (the last its host's said, or
+    # this box's own send's, to come), base (what its host had in it as this box's typing began), typed_in (the epoch
+    # what's in the box was written in), sent ((id, epoch before it): this box's send, its save not taken yet)})
+    draft_timer = draft_retry = None
+
+    @property
+    def draft_head(self):
+        """This window's box, as its saves say it (draft_save's head)."""
+        if getattr(self, "_draft_head", None) is None:
+            self._draft_head = str(uuid.uuid4())
+        return self._draft_head
+
+    def draft_host(self):
+        """The host that keeps the open chat's draft (a host's chat, listed, there now, this head let write it), or
+        None."""
+        r = self.remote
+        if r is None or r.state != "alive" or getattr(self, "desktop_chat", False) or not self.draft_key():
+            return None
+        return None if getattr(self.proc, "writes", True) is False else r
+
+    def box_markdown(self):
+        return ComposerMarkdown.to_markdown(widgets.typed_text(self.input))
+
+    def hd_open(self):
+        """Is hd the open chat's?"""
+        return self.hd.get("sid") is not None and self.hd["sid"] == self.session_id
+
+    def open_host_draft(self, local):
+        """(the chat just opened, its local draft local, or None) Its host's draft in the box, unless what's kept here
+        is dirty (typed while its host couldn't take it): that's saved to it instead. Its host with none, what's
+        here is saved to it."""
+        self.drop_draft_timer()
+        dirty = bool(local and local.get("dirty"))
+        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None, "dirty": dirty,
+                   "failed": False, "tries": 0, "epoch": 0, "base": "", "typed_in": 0, "sent": None}
+        if self.draft_host() is None:
+            return
+        d = getattr(self.proc, "draft", None) if isinstance(self.proc, baudelib.client.RemoteProc) else None
+        if not isinstance(d, dict):
+            if self.box_markdown().strip():
+                self.hd["dirty"] = True
+                self.save_host_draft()
+            return
+        self.host_queue_in(getattr(self.proc, "queue", None))  # (its queue, its host's)
+        epoch = d.get("epoch") or 0
+        self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "", epoch=epoch, base=d.get("text") or "",
+                       typed_in=epoch)
+        if dirty and (local.get("epoch") or 0) < epoch:  # (typed before a send since: only what was typed here)
+            self.set_box(self.after_send(local.get("base") or "", self.box_markdown(), self.hd["text"]))
+        if dirty and self.box_markdown() != self.hd["text"]:
+            return self.save_host_draft()
+        self.hd["dirty"] = False
+        self.put_host_text(self.hd["text"])
+
+    def reattached_draft(self):
+        """(the open chat attached again: its host back, say) What's been typed since its host last took it saved to
+        it; else what it has, if it's had a write since. Its queue as its host has it."""
+        if isinstance(self.proc, baudelib.client.RemoteProc):
+            self.host_queue_in(self.proc.queue)
+        if not self.hd_open() or not isinstance(self.proc, baudelib.client.RemoteProc) or self.draft_host() is None:
+            return
+        if self.hd["dirty"]:
+            return self.save_host_draft()
+        self.host_draft_in(self.proc.draft)
+
+    @staticmethod
+    def moved_offset(old, new, at):
+        """Where offset at in old is in new, the change between them the part neither's start nor end shares."""
+        start, most = 0, min(len(old), len(new))
+        while start < most and old[start] == new[start]:
+            start += 1
+        end = 0
+        while end < most - start and old[-1 - end] == new[-1 - end]:
+            end += 1
+        if at <= start:
+            return at
+        if at >= len(old) - end:
+            return at + len(new) - len(old)
+        return len(new) - end
+
+    def put_host_text(self, text):
+        """text in the box (what's attached as it is), the caret and selection carried over the change, unless that's
+        what's there."""
+        self.hd["text"] = text
+        if self.box_markdown() != text:
+            old = widgets.typed_text(self.input)
+            self.set_box(text, [self.moved_offset(old, text, c) for c in widgets.caret_of(self.input)])
+
+    def drop_draft_timer(self):
+        """The save on its way after typing stops, and one to be made again, not made."""
+        if self.draft_timer is not None:
+            GLib.source_remove(self.draft_timer)
+            self.draft_timer = None
+        self.drop_draft_retry()
+
+    def drop_draft_retry(self):
+        """A save to be made again, not made (also as the window's closed)."""
+        if self.draft_retry is not None:
+            GLib.source_remove(self.draft_retry)
+            self.draft_retry = None
+
+    def draft_typed(self):
+        """(the box's text changed by hand: draft_changed, put_ahead) Dirty, and saved to its host DRAFT_SAVE_MS after
+        typing stops, at once as it's emptied; written back to what its host has, clean."""
+        self.drop_draft_timer()
+        if self.reverting is not None or not self.hd_open():
+            return
+        text, hd = self.box_markdown(), self.hd
+        hd.update(failed=False, tries=0)
+        if text.strip():
+            hd.update(sent=None, typed_in=hd["epoch"])
+        elif getattr(self, "enter_id", None) and (hd["sent"] or (None,))[0] != self.enter_id:  # (emptied by a
+            hd.update(sent=(self.enter_id, hd["epoch"]), epoch=hd["epoch"] + 1, base="")  # send: the next epoch's,
+            hd["typed_in"] = hd["epoch"]  # and nothing from before it written back)
+        else:
+            hd["typed_in"] = hd["epoch"]
+        if text == hd["text"] and not hd["sent"]:
+            hd["dirty"] = False
+            return self.release_held()
+        self.hd["dirty"] = True
+        if self.draft_host() is None:
+            return
+        self.draft_timer = GLib.timeout_add(0 if not text.strip() else self.DRAFT_SAVE_MS, self.draft_due)  # (emptied:
+        # on the main loop's next turn, so text put in its place at once, as set_text does, goes instead)
+
+    def draft_due(self):
+        self.draft_timer = None
+        self.save_host_draft()
+        return False
+
+    def flush_host_draft(self):
+        """(the chat being left, or the app restarting) Dirty typing saved to its host now; whether it's still dirty
+        (its host's answer not come yet, or it can't be told: saved again as it's opened)."""
+        self.drop_draft_timer()
+        if not self.hd_open() or self.reverting is not None:
+            return False
+        if self.hd["dirty"] and self.draft_host() is not None:
+            self.save_host_draft()
+        return bool(self.hd["dirty"])
+
+    def save_host_draft(self):
+        """The box's text saved to the open chat's host (draft_save): clean once its host's taken that very text and
+        nothing's been typed since."""
+        self.drop_draft_timer()
+        r = self.draft_host()
+        if r is None:
+            return
+        hd, sid, text = self.hd, self.session_id, self.box_markdown()
+        hd["text"], hd["failed"] = text, False
+        hd["flight"] += 1
+        sent = hd["sent"] if not text.strip() else None
+        msg = {"op": "draft_save", "session": sid, "text": text, "head": self.draft_head,
+               "epoch": sent[1] if sent else hd["typed_in"], **({"sent": sent[0]} if sent else {})}
+
+        def done(reply):
+            hd["flight"] -= 1
+            took = reply.get("op") == "draft_saved"
+            stale = reply.get("code") == wire.STALE and isinstance(reply.get("draft"), dict)
+            again = took and sent and reply["draft"].get("head") != self.draft_head  # (that send's own, made again:
+            if took and not again:  # its host's draft now, which another head may have written: that's come in below)
+                d = reply["draft"]
+                hd["rev"] = max(hd["rev"], d["rev"])
+                if (d.get("epoch") or 0) >= hd.get("epoch", 0):
+                    hd.update(epoch=d.get("epoch") or 0, base=d.get("text") or "")
+            if (took or stale) and sent and hd.get("sent") == sent:
+                hd["sent"] = None
+            if self.hd is not hd:  # (left: what was kept of it clean, if this was what it had)
+                if took and (d := self.DRAFTS.get(sid)) is not None and \
+                        ComposerMarkdown.to_markdown(d["text"]) == text:
+                    d["dirty"] = False
+                return
+            if again:
+                if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                    hd["dirty"] = False
+                return self.host_draft_in(reply["draft"])
+            if stale:  # (written before a send since: its host's draft in, and only what was typed here: rebase)
+                if (reply["draft"].get("epoch") or 0) >= hd["epoch"] and (reply["draft"].get("rev") or 0) >= hd["rev"]:
+                    self.rebase(reply["draft"])
+                return
+            if not took:  # (not kept there: still dirty, this box's, and held against others'. Too long: stays so, as
+                hd["text"] = None  # its host will never take it. Else saved again soon, and as it's opened or attached)
+                if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text and \
+                        reply.get("code") != wire.INVALID:
+                    hd["failed"] = True
+                    self.retry_host_draft(text)
+                return
+            hd["tries"] = 0
+            if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                hd["dirty"] = False
+                self.release_held()
+        r.request(msg, done)
+
+    def retry_host_draft(self, text):
+        """(a save of text its host didn't take) Saved again in a while, unless it's been tried DRAFT_RETRIES times, or
+        the box has changed, another's write come or the chat's been left meanwhile."""
+        hd = self.hd
+        if hd["tries"] >= self.DRAFT_RETRIES or self.draft_retry is not None:
+            return
+
+        def again():
+            self.draft_retry = None
+            if self.hd is hd and hd["failed"] and not hd["flight"] and self.draft_timer is None and \
+                    self.box_markdown() == text:
+                self.save_host_draft()
+            return False
+        self.draft_retry = GLib.timeout_add(self.DRAFT_RETRY_MS << hd["tries"], again)
+        hd["tries"] += 1
+
+    def release_held(self):
+        """Another head's write held while this box was dirty or saving, put in now it's neither."""
+        hd = self.hd
+        if (held := hd.get("held")) is not None and not hd["flight"] and not hd["dirty"] and \
+                self.draft_timer is None:
+            hd["held"] = None
+            self.host_draft_in(held)
+
+    def h_draft(self, msg):
+        """Another head's write of the open chat's draft, as its host tells it (draft_changed)."""
+        self.host_draft_in(msg.get("draft"))
+
+    def host_draft_in(self, d):
+        """Its host's draft (another head's write, or as it's attached again) in the box, unless it's from before a
+        send this box knows of. One of a later epoch than this box's typing: its own typing kept, and only that
+        (rebase); else held while this box is dirty or saving."""
+        hd = self.hd
+        if not isinstance(d, dict) or not self.hd_open() or (d.get("epoch") or 0) < hd["epoch"]:
+            return  # (from before a send: what was sent, never back)
+        if (d.get("rev") or 0) <= hd["rev"]:
+            return  # (one seen already, or older than one that has been)
+        epoch = d.get("epoch") or 0
+        if d.get("head") == self.draft_head:  # (this box's own save, back)
+            hd.update(rev=d["rev"], epoch=epoch)
+            return
+        if epoch > hd["typed_in"] and (hd["dirty"] or self.draft_timer is not None) and self.reverting is None:
+            return self.rebase(d)
+        if hd["flight"] or hd["dirty"] or self.draft_timer is not None or \
+                self.reverting is not None:
+            if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # (this box's own goes after, unless its host had
+                hd["held"] = d                                      # this after it)
+            return
+        hd.update(rev=max(hd["rev"], d["rev"]), epoch=epoch, base=d.get("text") or "", typed_in=epoch)
+        self.put_host_text(d.get("text") or "")
+
+    @staticmethod
+    def after_send(base, typed, now):
+        """(the box written in from base, its host's draft then, as typed; its draft emptied by a send since, now
+        what it has) What the box keeps: now, and what was typed here into base (the part base's start and end
+        don't share), not base's own text, sent."""
+        start, most = 0, min(len(base), len(typed))
+        while start < most and base[start] == typed[start]:
+            start += 1
+        end = 0
+        while end < most - start and base[-1 - end] == typed[-1 - end]:
+            end += 1
+        mine = typed[start:len(typed) - end].strip() if base else typed
+        return "\n\n".join(p for p in (now, mine) if p.strip())
+
+    def rebase(self, d):
+        """(d: its host's draft, of an epoch after this box's typing: a send emptied it since) The box: d's text, and
+        what was typed here (after_send); saved a moment later if that's more than d's."""
+        hd, text = self.hd, d.get("text") or ""
+        keep = self.after_send(hd["base"], self.box_markdown(), text)
+        self.drop_draft_timer()
+        epoch = d.get("epoch") or 0
+        hd.update(rev=max(hd["rev"], d["rev"]), epoch=epoch, base=text, typed_in=epoch, text=text, held=None,
+                  failed=False, tries=0)
+        if self.box_markdown() != keep:
+            self.set_box(keep, [len(keep)] * 2)
+        hd["dirty"] = keep != text
+        if hd["dirty"] and self.draft_host() is not None:
+            self.draft_timer = GLib.timeout_add(self.DRAFT_SAVE_MS, self.draft_due)
+
+    # ---- a host's chat's queue: kept by its host (hostqueue), the same in every head that opens the chat, on any
+    # machine. What's queued here is added there, and what's sent, edited or deleted here dropped there; its host
+    # leads it, sending it as the turn ends, so every head shows it and it's sent once. Each change comes back as
+    # its answer, another head's or its host's sending it as "_queue" (h_queue). One its host won't take (too big)
+    # stays this window's, sent as its turn ends here, as before
+    hq = {"sid": None, "rev": -1}  # (the open chat's queue: the last revision its host's said)
+
+    def queue_host(self):
+        """The open chat's connection, if its host keeps its queue (as its draft: draft_host), else None."""
+        p = self.proc
+        return p if self.draft_host() is not None and isinstance(p, baudelib.client.RemoteProc) else None
+
+    def queue_to_host(self, turn):
+        """A message just queued, added to its host's queue."""
+        p = self.queue_host()
+        if p is None:
+            return
+        turn.qid, turn.hosted = turn.said or str(uuid.uuid4()), "adding"
+        sid = self.session_id
+
+        def done(reply):
+            if reply.get("op") == "queue" and self.session_id == sid:
+                self.host_queue_in(reply.get("queue"))
+                if turn.hosted == "adding":  # (its host's queue has no row for it: sent at once, as no turn was going)
+                    self.unqueue([turn], host=False)
+                return
+            if turn.hosted == "adding":  # (not taken: this window's to send, as its turn ends)
+                turn.hosted = False
+        p.queue_op({"add": [{"id": turn.qid, "text": turn.text, "content": self.user_content(turn.text, turn.atts)}]},
+                   done)
+
+    def unqueue_on_host(self, turns):
+        """Queued messages sent, edited or deleted here: dropped from its host's queue."""
+        ids = [t.qid for t in turns if t.hosted and t in self.queued]
+        if ids and (p := self.queue_host()) is not None:
+            sid = self.session_id
+            p.queue_op({"drop": ids}, lambda r: self.session_id == sid and r.get("op") == "queue" and
+                       self.host_queue_in(r.get("queue")))
+
+    def queue_upto_host(self):
+        """(a send-now's interrupt about to be sent) The queued message it's for, its host's: named to its host, which
+        sends it and those before it as the turn ends, not this window."""
+        t = self.queue_upto
+        if isinstance(t, QueuedTurn) and t.hosted and (p := self.queue_host()) is not None:
+            self.queue_upto = None
+            sid = self.session_id
+            p.queue_op({"upto": t.qid}, lambda r: self.session_id == sid and r.get("op") == "queue" and
+                       self.host_queue_in(r.get("queue")))
+
+    def follow_host_queue(self):
+        """(the open chat's agent gone mid-turn, stopped outright) Attached again if its host has what's queued here,
+        which it sends now, so its turn's followed here as it would be had this window sent it: once what's sent is
+        in its transcript as it's fetched (FOLLOW_WAIT_S at most), so it's drawn before the turn that answers it."""
+        if self.remote is None or self.proc is not None or not any(t.hosted for t in self.queued):
+            return
+        sid, path, since = self.session_id, self.view_path, time.monotonic()
+        size = os.path.getsize(path) if path and os.path.exists(path) else 0
+
+        def due():
+            if self.session_id != sid or self.proc is not None or not self.resume_pending:
+                return False
+            grown = path and os.path.exists(path) and os.path.getsize(path) > size
+            if not grown and time.monotonic() - since < self.FOLLOW_WAIT_S:
+                return True
+            self.begin_resume()
+            return False
+        GLib.timeout_add(200, due)
+
+    FOLLOW_WAIT_S = 5
+
+    def h_queue(self, msg):
+        """The open chat's queue changed on its host: another head's change, or its host sending it (queue_changed)."""
+        self.host_queue_in(msg.get("queue"))
+
+    @staticmethod
+    def queued_atts(content):
+        """What's attached to a queued message, from its content (pictures and documents; files named in its text)."""
+        atts = []
+        for b in content if isinstance(content, list) else ():
+            src = b.get("source") or {} if isinstance(b, dict) else {}
+            if src.get("type") != "base64" or b.get("type") not in ("image", "document"):
+                continue
+            try:
+                data = base64.b64decode(src.get("data") or "")
+            except ValueError:
+                continue
+            atts.append(Attachment(b.get("title") or "image", "image" if b["type"] == "image" else "pdf",
+                                   src.get("media_type") or "application/pdf", data, None))
+        return atts
+
+    def host_queue_in(self, q):
+        """The open chat's queue as its host has it, under the conversation: what's gone from it gone here, what's
+        new in it drawn in its place, what this window's adding (and what its host won't take) left as it is."""
+        if not isinstance(q, dict) or self.queue_host() is None:
+            return
+        if self.hq.get("sid") != self.session_id:
+            self.hq = {"sid": self.session_id, "rev": -1}
+        if (q.get("rev") or 0) < self.hq["rev"]:
+            return  # (older than one seen)
+        self.hq["rev"] = q.get("rev") or 0
+        turns = [t for t in q.get("turns") or () if isinstance(t, dict) and isinstance(t.get("id"), str)]
+        ids = {t["id"] for t in turns}
+        self.unqueue([t for t in self.queued if t.hosted is True and t.qid not in ids], host=False)
+        here = {t.qid: t for t in self.queued if t.qid}
+        prev = None
+        for t in turns:
+            turn = here.get(t["id"])
+            if turn is None:
+                atts = self.queued_atts(t.get("content"))
+                turn = QueuedTurn(self, self.user_bubble(t.get("text") or "", atts), t.get("text") or "", atts)
+                turn.qid = t["id"]
+                at = self.queued.index(prev) + 1 if prev is not None else 0
+                self.queued.insert(at, turn)
+                after = prev if prev is not None else (self.queued[1].get_prev_sibling() if len(self.queued) > 1
+                                                       else self.queue_box.get_last_child())
+                self.queue_box.insert_child_after(turn, after)
+                self.stick_bottom, self.restore_scroll = True, None
+            turn.hosted = True
+            prev = turn
+        self.queue_box.set_visible(bool(self.queued or any(t.get_visible() for t in
+                                                            getattr(self, "held_turns", {}).values())))
 
     @classmethod
     def drafts_state(cls):
@@ -315,19 +738,71 @@ class WindowDrafts:
         words left out of your box."""
         said_text = baudelib.wire.unsaid(text or "").strip()
         drawn = baudelib.wire.unsaid(sender["shown"]).strip() if isinstance(sender.get("shown"), str) else said_text
-        return SenderTurn(self, self.sender_bubble(sender, drawn, atts), said_text, said)
+        return SenderTurn(self, self.sender_bubble(sender, drawn, atts, said), said_text, said)
 
-    def sender_bubble(self, sender, text, atts=()):
+    def sender_bubble(self, sender, text, atts=(), said=None):
         """A message from sender, not you (its host's sender store's): where yours are, grey (not your accent), as a
-        queued one is, with who it's from in a small line at its top."""
+        queued one is, with who it's from in a small line at its top: a link to that chat (a task's: to its run, on
+        its Bot's Tasks page), if it names one; a chat a task's run started, then its run (a link to it) and how its
+        turn ended: "from subagent “Why” · Deploy site run · finished"; a task's ask (uuid said) whose run waits for
+        its answer, then that it does, while it does (sender_waits)."""
         bubble = self.user_bubble(text, atts)
         bubble.add_css_class("sender-bubble")
-        head = Gtk.Label(label=wording.say("common.from_who", author=baudelib.wire.sender_name(sender)), xalign=1,
-                         wrap=True,
-                         wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
+        head = Gtk.Label(xalign=1, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
+        head.sender, head.said, head.waits = sender, said, None
+        if sender.get("session"):
+            head.connect("activate-link", lambda _l, uri: self.open_sender(sender, uri == "run") or True)
         head.add_css_class("sender-from")
+        self.sender_head(head)
+        if said and sender.get("run"):
+            head.chat = self.session_id
+            self.sender_heads = [h for h in getattr(self, "sender_heads", ()) if h.chat == self.session_id] + [head]
         bubble.prepend(head)
         return bubble
+
+    def task_asks(self):
+        """The asks (their uuids) the open chat's been sent whose tasks' runs wait for its answer, as its host lists
+        them (a Bot's task_asks)."""
+        if self.remote is None or not self.session_id:
+            return ()
+        return tuple((self.remote.sessions.get(self.session_id) or {}).get("task_asks") or ())
+
+    def sender_head(self, head):
+        """A from line drawn as its sender says, and, for a task's ask its run waits on, that it does."""
+        sender = head.sender
+        waits = bool(head.said) and head.said in self.task_asks()
+        if waits == head.waits:
+            return
+        head.waits = waits
+        said = wording.say("common.from_who", author=baudelib.wire.sender_name(sender))
+        run, about = baudelib.wire.sender_run(sender), baudelib.wire.sender_about(sender)
+        after = [wording.say("senders.run_waiting")] if waits else []
+        if not sender.get("session"):
+            head.set_label(" · ".join([said, *about, *after]))
+            return
+        esc = GLib.markup_escape_text
+        parts = [f'<a href="sender">{esc(said)}</a>']
+        for i, part in enumerate(about):  # (its run: a link to it; how it ended, plain)
+            parts.append(f'<a href="run">{esc(part)}</a>' if i == 0 and sender.get("task_name") and run
+                         else esc(part))
+        parts += [f'<a href="run">{esc(part)}</a>' for part in after]  # (the run that waits: a link to it)
+        head.set_markup(" · ".join(parts))
+
+    def sender_waits(self):
+        """The open chat's from lines of tasks' asks drawn again as their runs wait for an answer or stop waiting."""
+        self.sender_heads = [h for h in getattr(self, "sender_heads", ()) if h.chat == self.session_id]
+        for head in self.sender_heads:
+            self.sender_head(head)
+
+    def open_sender(self, sender, to_run=False):
+        """The chat a message is from, opened (a task's, or to_run, a chat a task's run started's run: its Bot's, on
+        its Tasks page at that run, its task's page under it), on its host."""
+        run = baudelib.wire.sender_run(sender)
+        if run and (to_run or not sender.get("bot")):
+            bot, task, rid = run
+            return self.see_blocker(self.remote, {"kind": "task", "session": bot, "host": sender.get("host"),
+                                                  "task": task, "run": rid, "name": sender.get("task_name")})
+        self.see_blocker(self.remote, {"kind": "chat", "session": sender["session"], "host": sender.get("host")})
 
     def can_revert(self):
         """Whether a message of yours can be reverted here: every model's chat can (its program cuts the conversation:
@@ -541,6 +1016,7 @@ class WindowDrafts:
         says it, once (h_result; stop_stuck)."""
         if not self.proc:
             return
+        self.queue_upto_host()  # (a send-now's: its host sends them as the turn ends)
         if self.interrupting is not None and self.interrupting[0] is self.proc:
             return  # (asked already: stopped outright if it doesn't end soon)
         self.drop_interrupting()
@@ -584,7 +1060,8 @@ class WindowDrafts:
                     waiting.answered()
             self.waiting_cards.clear()
         else:
-            self.restart_after_turn = False  # (started again now, on whatever sign-in there is)
+            self.restart_after_turn = False  # (started again now, on whatever sign-in there is, or the account picked)
+            self.take_account()
             self.restart_proc(resume=True)
         self.end_turn(proc)
         return False
@@ -602,6 +1079,15 @@ class WindowDrafts:
                 self.sync_providers()
             return
         self.outgrown = False  # (another model's window: as its usage says)
+        if self.remote is not None and model_program(value) != model_program(was) and self.bot_name() and \
+                baudelib.wire.takes(self.remote.info, "rotate"):
+            if getattr(self, "busy", False) and self.proc is not None:  # (rotated once the turn's over)
+                self.move_after_turn = (self.proc, value)
+                self.sync_providers()
+                return
+            self.sync_providers()  # (its own model till the host's moved it)
+            self.remote_rotate_to(value)  # (a Bot: its conversation rotated, and it goes on afresh on the one picked)
+            return
         if self.remote is not None and model_program(value) != model_program(was):
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value)  # (a network session: a new one, on its server)
@@ -882,7 +1368,8 @@ class WindowDrafts:
             return m.get("provider") or providerslib.provider_of(m["value"])
 
         def info(value):
-            return self.models_info.get(value) or {"value": value, "displayName": providerslib.model_name(value)}
+            return self.models_info.get(value) or \
+                {"value": value, "displayName": providerslib.model_name(value, list(self.models_info.values()))}
         pid = pid_of(info(shown)) if shown else None
         # (every model with a provider: the chat's host's Apple model, then the providers' in their order; the chat's
         # own last if its host's gone, the same one as another host's where it is)
@@ -904,9 +1391,10 @@ class WindowDrafts:
         listed = own + [lead for lead, _ms in kinds]
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
         names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
-                  m.get("displayName") or m["value"]) for m in listed]
+                  m.get("displayName") or providerslib.model_name(m["value"])) for m in listed]
         self.model_names = dict(names) | ({shown: dict(names)[pick]} if same else {})
-        self.model_dd.set_choices(names or MODELS)
+        known = list(self.models_info.values())
+        self.model_dd.set_choices(names or MODELS, {v: providerslib.model_slug(v, known) for v, _n in names})
         if pick:
             self.model_dd.select(pick)
 
@@ -934,11 +1422,138 @@ class WindowDrafts:
         self.provider_dd.set_visible(bool(self.alike_keys))  # (Claude's: none)
         self.provider_dd.set_tooltip_text(wording.say("chat_header.provider_tip_only") if one else
                                           wording.say("chat_header.provider_tip"))
+        if not self.alike_keys:
+            self.sync_accounts(shown)
         self.ctx_box.window_changed()  # (no session's said what it's used yet: this model's window)
+
+    # ---- a chat on Claude's or Codex's model whose host keeps a subscription account for it (with the CLI's own
+    # sign-in, two subscriptions): each is a provider in the provider picker, by its name alone (an account is its
+    # host's: never another's), the CLI's own sign-in first, the chat's own picked. Picking another goes on with the chat under it (accounts' use: its agent started again, resuming it,
+    # once its turn's over; a Claude Desktop chat's own claude, here, started again under it)
+    ACCOUNTS_S = 30  # (s a host's accounts, as it last listed them, are taken as they are)
+    ACCOUNT = "account|"  # (a provider picker key that's an account: its id after it)
+    ACCOUNT_GONE = "account-gone"  # (the provider picker's key for an account since removed that the chat's on)
+
+    def host_accounts(self):
+        """The subscription accounts of the chat's host, as it last listed them ([] till it has), listed again once
+        they're ACCOUNTS_S old; the pickers synced as an answer changes them."""
+        host = self.remote
+        if host is None:
+            from baudelib import accounts
+            try:
+                return accounts.listing()
+            except OSError:
+                return []
+        said = getattr(host, "accounts_said", None)
+        if (said is None or GLib.get_monotonic_time() / 1e6 - said[0] >= self.ACCOUNTS_S) and \
+                not getattr(host, "accounts_asking", False):
+            host.accounts_asking = True
+
+            def answered(reply, host=host, was=said):
+                host.accounts_asking = False  # (answered, refused, or the connection gone: asked again next time)
+                if reply.get("op") != "accounts":
+                    return
+                listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
+                host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed)
+                if (was or (0, []))[1] != listed and self.remote is host and self.get_application() is not None:
+                    self.sync_providers()
+            host.request({"op": "accounts", "what": "list"}, answered)
+        return said[1] if said else []
+
+    def sync_accounts(self, shown):
+        """The provider picker as the chat's subscriptions, the CLI's own sign-in and each account: shown (its model)
+        Claude's or Codex's, and its host keeping an account for it; else left as sync_providers left it. Not for a Claude Desktop chat its
+        host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
+        that, picked, till another's picked."""
+        program = model_program(shown or self.model)
+        if program not in ("claude", "codex") or not self.session_id:
+            return
+        if self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
+            return
+        mine = [a for a in self.host_accounts() if a.get("provider") == program]
+        if not mine:  # (the CLI's own sign-in alone: nothing else to pick)
+            return
+        on = (self.chat_account_info() or {}).get("id") or ""
+        choices = [(self.ACCOUNT, wording.say("subscriptions.cli_default"))] + \
+            [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
+        if self.chat_account_gone():
+            on = self.ACCOUNT_GONE
+            choices.append((on, wording.say("subscriptions.removed_account")))
+        self.provider_dd.set_choices([(None, choices)])
+        self.provider_dd.select(on if on == self.ACCOUNT_GONE else self.ACCOUNT + on)
+        self.provider_dd.set_sensitive(True)
+        self.provider_dd.set_visible(True)
+        self.provider_dd.set_tooltip_text(wording.say("subscriptions.account_tip"))
+
+    def chat_account_gone(self):
+        """Is the chat on a subscription account since removed from its host?"""
+        if self.remote is not None:
+            return bool((self.remote.sessions.get(self.session_id) or {}).get("account_gone"))
+        import sqlite3
+        from baudelib import accounts
+        try:
+            profile = accounts.claude_session_profile(self.session_id)
+            return bool(profile) and accounts.account(profile) is None
+        except (OSError, sqlite3.Error):
+            return False
+
+    def use_account(self, profile):
+        """The chat goes on under another of its host's accounts (profile; "": the CLI's own sign-in)."""
+        name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
+            wording.say("subscriptions.cli_default")
+        if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it,
+            self.account_to = profile  # once its turn's over)
+            if getattr(self, "busy", False) and self.proc is not None:
+                self.restart_after_turn = True
+                self.note(wording.say("subscriptions.account_note", name=name))
+            elif self.take_account():
+                self.note(wording.say("subscriptions.account_note", name=name))
+                self.restart_proc(resume=True)
+            self.sync_providers()
+            return
+
+        def answered(reply):
+            if reply.get("error") or reply.get("op") == "error":
+                self.note(reply.get("error") or wording.say("subscriptions.gone"))
+            else:
+                self.note(wording.say("subscriptions.account_note", name=name))
+                listed = self.remote.sessions.get(self.session_id) if self.remote is not None else None
+                if isinstance(listed, dict):  # (as its host lists it next: taken now)
+                    listed["account"] = next((a for a in self.host_accounts() if a["id"] == profile), None)
+                    listed["account_gone"] = False
+            self.sync_providers()
+        self.remote.request({"op": "accounts", "what": "use", "session": self.session_id, "id": profile}, answered)
+
+    def take_account(self):
+        """A Claude Desktop chat run here moved onto the account picked for it (account_to), with no claude running
+        in it: its transcript carried to that account's projects folder where it isn't the one it's in
+        (accounts.carry_chat), and the account kept as its own and as the one a new chat here takes. Whether it was (a
+        copy that fails: said, the chat left on the one it's on)."""
+        profile, self.account_to = getattr(self, "account_to", None), None
+        if profile is None or not self.session_id:
+            return False
+        from baudelib import accounts, transcripts
+        try:
+            accounts.carry_chat("claude", self.session_id, transcripts.session_file(self.session_id),
+                                accounts.claude_session_profile(self.session_id), profile)
+            accounts.use_claude_session(self.session_id, profile)
+            accounts.select("claude", profile)  # (as a host's use keeps it: its drafts take it as they're written in)
+        except (OSError, ValueError) as e:
+            self.note(str(e))
+            return False
+        return True
 
     def on_provider_changed(self, key):
         """Another provider of the chat's model picked (alike_keys): the chat's model is its copy there, as a model
-        picked is; mid-turn, once the turn's over. Its own picked back: no move, one waiting dropped."""
+        picked is; mid-turn, once the turn's over. Its own picked back: no move, one waiting dropped. An account
+        picked (sync_accounts): the chat goes on under it."""
+        if key == self.ACCOUNT_GONE:
+            return
+        if key.startswith(self.ACCOUNT):
+            if key[len(self.ACCOUNT):] != ((self.chat_account_info() or {}).get("id") or "") or \
+                    self.chat_account_gone():
+                self.use_account(key[len(self.ACCOUNT):])
+            return
         self.move_after_turn = None
         value = getattr(self, "alike_keys", {}).get(key)
         if value is not None and value != self.model:
@@ -1113,6 +1728,7 @@ class WindowDrafts:
         if st == "init":
             self.init_info = msg  # (its model and tools, as claude says them: report)
             TOOL_NAMES.update(t for t in msg.get("tools") or [] if isinstance(t, str))  # (what Signal can name)
+            toolnames.learn_servers(msg.get("mcp_servers"))  # (its MCP servers' names, as they're configured)
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
         if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)
@@ -1270,6 +1886,41 @@ class WindowDrafts:
     def stop_task(self, task_id):
         self.request({"subtype": "stop_task", "task_id": task_id}, lambda _r: None)
         self.note(wording.say("side_panel.stop_requested", task=self.tasks.get(task_id, {}).get("description") or task_id))
+
+    def offers_background(self):
+        """Whether the open chat's agent moves a command or subagent it's running to the background when asked: only
+        Claude Code does (background_tasks); Codex, pi and Apple's model have no way to."""
+        return model_program(self.model) == "claude"
+
+    def move_foreground(self):
+        """Send now's: each command and subagent of the turn's own running in the foreground moved to the background,
+        where it goes on (background_tasks by its call, as send_to_background does, unsaid if it can't be), each card
+        taking its result as a task's; the step the turn waits on ends, so the turn takes in what was sent now. A
+        subagent's own commands and a call waiting on a permission are left as they are."""
+        if not self.offers_background() or not self.proc or not self.busy:
+            return
+        for card in [c for c in self.tool_cards.values() if getattr(c, "to_background", None) is not None and
+                     c.state == "running" and c.asking is None and not c.moving and c.tool_id not in self.tool_parent]:
+            self.send_to_background(card, said=False)
+
+    def send_to_background(self, card, said=True):
+        """A card's Background: its command or subagent moved to the background (Claude Code's background_tasks, by
+        its call), where it goes on, its result saying so (task_from_result) and its end told as a task's; the turn
+        goes on, so what's sent at it reaches the agent. Said in the chat if it can't be (said)."""
+        def done(r):
+            if not (r or {}).get("backgrounded", True):  # (it ended, or its task wasn't one yet: nothing to move)
+                card.moved(False)
+                if said:
+                    self.note(wording.say("tool_calls.not_moved", what=tool_label(card.name)))
+
+        def refused(why):
+            card.moved(False)
+            if said:
+                self.note(wording.say("tool_calls.not_moved_why", why=why))
+        if not self.proc or not self.busy:
+            return
+        card.moved(True)
+        self.request({"subtype": "background_tasks", "tool_use_id": card.tool_id}, done, refused)
 
     def place_split(self):
         """Give the panel the width it was dragged to when it opens, else about a third of the window."""
@@ -1430,8 +2081,8 @@ class WindowDrafts:
                 self.orphan_results[c.get("tool_use_id")] = c
             if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("tool_use_id") in self.tool_cards:
                 card = self.tool_cards[c["tool_use_id"]]
-                if from_file:
-                    self.task_from_result(card, c.get("content"))  # before: the card waits on it
+                if from_file or card.moving:  # (one moved to the background as it ran: its result says it's a task)
+                    self.task_from_result(card, c.get("content"), from_file)  # before: the card waits on it
                 card.set_result(c.get("content"), c.get("is_error", False))
                 if card.task is None and self.task_lines:  # (its task's ending drawn before it: a later part)
                     self.card_task(card)

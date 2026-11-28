@@ -109,6 +109,7 @@ object Meta {
         "Mesh: your mesh tools (mcp__mesh__*) list the mesh's hosts and their models and the chats on each, read a " +
             "chat, message one, and start a subagent on any host with any of its models. What they start or say isn't " +
             "an action: it has no undo.",
+        Wording.Inbox.metaPrompt,
         "Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it.",
     ).joinToString("\n\n")
 

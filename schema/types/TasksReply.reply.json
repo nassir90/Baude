@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "tasks' answer: a Bot's tasks (their scripts left out).",
+  "properties": {
+    "op": {
+      "const": "tasks",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "Task.json"
+      },
+      "description": "Its tasks."
+    },
+    "clock": {
+      "$ref": "Clock.json",
+      "description": "The host's clock."
+    },
+    "saved": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The id of the task set, if one was."
+    }
+  },
+  "required": [
+    "op",
+    "session"
+  ],
+  "additionalProperties": false
+}

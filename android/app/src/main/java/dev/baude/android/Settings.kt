@@ -192,10 +192,13 @@ fun chatColumn(w: Dp): Dp {
  * grow by the same ratio and keep their size against the words beside them. */
 val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.iconScale.value
 
+/** A width given in Baude's px for room for text: as the phone's text is to Baude's 12 px, at Settings' text size. */
+val Dp.text: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.textScale.value
+
 private const val BAUDE_TEXT_PX = 12f
 
-/** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage)
- * and Telemetry (TelemetryPage), swiped between (the chat's pages' pager) or switched between by the bar at its foot,
+/** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage),
+ * Telemetry (TelemetryPage) and Access (AccessPage), swiped between (the chat's pages' pager) or switched between by the bar at its foot,
  * as Baude's dialog's switcher is when it's narrow, which follows the swipe (page: the one it opens on). General's
  * groups in Baude's order: Meta's, Full-width text, Code Font, the accent and whether it's light or dark, how updates
  * download, notifications and the version; the sizes; Send Feedback…. */
@@ -205,7 +208,8 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
     val pages = listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
         Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
         Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric),
-        Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent))
+        Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent),
+        Page("access", Wording.Access.title, Adwaita.DialogPassword))
     val state = rememberPagerState(initialPage = page.coerceIn(0, pages.lastIndex)) { pages.size }
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -215,6 +219,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
                 1 -> SubscriptionsPage()
                 2 -> DepsPage()
                 3 -> TelemetryPage()
+                4 -> AccessPage()
                 else -> GeneralPage(feedback, chat)
             }
         }
@@ -404,10 +409,10 @@ private fun VersionRow() {
 /** A row with a switch (Adw.SwitchRow). */
 @Composable
 fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = true,
-              extra: (@Composable () -> Unit)? = null, set: (Boolean) -> Unit) {
+              extra: (@Composable () -> Unit)? = null, titleLines: Int = 1, set: (Boolean) -> Unit) {
     val c = LocalBaude.current
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
-        ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, suffix = {
+        ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, titleLines = titleLines, suffix = {
             Switch(on, set, enabled = enabled,
                 colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
             extra?.invoke()
@@ -420,11 +425,12 @@ fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = 
 @Composable
 fun Choice(title: String, values: List<String>, picked: String, label: (String) -> String,
            dot: ((String) -> Color)? = null, subtitle: String? = null, enabled: Boolean = true,
-           before: (@Composable () -> Unit)? = null, extra: (@Composable () -> Unit)? = null, pick: (String) -> Unit) {
+           before: (@Composable () -> Unit)? = null, extra: (@Composable () -> Unit)? = null, titleLines: Int = 1,
+           pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
-    ActionRow(title, subtitle, onClick = if (enabled) ({ open = true }) else null, suffix = {
+    ActionRow(title, subtitle, onClick = if (enabled) ({ open = true }) else null, titleLines = titleLines, suffix = {
         before?.invoke()
         Box {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

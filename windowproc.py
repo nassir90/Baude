@@ -34,7 +34,7 @@ from chatparts import (  # noqa: E402  (a message of yours, its revert button: M
 )
 from widgets import ZOOM_STEP, discard, load_settings, save_settings, toast  # noqa: E402,F401
 from markdownview import ARTIFACT_TITLES, MarkdownView  # noqa: E402,F401
-from toolcards import CUT_CONTINUE, ToolCard, track_commands  # noqa: E402
+from toolcards import CUT_CONTINUE, ToolCard, tool_label, track_commands  # noqa: E402
 from chatinput import Attachment, attachment_widget, clipboard_has  # noqa: E402
 from sessionlist import (  # noqa: E402
     ClaudeProc, HERE_HOST, RemoteProc, THIS_MACHINE, is_desktop, local_host, main_folder, on_main, remote_info,
@@ -109,9 +109,26 @@ class WindowProc:
         widgets.toast(self, wording.say("window.transcript_copied"))
 
     def refresh_context(self):
+        if self.remote is not None:  # (a host's chat: its host asks its agent, ask_context, and lists what it said)
+            return self.show_listed_context()
         model = self.model  # (the model the answer's for: another picked while it's asked for isn't, on_model_changed)
         self.request({"subtype": "get_context_usage"},
                      lambda usage: (self.remember_context(model, usage), self.show_context(usage)))
+
+    def show_listed_context(self, again=False):
+        """A host's chat: how much of its window it's used, as its host lists it (Session's context), shown as it
+        changes; again: shown whatever was shown before (another chat opened)."""
+        listed = (self.remote.sessions.get(self.session_id) or {}) if self.remote is not None and self.session_id else {}
+        usage = listed.get("context")
+        if not isinstance(usage, dict) or (not again and (self.session_id, usage) == getattr(self, "context_listed", None)):
+            return
+        self.context_listed = (self.session_id, usage)
+        self.remember_context(self.model, usage)
+        self.show_context(usage)
+        sid = self.session_id  # (the tooltip's categories: not listed, asked of its host, which has them kept)
+        self.request({"subtype": "get_context_usage"},
+                     lambda said: self.session_id == sid and said.get("categories") and self.show_context(
+                         {**usage, "categories": said["categories"]}))
 
     CONTEXT_EVERY_MS = 1000
 
@@ -330,6 +347,20 @@ class WindowProc:
         sign-in."""
         return (self.chat_account_info() or {}).get("name")
 
+    def subscription_off(self):
+        """Is the subscription the chat runs on disabled on its host (its listing's account_disabled; a chat this
+        process runs claude for itself: as this machine keeps it)?"""
+        if self.remote is not None:
+            return bool(self.session_id and (self.remote.sessions.get(self.session_id) or {}).get("account_disabled"))
+        if not self.session_id or model_program(self.model) != "claude":
+            return False
+        import sqlite3
+        from baudelib import accounts
+        try:
+            return accounts.disabled(accounts.usage_key("claude", accounts.claude_session_profile(self.session_id)))
+        except (OSError, sqlite3.Error):
+            return False
+
     def chat_account_info(self):
         """The subscription account the chat's agent runs under on its host (Account's fields: its listing's; a chat
         this process runs claude for itself: as this machine keeps it), or None: the CLI's own sign-in."""
@@ -343,6 +374,22 @@ class WindowProc:
                 return accounts.account(accounts.claude_session_profile(self.session_id))
             except (OSError, sqlite3.Error):
                 return None
+        return None
+
+    def usage_account(self):
+        """Whose usage ☰'s usage row shows (subscriptionpage.MenuUsage): (where, provider, account id, "" for the CLI's
+        own sign-in) of the chat's on a Claude or Codex model: its host's, its model's provider's, the account its agent
+        runs under (None for a chat its host doesn't list yet: the one a new chat there takes); else None, as with no
+        chat."""
+        program = model_program(self.model or "default")
+        if program not in ("claude", "codex"):
+            return None
+        if self.remote is not None:
+            listed = self.remote.sessions.get(self.session_id) if self.session_id else None
+            profile = ((listed.get("account") or {}).get("id") or "") if isinstance(listed, dict) else None
+            return self.remote.where, program, profile
+        if program == "claude" and self.session_id:
+            return {"via": "local"}, program, (self.chat_account_info() or {}).get("id") or ""
         return None
 
     def cost_said(self):
@@ -429,7 +476,8 @@ class WindowProc:
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.where, self.session_id,
                                        live=not self.resume_pending,  # (this machine's: as Baude's own claude would
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
-                                       always_allow=sorted(self.allowed_in(self.session_id)))
+                                       always_allow=sorted(self.allowed_in(self.session_id) -
+                                                           self.host_allowed.get(self.session_id, set())))
             except OSError as e:
                 refused = isinstance(e, baudelib.client.Refused)
                 if refused:  # (its host there, but the session not to be had)
@@ -445,8 +493,11 @@ class WindowProc:
                     self.attach_said = (self.session_id, kind)
         if self.proc is not None:
             self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
-            self.allowed_in(self.session_id).update(self.proc.listing.get("always_allow") or ())  # (what its host
-            # allows it: another head's too)
+            self.host_allowed[self.session_id] = set(self.proc.listing.get("always_allow") or ())  # (what its host
+            self.allowed_in(self.session_id).update(self.host_allowed[self.session_id])  # allows it: another head's
+            # too; not sent it again as this attaches again)
+            self.apply_read_only()  # (one its host lets this head only read: no text box)
+            self.reattached_draft()  # (what's typed while it was away, or what its host's had since)
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -459,6 +510,8 @@ class WindowProc:
             self.pending.clear()
             for msg in list(self.proc.asks.values()):  # (what it's waiting on an answer to)
                 self.h_control_request(msg)
+            if getattr(self.proc, "login", None) is not None:  # (its sign-in, as its host has it: its card)
+                self.h_login({"login": self.proc.login, "attached": True})
         self.update_status()
         self.update_banner()
 
@@ -496,7 +549,8 @@ class WindowProc:
             return True
         child = self.transcript.get_first_child()
         while child is not None:
-            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None):
+            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None) and \
+                    child is not getattr(self, "resume_row", None):
                 return True
             child = child.get_next_sibling()
         return False
@@ -680,7 +734,8 @@ class WindowProc:
                 info = remote_info({**listed, "server": r})
                 self.tell_desktop(sid, wording.say("asks.waiting") if state == "waiting" else
                                   wording.say("meta.finished"),
-                                  title=baudelib.client.chat_name(listed), info=info)
+                                  title=baudelib.client.chat_name(listed), info=info,
+                                  turn=None if state == "waiting" else listed.get("ended"))
 
     def on_background_msg(self, proc, msg):
         t, req = msg.get("type"), msg.get("request") or {}
@@ -697,7 +752,8 @@ class WindowProc:
                 proc.asks[msg["request_id"]] = msg
                 self.sidebar.restate()
                 self.tell_desktop(proc.key, wording.say("asks.waiting_for_tool",
-                                                        tool=req.get("tool_name") or wording.say("asks.a_tool")))
+                                                        tool=tool_label(req["tool_name"]) if req.get("tool_name")
+                                                        else wording.say("asks.a_tool")))
         elif t == "result":
             self.tell_desktop(proc.key, turn_said(msg))
             if not self.left_turn_ended(proc.key, lambda content, said, done: (proc.user(content, said),
@@ -776,7 +832,8 @@ class WindowProc:
             queue = None
         elif queue and not gone:  # (whether its turn's going on as it's left: its end, seen as it's listed, sends it)
             self.QUEUE_SEEN[key] = "working" if self.busy or key in self.left_remote else None
-        self.unqueue(list(self.queued))  # (another chat: this one's queue kept for it, not shown under the next)
+        self.unqueue(list(self.queued), host=False)  # (another chat: this one's queue kept for it, not shown under the
+        # next; its host's left there)
         self.held_after_revert = None
         for t in getattr(self, "held_turns", {}).values():  # (and what its host holds for it: the next one's own)
             if t.get_parent() is self.queue_box:
@@ -788,6 +845,7 @@ class WindowProc:
         if carried is not None:
             self.set_box(*carried)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
+        self.resume_row = self.resume_shown = None  # (and resume_state)
         self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None
@@ -875,9 +933,13 @@ class WindowProc:
             return True
         return sid in self.sidebar.archived_ids()
 
+    def writes_chat(self):
+        """Whether this head may change the open chat: no, where its host lets it only read it (access)."""
+        return getattr(self, "remote", None) is None or getattr(getattr(self, "proc", None), "writes", True) is not False
+
     def set_read_only(self, on):
         """Make this session read-only, or not (and remember it for the session, once it has an id)."""
-        if self.archived:
+        if self.archived or not self.writes_chat():
             return  # (read-only till it's unarchived: the item's greyed)
         if self.session_id:
             ids = [i for i in self.read_only_ids() if i != self.session_id] + ([self.session_id] if on else [])
@@ -885,15 +947,17 @@ class WindowProc:
         self.apply_read_only(on)
 
     def apply_read_only(self, on=None):
-        """Show or hide the text box as the session asks (on: as given, None: as remembered for it); archived, it's
-        hidden whatever was chosen, and ☰ → Read-only session is checked and greyed."""
+        """Show or hide the text box as the session asks (on: as given, None: as remembered for it); archived, or one
+        its host lets this head only read, it's hidden whatever was chosen, and ☰ → Read-only session is checked and
+        greyed."""
         if on is None:
             on = bool(self.session_id) and self.session_id in self.read_only_ids()
         self.archived = self.chat_archived()
-        self.read_only = on or self.archived
+        forced = self.archived or not self.writes_chat()
+        self.read_only = on or forced
         if (action := self.lookup_action("readonly")) is not None:
             action.set_state(GLib.Variant.new_boolean(self.read_only))
-            action.set_enabled(not self.archived)
+            action.set_enabled(not forced)
         self.show_composer()
 
     def show_composer(self):
@@ -935,6 +999,8 @@ class WindowProc:
             self.proc = None
             self.set_busy(False)
             self.remote_view()
+            if code != "lost":
+                self.follow_host_queue()  # (its host sending what's queued: attached again for it)
             return
         self.compact_ended()
         if code != 0 and self.session_id and not self.resume_pending:  # (nothing said now: the claude started next
@@ -975,6 +1041,15 @@ class WindowProc:
         return False
 
     def on_send(self):
+        """Enter (or Send): what's written sent, queued or done. The box emptied by it is a send of its own
+        (enter_id): its host's draft emptied for it, and nothing written before it saved back (draft_typed)."""
+        self.enter_id = str(uuid.uuid4())
+        try:
+            self.send_box()
+        finally:
+            self.enter_id = None
+
+    def send_box(self):
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
         if self.composer_box.gates and not self.busy and not (typed in ("/clear", "/new", "/cd", "/login", "/logout") or
@@ -1043,9 +1118,10 @@ class WindowProc:
         self.send_text(text)
 
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
-    # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
-    # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
-    # box; its ✕ drops it. They're the open chat's: another chat opened, they're kept with its draft
+    # that ends sends them all, together as one message. A queued message's ↑ sends it with every one before it at
+    # once, to the turn going on, which goes on with it, its subagents moved to the background, not stopped
+    # (send_at_turn); its revert puts it back in the box; its ✕
+    # drops it. They're the open chat's: another chat opened, they're kept with its draft
     # (clear_transcript), sent as its turn ends meanwhile (send_left_queues) and drawn again as it's opened (take_draft)
     def queue_message(self):
         buf = self.input.get_buffer()
@@ -1059,17 +1135,19 @@ class WindowProc:
         self.queue_box.append(turn)
         self.queue_box.set_visible(True)
         self.stick_bottom, self.restore_scroll = True, None
+        self.queue_to_host(turn)  # (a host's chat's: kept there, for every head, and sent by it)
 
     def queue_state(self):
         """The queue as the chat's draft keeps it (keep_draft): its messages (text, attachments, and the uuid one put
         back is sent by), the one whose ↑ the turn's stopping for (its place), and whether the turn was stopped
         otherwise (hold: its end sends nothing); None if nothing's queued."""
         stopped = self.__dict__.pop("stop_left", False) or bool(self.busy and getattr(self.proc, "stop_asked", False))
-        if not self.queued:
+        mine = [t for t in self.queued if not t.hosted]  # (its host's are kept there)
+        if not mine:
             return None
-        upto = self.queue_upto
-        return {"turns": [{"text": t.text, "attachments": list(t.atts), "said": t.said} for t in self.queued],
-                "upto": self.queued.index(upto) if isinstance(upto, QueuedTurn) else None, "hold": stopped}
+        upto = self.queue_upto if self.queue_upto in mine else None
+        return {"turns": [{"text": t.text, "attachments": list(t.atts), "said": t.said} for t in mine],
+                "upto": mine.index(upto) if isinstance(upto, QueuedTurn) else None, "hold": stopped}
 
     def put_queue(self, queue):
         """A queue the chat's draft kept (queue_state) under the conversation again, after what's queued; its ↑ and
@@ -1089,7 +1167,10 @@ class WindowProc:
         self.queue_box.set_visible(bool(self.queued))
         self.stick_bottom, self.restore_scroll = True, None
 
-    def unqueue(self, turns):
+    def unqueue(self, turns, host=True):
+        """turns out of the queue; out of its host's too (host), those it has."""
+        if host:
+            self.unqueue_on_host(turns)
         for t in turns:
             if t in self.queued:
                 self.queued.remove(t)
@@ -1115,10 +1196,14 @@ class WindowProc:
         self.input.grab_focus()
 
     def queue_send(self, turn):
-        """Its ↑: it and the queued messages before it sent together: now, or once the interrupted turn's ended."""
-        if turn not in self.queued:
+        """Its ↑: it and the queued messages before it sent together, now: to the turn going on (send_at_turn), or as
+        a turn of its own when none is. A revert waiting to be made is made first, as sending does (on_send): the turn
+        it stops ends, and they're sent after it."""
+        if turn not in self.queued or self.live_elsewhere():
             return
-        if self.busy:
+        if self.busy and self.reverting is None and self.proc is not None:
+            self.send_at_turn(self.queued[:self.queued.index(turn) + 1])
+        elif self.busy:
             if self.queue_upto is None or self.queued.index(turn) > self.queued.index(self.queue_upto):
                 self.queue_upto = turn
             self.interrupt()
@@ -1126,13 +1211,33 @@ class WindowProc:
             self.queue_upto = turn
             self.flush_queue()
 
+    def send_at_turn(self, turns):
+        """Queued messages given the agent at its turn, together as one message, without stopping it: claude, Codex
+        and pi take it in between the turn's steps (Apple's model, once its turn's over), and the turn goes on. Drawn
+        as sent, where the chat's got to. Claude Code's commands and subagents running in the foreground are moved to
+        the background (background_tasks, as its Ctrl+B), where they go on: the step waiting on them ends, so the turn
+        takes the message in now, not once they're done. Moved once its host has taken the message: one it refuses
+        moves nothing."""
+        turns = list(turns)
+        self.unqueue(turns)
+        text = "\n\n".join(t.text for t in turns if t.text)
+        atts = [a for t in turns for a in t.atts]
+        said = turns[0].said if len(turns) == 1 and turns[0].said else str(uuid.uuid4())
+        self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
+        self.stick_bottom, self.restore_scroll = True, None
+        sid = self.session_id
+        self.proc.user(self.user_content(text, atts), said,
+                       lambda r: r.get("op") != "error" and self.session_id == sid and self.move_foreground())
+
     def flush_queue(self):
         """The queue sent up to queue_upto (all of it: "all"), as one message (send_text), once no turn's going."""
         upto, self.queue_upto = self.queue_upto, None
         if upto is None or self.busy or not self.queued:
             return False
-        turns = self.queued if upto == "all" else self.queued[:self.queued.index(upto) + 1]
-        turns = list(turns)
+        turns = [t for t in self.queued if not t.hosted] if upto == "all" else \
+            self.queued[:self.queued.index(upto) + 1]  # (all: what its host hasn't, which it sends itself)
+        if not turns:
+            return False
         self.unqueue(turns)
         text = "\n\n".join(t.text for t in turns if t.text)
         buf = self.input.get_buffer()  # (sent from the box, as anything is: on_send; what was written there kept)
@@ -1186,7 +1291,8 @@ class WindowProc:
         if gates := self.composer_box.gates:  # (what's in the way of sending, said as it is)
             toast(self, wording.say("held_send.while_exhausted") if "exhausted" in gates else
                   wording.say("held_send.while_down") if "network" in gates else
-                  wording.say("held_send.while_no_host") if "host" in gates else wording.say("held_send.while_other"))
+                  wording.say("held_send.while_no_host") if "host" in gates else
+                  wording.say("held_send.while_disabled") if "disabled" in gates else wording.say("held_send.while_other"))
             return
         if self.reverting is not None:
             if not self.revert_asked():
@@ -1366,6 +1472,7 @@ class WindowProc:
         """The composer's text changed: the sidebar lists the open chat once it's begun, and not while it's blank."""
         if getattr(self, "swapping_draft", False):  # (a chat's draft put away or back: the switch fills the sidebar)
             return
+        self.draft_typed()  # (a host's chat's: saved to its host)
         if getattr(self, "sidebar", None) is not None and (begun := self.chat_begun()) != self.listed_begun:
             self.listed_begun = begun
             self.sidebar.fill()

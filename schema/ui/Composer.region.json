@@ -23,7 +23,10 @@
     "chatinput.py:Attachment",
     "chatinput.py:attachment_widget",
     "chatparts.py:QueuedTurn",
-    "chatparts.py:HeldTurn"
+    "chatparts.py:HeldTurn",
+    "windowdrafts.py:WindowDrafts.open_host_draft",
+    "windowdrafts.py:WindowDrafts.draft_typed",
+    "windowdrafts.py:WindowDrafts.host_draft_in"
   ],
   "copy": [
     "composer",
@@ -37,7 +40,7 @@
   "parts": [
     {
       "name": "text box",
-      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). Where the line is taller than the buttons (a large chat zoom, Text size or Global Scale) or the buttons taller than 28 px (a large Icons size), the one-line box is the taller of the two plus the inset above and below, and both are centred in it. As the text grows the buttons stay at the bottom, centred on its last line. The box follows a change of zoom or size at once, smaller as well as larger. It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
+      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). Where the line is taller than the buttons (a large chat zoom, Text size or Global Scale) or the buttons taller than 28 px (a large Icons size), the one-line box is the taller of the two plus the inset above and below, and both are centred in it. As the text grows the buttons stay at the bottom, centred on its last line. The box follows a change of zoom or size at once, smaller as well as larger. It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text. A host's chat's text is its host's draft (schema/types/DraftSave.request.json): the box opens with it and follows other heads' edits to it; what was sent from any box never comes back into it.",
       "actions": [
         {
           "by": "key Enter",
@@ -79,14 +82,88 @@
       "parts": [
         {
           "name": "markdown shown as typed",
-          "decisions": [{"said": "In every formatted input box, > shows as a quote as it does once sent", "rule": "Every app's formatted boxes (the chat's, Meta's, Send Feedback's) show a line starting with > as a quote while it's written, as a sent quote looks: a rule at its left, its text set in past it and faded, not italic, the > hidden off the caret's line", "decided": "2026-11-23", "source": [{"issue": "BaudeInternal#201"}]}],
+          "decisions": [
+            {
+              "said": "In every formatted input box, > shows as a quote as it does once sent",
+              "rule": "Every app's formatted boxes (the chat's, Meta's, Send Feedback's) show a line starting with > as a quote while it's written, as a sent quote looks: a rule at its left, its text set in past it and faded, not italic, the > hidden off the caret's line",
+              "decided": "2026-11-23",
+              "source": [
+                {
+                  "issue": "BaudeInternal#201"
+                }
+              ]
+            }
+          ],
           "shows": "The text is styled live like chat messages while still plain text: # headings at the chat's heading sizes, **bold**, *italic*, `inline code` (monospace, shaded), ``` fenced code blocks (one rounded shaded background behind all lines, fence lines dim, monospace), bullet lists with real bullets (- * + typed become • at the top level, ◦ one level in; sent back as -) with hanging indent, numbered lists, > quotes. Markdown symbols (#, **, `) are hidden except on the line the caret is on, where they show dim. @names the catalogue knows are coloured (green, bold, tinted background), and the @ search being typed too."
         }
       ],
       "decisions": [
-        {"said": "Being unable to paste images and such into the input is a massive oversight (paraphrased)", "rule": "In every app, pasting copied images or files into a message box (any paste: Ctrl+V, ⌘V, Shift+Insert, the menu's Paste) attaches them; text pastes as text", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#149"}]},
-        {"said": "Tab in the agent's box should indent (bullet points), as it does in Record; right now it's unclear what it does (paraphrased)", "rule": "In every app's message boxes Tab moves the list item (or selected items) in a level and Shift+Tab out, as on a Record page; in a code block it indents four spaces; elsewhere it moves the focus", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#162"}, {"issue": "BaudeInternal#168"}]},
-        {"said": "Across both mobile and desktop, the default height of the prompt bar bar can be shrunk. A good reference is the one that currently exists for side questions post-initial-ask. I.e. the default bar is just closely wrapperd around the \"+\" and \"Enter\" icon", "rule": "Every app's empty or one-line message box is wrapped close round its buttons: a button's height with the buttons' inset above and below (composer tokens), the same height as a side question's box under its question; it grows with the text", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
+        {
+          "said": "Being unable to paste images and such into the input is a massive oversight (paraphrased)",
+          "rule": "In every app, pasting copied images or files into a message box (any paste: Ctrl+V, ⌘V, Shift+Insert, the menu's Paste) attaches them; text pastes as text",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#149"
+            }
+          ]
+        },
+        {
+          "said": "Tab in the agent's box should indent (bullet points), as it does in Record; right now it's unclear what it does (paraphrased)",
+          "rule": "In every app's message boxes Tab moves the list item (or selected items) in a level and Shift+Tab out, as on a Record page; in a code block it indents four spaces; elsewhere it moves the focus",
+          "decided": "2026-11-18",
+          "source": [
+            {
+              "issue": "BaudeInternal#162"
+            },
+            {
+              "issue": "BaudeInternal#168"
+            }
+          ]
+        },
+        {
+          "said": "Across both mobile and desktop, the default height of the prompt bar bar can be shrunk. A good reference is the one that currently exists for side questions post-initial-ask. I.e. the default bar is just closely wrapperd around the \"+\" and \"Enter\" icon",
+          "rule": "Every app's empty or one-line message box is wrapped close round its buttons: a button's height with the buttons' inset above and below (composer tokens), the same height as a side question's box under its question; it grows with the text",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        },
+        {
+          "said": "Thread drafts need to be saved across the mesh",
+          "rule": "Every app keeps a host chat's unsent text on the chat's host, not on the device: any head on any machine that opens the chat shows the same draft, and an edit in one shows in the others. A head saves about 400 ms after typing stops, at once when the box is emptied (a message sent or queued), and as the chat is left. Sending clears the draft everywhere. When two heads type at once the last write the host takes wins; a head's own save coming back never replaces what it has typed since. Only the text is shared: attachments are files on the device and stay with it.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "7d20c8ad-943d-490b-a80f-304ab1fc36c3"
+            }
+          ]
+        },
+        {
+          "said": "Draft sync doesn't refresh while the pointer rests on the box; hovering mustn't stop updates from the draft's owner (paraphrased)",
+          "rule": "Nothing about the pointer, the focus or the window being in front keeps another head's edit out of a box: it goes in unless this head has typing its host hasn't taken yet, or a save on its way, and the caret and selection move with the text. Text this head typed that the host never took is never replaced by another head's edit: a draft over 200000 characters (which the host refuses) stays this head's own and is not saved again, and an edit held meanwhile stays held; a save lost to a dropped connection leaves the box dirty and is made again after 1 s, then 2 s, then 4 s (and as the chat is attached again), an edit held from before the typing staying held.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#304"
+            }
+          ]
+        },
+        {
+          "said": "There seems to be an issue with drafts coming back to me post send. In think this would be fixed if we used some id ber enter-invocation to prevent splashback",
+          "rule": "Text a head has sent never comes back into any box. Every Enter (or Send) that empties a box is a send with an id of its own: its save empties the host's draft and starts the draft's next epoch, and the same send's save made again empties it once. Every save says the epoch its text was written in; the host refuses one from an earlier epoch, and every head drops a draft from an epoch earlier than one it has seen. A head typing on text that another head then sends keeps only what it typed itself, the sent text taken out of its box, and saves that; text a head typed that the host never took is still never replaced by another head's edit. The phone's own sends empty the host's draft as the desktop's do.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "fe9f6e47-6574-4d3e-83c0-dc3ae0b3c856"
+            }
+          ]
+        }
       ]
     },
     {
@@ -134,7 +211,19 @@
           "does": "Stops the turn (also with a revert pending); background commands and subagents go on (BackgroundTask). Enter/Ctrl+Enter with text meanwhile queues instead of stopping"
         }
       ],
-      "decisions": [{"said": "On desktop, sometimes the new narrow \"Enter\" button is not center aligned vertically please investigate and fix this", "rule": "Every app keeps the message box's buttons centred on the text's line at every text and icon size, and after the text grows or shrinks (zoom, Text size)", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "44af0a49-d47f-47d3-b127-b0863c87ad82"}]}]
+      "decisions": [
+        {
+          "said": "On desktop, sometimes the new narrow \"Enter\" button is not center aligned vertically please investigate and fix this",
+          "rule": "Every app keeps the message box's buttons centred on the text's line at every text and icon size, and after the text grows or shrinks (zoom, Text size)",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "44af0a49-d47f-47d3-b127-b0863c87ad82"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "slash commands in the box",
@@ -204,7 +293,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Stops the turn, then sends this message and every one queued before it together as one message (tooltip \"Send now: interrupt the chat, then send this and the queued messages before it\")"
+          "does": "Sends this message and every one queued before it together as one message, to the turn going on, which goes on, its foreground commands and subagents moved to the background in a Claude Code chat so it takes the message in now (tooltip \"Send now: send this and the queued messages before it, without stopping the chat\")"
         },
         {
           "by": "click revert (circular arrow)",
@@ -268,7 +357,19 @@
     },
     {
       "name": "host gone or connection dropped",
-      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable"
+      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable. On an app whose link the OS closes (the phone), the send button stays on while the host isn't reached: what's sent is queued under the chat with a cloud beside it, kept on disk, and sent once the host is back (see QueuedTurn).",
+      "decisions": [
+        {
+          "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+          "rule": "Every app whose link the OS or browser closes lets you send while a host isn't reached: the message is queued, marked as waiting for its host, and sent by itself once the host is back and the chat has caught up.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#243"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "read-only by choice",
@@ -281,7 +382,18 @@
     {
       "name": "draft kept",
       "shows": "Each chat keeps its own draft (text, caret, attachments) while another chat is open, and over a restart; a new chat keeps one shared draft",
-      "decisions": [{"said": "Drafts are shared across chats; a draft should belong to the Bot or chat it was written in (paraphrased)", "rule": "Every app keeps each chat's (and Bot's) draft on its own: text, caret and attachments come back when the chat is opened again, and another chat's box shows its own draft or nothing", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#174"}]}]
+      "decisions": [
+        {
+          "said": "Drafts are shared across chats; a draft should belong to the Bot or chat it was written in (paraphrased)",
+          "rule": "Every app keeps each chat's (and Bot's) draft on its own: text, caret and attachments come back when the chat is opened again, and another chat's box shows its own draft or nothing",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#174"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "revert pending",

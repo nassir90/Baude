@@ -26,6 +26,8 @@ import fixview  # noqa: E402  (☰ → Ongoing Feedback: the fixes, approved or 
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import metalook  # noqa: E402
 import metachat  # noqa: E402
+import metaagent  # noqa: E402  (a tool that answers later: Later)
+import inboxview  # noqa: E402  (the Inbox: the ask selected, for read_ask and fill_ask)
 from widgets import load_settings, pretty_path, save_settings, time_ago, toast  # noqa: E402,F401
 from markdownview import open_code  # noqa: E402,F401
 
@@ -53,7 +55,9 @@ the groups. highlight_chats highlights chats in the list without changing them: 
 change the user should check. archive_chats and unarchive_chats; delete_chats moves chats of this machine's own (not \
 a host's sessions) to Baude's trash, where undo finds them; a host's session you don't delete: show button:trash. How \
 the list is grouped (by folder, by the day each chat was made, or by the day it was last used) is the setting \
-group_by."""
+group_by.
+
+""" + wording.say("inbox.meta_prompt")
 
 BAUDE_TOOLS = [
     {"name": "highlight_chats", "description": "Highlight chats in the left bar, changing nothing, to show the user "
@@ -80,6 +84,10 @@ BAUDE_TOOLS = [
     {"name": "unarchive_chats", "description": "Bring archived chats back to the list.",
      "inputSchema": {"type": "object", "required": ["chats"], "properties": {
          "chats": {"type": "array", "items": {"type": "string"}}}}},
+    {"name": "read_ask", "description": wording.say("inbox.read_ask_tool"),
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "fill_ask", "description": wording.say("inbox.fill_ask_tool"),
+     "inputSchema": {"type": "object", "required": ["values"], "properties": {"values": {"type": "object"}}}},
     {"name": "delete_chats", "description": "Delete chats of this machine's own: their transcripts go to Baude's "
      "trash, and undo brings them back. Not a host's session, nor the chat open.",
      "inputSchema": {"type": "object", "required": ["chats"], "properties": {
@@ -333,7 +341,39 @@ class BaudeMeta(metachat.MetaChat):
         return {"highlight_chats": self.highlight_chats, "move_chats": self.move_chats, "make_group": self.make_group,
                 "rename_group": self.rename_group, "delete_group": self.delete_group, "show_groups": self.show_groups,
                 "archive_chats": lambda t, a: self.archive_chats(t, a, True),
-                "unarchive_chats": lambda t, a: self.archive_chats(t, a, False), "delete_chats": self.delete_chats}
+                "unarchive_chats": lambda t, a: self.archive_chats(t, a, False), "delete_chats": self.delete_chats,
+                "read_ask": self.read_ask, "fill_ask": self.fill_ask}
+
+    # ---- the Inbox
+    def _selected_ask(self):
+        got = self.win.selected_ask() if hasattr(self.win, "selected_ask") else None
+        if got is None:
+            raise ValueError("No ask is selected: the user hasn't opened or touched one in the Inbox.")
+        return got
+
+    def read_ask(self, turn, args):
+        """The selected ask, its run's log (asked of its host, off the main loop) and the end of its Bot's chat."""
+        ask, view = self._selected_ask()
+        text = inboxview.ask_text(ask, view)
+        chat = self.find_chat(ask["session"])
+        bot = self.chat_text(chat)[-4000:] if chat is not None else "(its Bot's chat isn't here)"
+        if not ask.get("run"):  # (a chat's own ask: the asking chat, no run)
+            return {"text": f'{text}\n\n<asking_chat name="{meta.attr(inboxview.asker(ask))}">\n{bot}\n</asking_chat>'}
+        return metaagent.Later(lambda: {"text": f"{text}\n\n<run_log>\n{inboxview.run_log(ask)}\n</run_log>\n\n"
+                                                f'<bot_chat name="{meta.attr(ask.get("bot") or "")}">\n{bot}\n</bot_chat>'})
+
+    def fill_ask(self, turn, args):
+        ask, view = self._selected_ask()
+        if view is None:
+            self.win.open_ask(ask["server"].key, ask["id"])
+            ask, view = self._selected_ask()
+        if view is None or not view.live():
+            raise ValueError("That ask can't be filled in now: it isn't waiting.")
+        values = args.get("values") if isinstance(args.get("values"), dict) else {}
+        wrong = view.fill(values)
+        if wrong:
+            return {"text": "Filled what fits; not: " + "; ".join(f"{k}: {v}" for k, v in wrong.items())}
+        return {"text": "Filled: the user checks it and presses a button."}
 
     def make_settings(self):
         win = self.win

@@ -131,6 +131,31 @@ def forget_profile(name):
         _write_profiles([p for p in _read_profiles() if p["name"] != name])
 
 
+def blocks_tracking(pid):
+    """Whether pid's profile blocks cross-site cookies and storage as Safari does (tracking prevention). Off unless
+    it's been turned on: a developer's previews on other hosts sign in, as in a browser that lets them."""
+    try:
+        with open(os.path.join(data_home(), "tracking.json"), encoding="utf-8") as f:
+            return pid in (json.load(f).get("blocked") or [])
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
+def set_blocks_tracking(pid, on):
+    with changing():
+        path = os.path.join(data_home(), "tracking.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                blocked = [str(i) for i in json.load(f).get("blocked") or []]
+        except (OSError, ValueError, AttributeError, TypeError):
+            blocked = []
+        blocked = [i for i in blocked if i != pid] + ([pid] if on else [])
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"blocked": blocked}, f)
+        os.replace(tmp, path)
+
+
 def leftovers():
     path = os.path.join(data_home(), "removed.json")
     try:
@@ -299,9 +324,9 @@ def call(pid, msg, timeout=60):
     return got
 
 
-def running_commits(timeout=2):
-    """The commit each Emission running here says its code is, one for each profile it has open (None for one that
-    doesn't say: on older code). Baude's own socket (home: it makes Bots' browsers) is Baude's, not an Emission's."""
+def running(timeout=2):
+    """What each Emission running here says it is (its info: the commit its code is, its process's pid, ...), one for
+    each profile it has open. Baude's own socket (home: it makes Bots' browsers) is Baude's, not an Emission's."""
     folder, home = os.path.dirname(profile_socket("home")), os.path.basename(profile_socket("home"))
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".sock") and n != home)
@@ -323,7 +348,7 @@ def running_commits(timeout=2):
         except (OSError, ValueError):
             continue  # (one gone, its socket left behind)
         if isinstance(got, dict) and not got.get("error"):
-            out.append(got["commit"] if isinstance(got.get("commit"), str) else None)
+            out.append(got)
     return out
 
 
@@ -333,6 +358,88 @@ def hand_over(pid, urls):
         return bool(call(pid, {"op": "open", "urls": list(urls)}, timeout=10).get("ok"))
     except (OSError, ValueError):
         return False
+
+
+def usable_display():
+    """Whether a window started here is seen: macOS in a session at its screen (not a process ssh started, which has
+    none), or a display of someone's on Linux (not one of Emission's own, virtual)."""
+    if os.environ.get("EMISSION_VIRTUAL_DISPLAY"):
+        return False
+    if sys.platform != "darwin":
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    import ctypes
+    try:
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGSessionCopyCurrentDictionary.restype = ctypes.c_void_p
+        session = cg.CGSessionCopyCurrentDictionary()
+        if not session:
+            return False
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        cf.CFRelease(session)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+STARTED = {"at": -1e9}  # (when open_window last started an Emission: another not started while that one opens)
+START_S = 20
+
+
+def open_window(show=True):
+    """Emission's window here on its Default profile (☰ → Browser): the Emission that has it brought to the front
+    (show), else one started, on this machine's screen; OSError (why, to be said) where there's no screen to show it
+    on, or the profile is a Bot's browser's here (hosted in Baude, or out of sight), which isn't opened again. Its
+    answer's fields: started, whether it was."""
+    from baudelib import wording
+    pid = profile_id(DEFAULT)
+    try:
+        info = call(pid, {"op": "info"}, timeout=5)
+    except (OSError, ValueError):
+        info = None
+    if info is not None:
+        if info.get("hosted") or info.get("agent"):
+            raise OSError(wording.say("host_errors.browser_default_bots"))
+        if show:
+            try:
+                call(pid, {"op": "show"}, timeout=5)
+            except ValueError as e:
+                raise OSError(str(e))
+        return {"started": False}
+    if not usable_display():
+        raise OSError(wording.say("host_errors.browser_no_display"))
+    if time.monotonic() - STARTED["at"] < START_S:  # (started a moment ago, not open yet: that one's coming)
+        return {"started": True}
+    STARTED["at"] = time.monotonic()
+    os.makedirs(data_home(), exist_ok=True)
+    env = dict(os.environ)
+    if env.get("BAUDE_RUNTIME_DIR"):  # (its folders as this process has them: it starts in another)
+        env["BAUDE_RUNTIME_DIR"] = os.path.abspath(env["BAUDE_RUNTIME_DIR"])
+    with open(os.path.join(data_home(), "window.log"), "ab") as log:
+        subprocess.Popen([sys.executable, EMISSION], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True, cwd=os.path.dirname(EMISSION), env=env)
+    return {"started": True}
+
+
+def default_window(wait_s):
+    """The socket of Emission's window here on its Default profile, for it to be watched from elsewhere (☰ → Browser
+    on another host): the one that has it, else one started (open_window's, not brought to the front), waited for
+    till wait_s has passed."""
+    pid = profile_id(DEFAULT)
+    open_window(show=False)
+    end = time.monotonic() + wait_s
+    while True:
+        try:
+            info = call(pid, {"op": "info"}, timeout=5)
+            break
+        except (OSError, ValueError) as e:
+            if time.monotonic() >= end:
+                raise OSError(str(e) or "Emission didn't open")
+            time.sleep(0.5)
+    if info.get("hosted") or info.get("agent"):
+        from baudelib import wording
+        raise OSError(wording.say("host_errors.browser_default_bots"))
+    return profile_socket(pid)
 
 
 def call_bot(bot_id, name, msg, timeout=60):

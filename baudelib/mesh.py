@@ -9,6 +9,15 @@ member, and the mesh is every member reached through links: A linked to B, and C
 other two, C's messages to A passed on by B. A member does on another what a head on that machine does: lists its
 chats, starts and steers them, reads their transcripts, and runs its models.
 
+Each member has a key of its own (Ed25519: baudelib/ed25519.py, kept in mesh-key in its state folder), said in its
+hello (key) on a link and in its record. A member's key is pinned here as it's first heard of (pins: mesh-pins.json),
+by join or joined, whose dialing end ssh vouches for, or else by its record; a link from one saying another key than
+its pin is refused (unlink forgets the pin). Every tunnel's open is signed by the member that opens it (signed: to,
+from, when, a nonce, sender; sig), so where it's opened to, it's from the member it says, and the hosts it passes
+through can carry it but not make one up: one with no from, or signed by another key than from's pin, or made more
+than SIGNED_S away from now, or seen before, is closed. One unsigned from a member with no key pinned (older code) is
+served as from a member no rule chooses (verified False: baudelib.access).
+
 What goes over a link, after hello and join {host} -> joined {host} (wire.py's lines, each with an "op"):
     mesh {records}          members' records, {id, seq, info, links}: who it is (info: id, name, group, host, version,
                             providers; commit, made, heads: the code it runs, and the apps connected to it by theirs)
@@ -16,7 +25,8 @@ What goes over a link, after hello and join {host} -> joined {host} (wire.py's l
                             higher than any it sent before) and passes each one newer than it had on to its other links;
                             all it has as a link's made. Members are reached through links both ends list (a direct
                             link of its own counts at once), so one that's gone, its links dropped, is gone for all.
-    open {t, to, ttl}       a tunnel to member to, t this end's number for it: passed on to the next host on the way
+    open {t, to, ttl, from, signed, sig}
+                            a tunnel to member to, t this end's number for it: passed on to the next host on the way
                             (ttl hosts at most), and at to a connection to its host process, served as if a head had
                             connected to its socket. opened {r} once it's there; close {t | r, error?} from either end
     data {t | r, msg}       a wire message in a tunnel: t, one this end opened; r, one the other end did
@@ -70,7 +80,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from baudelib import models, selfupdate, wire, wording
+from baudelib import ed25519, models, selfupdate, wire, wording
 
 RETRY_S = (2, 10, 30, 120, 300)  # a link that's dropped, or couldn't be made, is tried again after these
 OFF_S = 30  # (one the other end's deactivated this host on: tried again this often)
@@ -88,7 +98,9 @@ CHUNK = 64 << 10
 BACKLOG = wire.CONSTANTS["BACKLOG"]  # (messages a model's files may have waiting to go out, on a link or a
 # connection, before more are read: what's read goes no faster than the link takes it, and a ping waits behind no more
 # than this)
+SIGNED_S = wire.CONSTANTS["SIGNED_S"]  # (a tunnel's open: signed this near now, either way, or it's closed)
 LINKS = "links.json"
+KEY, PINS = "mesh-key", "mesh-pins.json"  # (this member's own key, the secret half; the others' keys as first heard)
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
 FETCH_S = 300  # (a commit git here hasn't, to count how far behind something is: origin fetched at most this often)
 _COMMIT = re.compile(r"[0-9a-f]{7,64}")
@@ -216,9 +228,18 @@ def published(p, http=None):
                        if isinstance(m, dict) and isinstance(m.get("value"), str)]}
 
 
+def is_key(value):
+    """Is it a member's key as hello says it: 32 bytes, in base64?"""
+    try:
+        return isinstance(value, str) and len(base64.b64decode(value, validate=True)) == 32
+    except ValueError:
+        return False
+
+
 def _hello_of(host):
     """A host's hello on a link, if it's one: {id, name, group, host, version, bonjour (its name on the local
-    network, if it said one), dial (False: it can't be linked to, only from: a phone, with no sshd)}, cut to size."""
+    network, if it said one), dial (False: it can't be linked to, only from: a phone, with no sshd), key (its own, if
+    it said one)}, cut to size."""
     if not isinstance(host, dict) or not wire.is_id(host.get("id")):
         return None
     out = {"id": host["id"], "name": str(host.get("name") or "")[:64] or host["id"][:8],
@@ -228,6 +249,8 @@ def _hello_of(host):
         out["bonjour"] = host["bonjour"][:255]
     if host.get("dial") is False:
         out["dial"] = False
+    if is_key(host.get("key")):
+        out["key"] = host["key"]
     return out
 
 
@@ -256,6 +279,8 @@ def _record(r):
     info["providers"] = [published(p, p.get("http") is True) for p in raw[:32]
                          if isinstance(p, dict) and is_provider_id(p.get("id"))] \
         if isinstance(raw, list) else []
+    from baudelib.deciders import from_record
+    info["deciders"] = from_record(r["info"].get("deciders"))
     info.update(versions_of(r["info"]))
     links = r.get("links") if isinstance(r.get("links"), list) else []
     return {"id": r["id"], "seq": r["seq"], "info": info, "links": sorted({x for x in links[:256] if wire.is_id(x)})}
@@ -427,8 +452,13 @@ class Out:
         self.stopped, self.wake, self.active = False, threading.Event(), active
         self.expect, self.made = None, 0  # (the member it must be, if it's said: Found's; how many times it's linked)
         self.again = False  # (tried again now, from the start of its waits: retry)
+        self.running = False  # (its thread started: once, whether by link or by the mesh's start)
 
     def start(self):
+        with self.mesh.lock:  # (one made before the mesh started, started again as it starts: one thread still)
+            if self.running:
+                return self
+            self.running = True
         threading.Thread(target=self._run, daemon=True, name=f"link-to-{wire.said_where(self.where)}").start()
         return self
 
@@ -509,6 +539,10 @@ class Out:
             self.error, self.state = wire.said(reply) or wording.say("host_status.no_answer"), "dropped"
             ch.close()
             return
+        if not self.mesh.pin(theirs):  # (another key than the one it had: not the member it says)
+            self.error, self.state = wording.say("host_status.another_key", host=theirs["name"]), "dropped"
+            ch.close()
+            return
         self.id, self.name, self.error, self.state = peer["id"], peer["name"], None, "linked"
         self.link, self.made = Link(self.mesh, ch, theirs, made=True), self.made + 1
         if self.stopped or not self.active:  # (unlinked or deactivated as it was made: stop or pause saw no link to
@@ -586,6 +620,25 @@ class Found(Out):
         self.mesh.unfound(self)
 
 
+def own_key(folder):
+    """This member's key (the secret half, 32 bytes), kept in folder (made the first time, for its user alone)."""
+    path = os.path.join(folder, KEY)
+    try:
+        with open(path, encoding="utf-8") as f:
+            secret = bytes.fromhex(f.read().strip())
+        if len(secret) == 32:
+            return secret
+    except (OSError, ValueError):
+        pass
+    secret = ed25519.new_secret()
+    os.makedirs(folder, exist_ok=True)
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(secret.hex())
+    os.replace(path + ".tmp", path)
+    return secret
+
+
 def same_place(a, b):
     """Do two wheres go to the same place?"""
     return wire.place(a) == wire.place(b)
@@ -606,6 +659,7 @@ class Mesh:
         self.routes, self.hops = {}, {}  # member id -> the linked member it's reached through; how many links away
         self.seq = time.time_ns()  # (higher than any this host sent before it started, clocks allowing)
         self.local = local_providers()
+        self.deciders = []  # (this host's deciders, as the mesh is told of them: refresh)
         self.proxy = None
         self.outs = []
         self.found, self.refused = {}, set()  # (member id -> Found; those that refused a link straight, this run)
@@ -616,6 +670,15 @@ class Mesh:
         # None, it can't; counted off the lock, on a thread of its own, as they're first asked for: behind)
         self.counted, self.counting, self.retry = {}, queue.Queue(), {}
         threading.Thread(target=self._count, daemon=True, name="mesh-versions").start()
+        self.secret = own_key(server.state_dir)  # (this member's key: what it signs its tunnels' opens with)
+        self.key = base64.b64encode(ed25519.public(self.secret)).decode()
+        try:
+            with open(os.path.join(server.state_dir, PINS), encoding="utf-8") as f:
+                pins = json.load(f)
+        except (OSError, ValueError):
+            pins = {}
+        self.pins = {k: v for k, v in (pins if isinstance(pins, dict) else {}).items() if wire.is_id(k) and is_key(v)}
+        self.nonces = {}  # (the opens' nonces seen lately, and when: one seen again is closed)
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
         try:
             with open(os.path.join(server.state_dir, LINKS), encoding="utf-8") as f:
@@ -641,6 +704,8 @@ class Mesh:
     def start(self):
         for o in self.outs:
             o.start()
+        threading.Thread(target=lambda: self.deciders_changed(self.server.deciders.listing()), daemon=True,
+                         name="deciders").start()  # (this host's deciders looked at, for its record)
         with self.lock:
             self.reroute()  # (those linked to straight before: linked to again)
         threading.Thread(target=self._providers, daemon=True, name="mesh-providers").start()
@@ -693,12 +758,13 @@ class Mesh:
     def hello(self):
         me = self.server.me
         return {"id": self.id, "name": me["name"], "group": me["group"], "host": socket.gethostname(),
-                "version": wire.VERSION, **({"bonjour": self.bonjour} if self.bonjour else {})}
+                "version": wire.VERSION, "key": self.key, **({"bonjour": self.bonjour} if self.bonjour else {})}
 
     def mine(self):
         """(lock held) This host's record."""
         return {"id": self.id, "seq": self.seq,
-                "info": {**self.hello(), "providers": [published(p) for p in self.local], **self.server.versions()},
+                "info": {**self.hello(), "providers": [published(p) for p in self.local], "deciders": self.deciders,
+                         **self.server.versions()},
                 "links": sorted(self.links)}
 
     def publish(self):
@@ -728,15 +794,43 @@ class Mesh:
                 self.refresh()
 
     def refresh(self):
-        """This machine's providers looked at now: the mesh told if they've changed, and heads here."""
+        """This machine's providers, and this host's deciders, looked at now: the mesh told if they've changed, and
+        heads here."""
         found = local_providers()
+        decs = self.server.deciders.published(self.server.deciders.listing(fresh=True))
         with self.lock:
-            if [published(p) for p in found] != [published(p) for p in self.local]:
-                self.local = found
+            if [published(p) for p in found] != [published(p) for p in self.local] or decs != self.deciders:
+                self.local, self.deciders = found, decs
                 self.publish()
             else:
                 self.local = found
         self.changed()
+
+    def deciders_changed(self, listed):
+        """This host's deciders as they are now (deciders.Deciders.listing's): the mesh told if that's news."""
+        decs = self.server.deciders.published(listed)
+        with self.lock:
+            if decs != self.deciders:
+                self.deciders = decs
+                self.publish()
+
+    def member_deciders(self):
+        """The deciders of the members reached, as their records say them: [(member id, its name, [decider])]."""
+        with self.lock:
+            out = []
+            for k in sorted(self.hops, key=lambda k: self.name_of(k).lower()):
+                rec = (self.records.get(k) or {}).get("rec")
+                if rec is not None and rec["info"].get("deciders"):
+                    out.append((k, rec["info"]["name"], list(rec["info"]["deciders"])))
+            return out
+
+    def member_named(self, name):
+        """A member reached, by its id or its name (any case): its id, or None."""
+        with self.lock:
+            if name in self.hops:
+                return name
+            low = name.lower()
+            return next((k for k in self.hops if self.name_of(k).lower() == low), None)
 
     # ---- links
     def link(self, where):
@@ -772,6 +866,7 @@ class Mesh:
             self.unlinked |= ids  # (never linked to straight, till it's linked to by hand again)
             for i in ids:
                 self.remembered.pop(i, None)
+                self.pins.pop(i, None)  # (its key forgotten: linked to by hand again, the key it has then pinned)
                 if (f := self.found.pop(i, None)) is not None:
                     gone.append(f)
             links = [x for i in ids for x in self.links.get(i) or [] if getattr(x, "straight", False)]
@@ -781,6 +876,7 @@ class Mesh:
             x.close()
         if gone or ids:
             self.save()
+            self.save_pins()
             self.changed()
         return bool(gone or ids)
 
@@ -831,6 +927,69 @@ class Mesh:
             self.changed()
         return bool(outs or ids)
 
+    def pin(self, hello):
+        """A member's key (as its hello says it: hello's key) pinned as it's first heard of: False if another's pinned
+        for it. One that says none (on older code) is nothing to pin."""
+        if not is_key(hello.get("key")):
+            return True
+        with self.lock:
+            have = self.pins.get(hello["id"])
+            if have is not None:
+                return have == hello["key"]
+            self.pins[hello["id"]] = hello["key"]
+        self.save_pins()
+        return True
+
+    def save_pins(self):
+        """mesh-pins.json: the members' keys as first heard of."""
+        path = os.path.join(self.server.state_dir, PINS)
+        with self.lock:
+            try:
+                with open(path + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump(self.pins, f)
+                os.replace(path + ".tmp", path)
+            except OSError as e:
+                self.log(f"mesh: {path}: {e}")
+
+    def seal(self, to, sender=None):
+        """An open's signed and sig from here to member to (sender: open's)."""
+        signed = json.dumps({"to": to, "from": self.id, "time": int(time.time()), "nonce": secrets.token_hex(16),
+                             **({"sender": sender} if sender else {})}, separators=(",", ":"))
+        return {"signed": signed, "sig": base64.b64encode(ed25519.sign(self.secret, signed.encode())).decode()}
+
+    def opener(self, f):
+        """Who an open to here is from, as it can be told: (member, verified, sender), or None if it's to be closed
+        (no from, signed by another key than from's pin, made too far from now, or seen before). Unsigned from a
+        member with no key pinned: (member, False, sender as it came)."""
+        origin = f.get("from")
+        if not wire.is_id(origin):
+            return None
+        with self.lock:
+            key = self.pins.get(origin)
+        came = wire.clean_sender(f.get("sender")) if isinstance(f.get("sender"), dict) else None
+        if f.get("signed") is None and f.get("sig") is None:
+            return None if key is not None else (origin, False, came)
+        try:
+            signed = f["signed"].encode()
+            body = json.loads(signed)
+            sig = base64.b64decode(f["sig"], validate=True)
+        except (KeyError, AttributeError, TypeError, ValueError):
+            return None
+        if not isinstance(body, dict) or body.get("from") != origin or body.get("to") != self.id:
+            return None
+        if key is None:  # (signed by a member whose key isn't known here yet: as one with none)
+            return origin, False, came
+        when, nonce, now = body.get("time"), body.get("nonce"), time.time()
+        if not isinstance(when, int) or abs(now - when) > SIGNED_S or not isinstance(nonce, str) or \
+                not 16 <= len(nonce) <= 64 or not ed25519.verify(base64.b64decode(key), signed, sig):
+            return None
+        with self.lock:
+            if nonce in self.nonces:
+                return None
+            self.nonces = {k: t for k, t in self.nonces.items() if now - t <= SIGNED_S}
+            self.nonces[nonce] = now
+        return origin, True, wire.clean_sender(body["sender"]) if isinstance(body.get("sender"), dict) else None
+
     def known(self, member):
         """(lock held) Is it a member's id this host has heard of?"""
         return member in self.records or member in self.links or any(o.id == member for o in self.outs)
@@ -858,6 +1017,10 @@ class Mesh:
             ch.send({"op": "error", "req": msg.get("req"), "error": "no host given" if peer is None else
                      wording.say("host_status.this_host") if peer["id"] == self.id else
                      f"deactivated on {self.server.me['name']}" if peer["id"] in self.inactive else f"unlinked on {self.server.me['name']}"})
+            return
+        if not self.pin(peer):  # (another key than the one it had: not the member it says)
+            ch.send({"op": "error", "req": msg.get("req"), "error": wording.say("host_status.another_key",
+                                                                                 host=peer["name"])})
             return
         if not ch.send({"op": "joined", "req": msg.get("req"), "host": self.hello()}):
             return
@@ -933,6 +1096,9 @@ class Mesh:
                 if have is None or r["seq"] > have["rec"]["seq"]:
                     self.records[r["id"]] = {"rec": r, "got": time.time()}
                     new.append(r)
+            for r in new:  # (a member's key as its record first says it, if neither it nor a link's said one)
+                if r is not None and r["id"] not in self.pins and is_key(r["info"].get("key")):
+                    self.pin(r["info"])
             if None in new:
                 self.publish()
             if new := [r for r in new if r is not None]:
@@ -1102,7 +1268,8 @@ class Mesh:
             return link.tunnels.pop(key, None)
 
     def open_here(self, link, f):
-        """open from a link: served here, if it's to here; else passed on toward the member it's to."""
+        """open from a link: served here, if it's to here (as from the member that signed it: opener); else passed on
+        toward the member it's to, as it came."""
         t, to, ttl, origin = f.get("t"), f.get("to"), f.get("ttl"), f.get("from")
         sender = wire.clean_sender(f.get("sender")) if isinstance(f.get("sender"), dict) else None  # (who what's
         # sent through it is from: the chat on origin its relay named, as origin has it)
@@ -1113,12 +1280,18 @@ class Mesh:
             link.tsend(key, {"op": "close", "error": f"deactivated on {self.server.me['name']}"})
             return
         if to == self.id:
+            if (said := self.opener(f)) is None:  # (not from the member it says, as far as can be told)
+                self.log(f"mesh: an open from {self.name_of(origin) if wire.is_id(origin) else 'no member'} through "
+                         f"{link.peer['name']} closed: {wording.say('host_status.unsigned')}")
+                link.tsend(key, {"op": "close", "error": wording.say("host_status.unsigned")})
+                return
+            origin, verified, sender = said
             mine, theirs = socket.socketpair()
             end = Here(self, wire.Channel.over(mine))
-            end.link, end.key, end.origin = link, key, origin if wire.is_id(origin) else None
+            end.link, end.key, end.origin = link, key, origin
             with self.lock:
                 link.tunnels[key] = end
-            threading.Thread(target=self.server.serve, args=(theirs, end.origin, end.origin and sender), daemon=True,
+            threading.Thread(target=self.server.serve, args=(theirs, origin, sender, verified), daemon=True,
                              name="tunnel-served").start()
             link.tsend(key, {"op": "opened"})
             threading.Thread(target=end.pump, daemon=True, name="tunnel-in").start()
@@ -1133,7 +1306,8 @@ class Mesh:
             link.tunnels[key] = Passed(self, ahead, okey)
             ahead.tunnels[okey] = Passed(self, link, key)
         ahead.tsend(okey, {"op": "open", "to": to, "ttl": ttl - 1, **({"from": origin} if wire.is_id(origin) else {}),
-                           **({"sender": sender} if sender else {})})
+                           **({"sender": sender} if sender else {}),
+                           **{k: f[k] for k in ("signed", "sig") if isinstance(f.get(k), str)}})
 
     def connect(self, end, to, sender=None):
         """A tunnel opened from here to member to, for end (a Here): None once it's there, else what's wrong. sender:
@@ -1152,7 +1326,7 @@ class Mesh:
         with self.lock:
             ahead.tunnels[key] = end
         ahead.tsend(key, {"op": "open", "to": to, "ttl": TTL, "from": self.id,
-                          **({"sender": sender} if sender else {})})
+                          **({"sender": sender} if sender else {}), **self.seal(to, sender)})
         if not end.up.wait(OPEN_S):
             if self.forget(ahead, key) is not None:
                 ahead.tsend(key, {"op": "close"})

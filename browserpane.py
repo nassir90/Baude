@@ -8,7 +8,7 @@ type, keys, scroll, its tabs, its address, the prompts a page waits on) goes to 
 tools do (real input there). Read-only: watched, not driven (kept for each Bot, as a setting). Out in a window of its
 own (BrowserWindow: an Emission window's bars, the Bot's browser still), the page says so instead, and the Bot's browser
 is that window's till it's closed. Over the page, never in it: the Bot's pointer as its tools move it, and its edges
-glowing in the accent while the Bot's turn is at its tools (BotPointer, drawn by Presence, or MacOverlay hosted)."""
+glowing in the accent while the Bot's turn is at Emission's tools (BotPointer, drawn by Presence, or MacOverlay hosted)."""
 import json
 import os
 import queue
@@ -35,6 +35,7 @@ SCROLL_MS = 50  # (a wheel's or a trackpad's turns this close together: one scro
 HOVER_MS = 300  # (the pointer still this long over the page: it hovers there)
 SIZE_MS = 250  # (the page shown at a new size: the frames asked for at it this long after)
 DRAG_PX = 5  # (a press moved this far before it's let go: a drag, not a click)
+PRIMARY = "cmd" if sys.platform == "darwin" else "ctrl"  # (what copies, cuts and pastes with C, X and V)
 KEYS = {"Return": "Enter", "KP_Enter": "Enter", "BackSpace": "Backspace", "Delete": "Delete", "Escape": "Escape",
         "Tab": "Tab", "ISO_Left_Tab": "Tab", "Left": "Left", "Right": "Right", "Up": "Up", "Down": "Down",
         "Home": "Home", "End": "End", "Page_Up": "PageUp", "Page_Down": "PageDown", "space": "Space"}
@@ -72,7 +73,7 @@ class Stream:
     def run(self):
         why = None
         try:
-            (self.run_here if self.remote.mine else self.run_there)()
+            (self.run_here if self.remote.mine and not self.bot.get("default") else self.run_there)()
         except Exception as e:  # (said in the pane: it can be tried again)
             why = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
         finally:
@@ -111,7 +112,8 @@ class Stream:
         self.ch = ch
         if self.stopped:
             return
-        ch.send({"op": "emission_watch", "req": 1, "bot": self.bot, "max_w": self.size[0], "max_h": self.size[1]})
+        whose = {"default": True} if self.bot.get("default") else {"bot": self.bot}  # (default: Emission's own window
+        ch.send({"op": "emission_watch", "req": 1, **whose, "max_w": self.size[0], "max_h": self.size[1]})  # there)
         threading.Thread(target=self.ping, daemon=True, name="browser-ping").start()
         ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
@@ -221,13 +223,14 @@ class Asks:
             remote, bot, call, answered = asked
             try:
                 got = None
-                if remote.mine:  # (straight to its socket: no host between)
+                if remote.mine and not bot.get("default"):  # (straight to its socket: no host between)
                     try:
                         got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
                     except (FileNotFoundError, ConnectionRefusedError):
                         got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
                 if got is None:
-                    r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
+                    whose = {"default": True} if bot.get("default") else {"bot": bot}
+                    r = remote.call({"op": "emission", **whose, "call": call}, timeout=120)
                     got = r.get("result") if r.get("op") == "emission" else \
                         {"error": wire.said(r) or wording.say("agent_proxy.no_answer")}
             except (OSError, ValueError) as e:
@@ -413,8 +416,8 @@ class Here:
 
 
 def guard_keys(root):
-    """A window of Baude's kept from keys that aren't its own (a page's that has them; a Bot's, handed back by its
-    page, or the text they made): MacWeb.page_has_keys. GTK's own widgets clicked: the keys theirs again. Once."""
+    """A window of Baude's kept from keys that aren't its own (a Bot's, handed back by its page, or the text they
+    made; a page's that has them, but a ⌘ or Ctrl key runs the window's or the app's shortcut): MacWeb.page_has_keys. GTK's own widgets clicked: the keys theirs again. Once."""
     if getattr(root, "keys_back", False):
         return
     root.keys_back = True
@@ -424,7 +427,7 @@ def guard_keys(root):
     root.add_controller(clicks)
     keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
     for signal in ("key-pressed", "key-released"):
-        keys.connect(signal, lambda c, kv, *_: emissionmac.MacWeb.page_has_keys(root, c.get_current_event_time(), kv))
+        keys.connect(signal, lambda c, kv, _code, st: emissionmac.MacWeb.page_has_keys(root, c.get_current_event_time(), kv, st))
     root.add_controller(keys)
 
 
@@ -474,7 +477,46 @@ RESTORE_S = 60
 
 def remember():
     """The chats whose browsers are out, kept (browser_out): out again as Baude next starts."""
-    widgets.save_settings(browser_out=sorted(set(DISEMBODIED) | set(RESTORE["left"] or ())))
+    out = {sid for sid, w in DISEMBODIED.items() if not w.default}  # (Emission's own windows elsewhere: not kept)
+    widgets.save_settings(browser_out=sorted(out | set(RESTORE["left"] or ())))
+
+
+PLACES_KEPT = 50  # (browser windows' places kept: the longest unopened go)
+
+
+def keep_place(win):
+    """A browser window's place kept for its Bot's (or host's) next one (browser_places): on macOS its frame (the
+    display it's on, where, how big), its size, and whether it's maximized."""
+    from macos import window_frame
+    if not win.get_mapped():
+        return
+    w, h = win.get_default_size()
+    place = {"size": [w, h] if w > 0 and h > 0 else None, "maximized": win.is_maximized(),
+             "frame": window_frame(win) if sys.platform == "darwin" else None}
+    places = {k: v for k, v in (widgets.load_settings().get("browser_places") or {}).items() if k != win.sid}
+    places[win.sid] = place
+    widgets.save_settings(browser_places=dict(list(places.items())[-PLACES_KEPT:]))
+
+
+def keep_places():
+    """Each browser window out's place kept (keep_place), as Baude restarts or quits."""
+    for w in list(DISEMBODIED.values()):
+        if not w.done:
+            keep_place(w)
+
+
+def put_place(win):
+    """A browser window opened where its Bot's (or host's) last one was (keep_place), before it's shown."""
+    import theming
+    place = (widgets.load_settings().get("browser_places") or {}).get(win.sid)
+    if not isinstance(place, dict):
+        return
+    size, frame = place.get("size"), place.get("frame")
+    if isinstance(size, list) and len(size) == 2 and all(isinstance(n, int) and n >= 200 for n in size):
+        win.set_default_size(*size)
+    if not (isinstance(frame, list) and len(frame) == 4 and all(isinstance(n, (int, float)) for n in frame)):
+        frame = None
+    theming.put_back(win, frame, place.get("maximized") is True)
 
 
 def baude_window(app, sid=None):
@@ -518,6 +560,17 @@ def restore_windows(win):
         GLib.timeout_add_seconds(1, look)
 
 
+def browser_window(main, remote, name):
+    """☰ → Browser on another host (remote, named name): Emission's own window there, on its Default profile, streamed
+    into a window here as a Bot's browser is (BrowserWindow: watched and driven, as that host's browser_write lets);
+    one for each host, brought to the front if it's out already."""
+    from sessionlist import host_key
+    sid = f"browser:{host_key(remote)}"
+    if (out := DISEMBODIED.get(sid)) is not None:
+        return out.present()
+    return BrowserWindow(main, {"id": sid, "default": True, "bot": {"name": name}, "remote": remote})
+
+
 class BrowserWindow(Adw.ApplicationWindow):
     """A Bot's browser out of the side panel (Disembody), in a window of its own that's an Emission window to look at
     (its bars: emissiongtk.Chrome), the Bot's browser still: the same pages and tabs, its profile, hosted or streamed as
@@ -534,7 +587,7 @@ class BrowserWindow(Adw.ApplicationWindow):
             import emissioncore
             if emission.themed_icon() is not None:
                 self.set_icon_name(emissioncore.APP_ID)
-        self.main, self.sid, self.done = main, info["id"], False
+        self.main, self.sid, self.done, self.default = main, info["id"], False, bool(info.get("default"))
         DISEMBODIED[self.sid] = self
         remember()
         for pane in list(PANES):  # (its chat's side panel page: out, now)
@@ -557,6 +610,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         self.connect("notify::is-active", lambda *_: self.is_active() and self.pane.watch_again())  # (stopped:
         # started again, come back to)
         self.gone_id = self.get_application().connect("window-removed", lambda _a, w: w is self.main and self.gone())
+        put_place(self)
         if restored:
             self.show_behind()
         else:
@@ -619,6 +673,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         """Gone: its page let go of (for the side panel's to have), the window too unless it's closing itself."""
         if self.done:
             return
+        keep_place(self)
         self.done = True
         if DISEMBODIED.get(self.sid) is self:
             DISEMBODIED.pop(self.sid)
@@ -774,8 +829,9 @@ class BrowserPane(Gtk.Box):
         # Emission, streamed till the page is shown again)
         self.pointer_seen = None  # (the last of the Bot's pointer's moves played, as its watch numbers them)
         self.phoned = False  # (its browser on a phone, as its host lists it: said here, not watched)
-        open_home(win.get_application(), lambda bot: (
-            (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
+        if getattr(win, "sidebar", None) is not None:  # (Baude's: Record's makes no Bot's browser)
+            open_home(win.get_application(), lambda bot: (
+                (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
         self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic",
                                           tooltip_text=wording.say("bot_browser.read_only"))
         self.read_only.add_css_class("flat")
@@ -1029,7 +1085,7 @@ class BrowserPane(Gtk.Box):
         self.native.set_visible(can_host(self.remote))
         self.say_status(wording.say("bot_browser.connecting"), "")
         self.pointer_seen = None  # (its moves before this watch: not played)
-        self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
+        self.stream = Stream(self.remote, self.whose(), self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
     def on_phone(self):
@@ -1185,7 +1241,7 @@ class BrowserPane(Gtk.Box):
         return True
 
     def presence_check(self):
-        """The glow as the Bot's turn is (its host's listing: acting, at its tools; not writing to you, not done),
+        """The glow as the Bot's turn is (its host's listing: acting, at Emission's tools; not writing to you, not done),
         in the accent: given the pointer drawn over its page (hosted: its window's, drawn by MacOverlay; streamed:
         Presence's). As listings change (listen), and as its page is shown or its frames start."""
         if self.sid is None or not self.get_mapped():  # (nothing for a page out of sight, or a chat's)
@@ -1410,6 +1466,13 @@ class BrowserPane(Gtk.Box):
     def tab(self):
         return self.state.get("selected")
 
+    def whose(self):
+        """Whose browser this is, as a host's asked about it: the Bot's ({id, name}), or (default) Emission's own
+        window there on its Default profile (☰ → Browser on another host: browser_window)."""
+        if (self.info or {}).get("default"):
+            return {"id": self.sid, "name": self.name, "default": True}
+        return {"id": self.sid, "name": self.name}
+
     def ask(self, call, done=None):
         """call to the Bot's Emission (as its tools' are: real input there), after what was asked before it: on this
         machine straight to its socket, elsewhere through its host. Nothing, while it's read-only."""
@@ -1433,7 +1496,7 @@ class BrowserPane(Gtk.Box):
                 done(r)
         if self.here is not None and self.here.win is not None:
             return self.here.call(call, lambda r: GLib.idle_add(lambda: answered(r) and False))
-        self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)
+        self.asks.put(remote, self.whose(), call, answered)
 
     def read_only_set(self, on):
         for w in self.drives:
@@ -1448,7 +1511,7 @@ class BrowserPane(Gtk.Box):
             self.sized_to = None                                    # Bot's page at its own size again)
             if on:
                 self.view_size = None  # (the page's size as it was fitted isn't what it'll be: fitted again after)
-                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True, "from_pane": True},
+                self.asks.put(self.remote, self.whose(), {"op": "resize", "restore": True, "from_pane": True},
                               lambda _r: None)
             else:
                 self.fit_page()
@@ -1584,8 +1647,37 @@ class BrowserPane(Gtk.Box):
         if key is None:
             return False
         self.flush_typing()
+        if mods == [PRIMARY] and not state & Gdk.ModifierType.SHIFT_MASK and key in ("c", "x", "v"):  # (the page's
+            # clipboard yours, not its Emission's; Ctrl+Shift+C and V are the page's keys)
+            return self.clipboard(key)
         combo = "+".join([*self.mods(state), key]) if key in KEYS.values() else "+".join([*mods, key])
         self.ask({"op": "key", "tab": self.tab(), "keys": combo})
+        return True
+
+    def clipboard(self, key):
+        """⌘C, ⌘X or ⌘V (Ctrl on Linux) on a streamed page: what's selected there put on this machine's clipboard
+        (cut: taken out of the page too), or what's on it pasted there. The Bot's Emission has a clipboard of its own,
+        elsewhere or on a display of its own, that the keys alone would use. Ctrl+C with nothing selected (and no
+        copy handler on the page) is sent as the key, a web terminal's interrupt."""
+        if key == "v":
+            def got(clip, res):
+                try:
+                    text = clip.read_text_finish(res)
+                except GLib.Error:
+                    return
+                if text:
+                    self.ask({"op": "paste", "tab": self.tab(), "text": text})
+            self.get_clipboard().read_text_async(None, got)
+            return True
+
+        def copied(r):
+            if not isinstance(r, dict):
+                return
+            if r.get("text"):
+                self.get_clipboard().set(r["text"])
+            elif key == "c" and PRIMARY == "ctrl" and not r.get("handled"):
+                self.ask({"op": "key", "tab": self.tab(), "keys": "ctrl+c"})
+        self.ask({"op": "copy", "tab": self.tab(), "cut": key == "x"}, copied)
         return True
 
     def flush_typing(self):
@@ -1639,5 +1731,5 @@ class BrowserPane(Gtk.Box):
         self.sized_to = size
         if self.view_size and tuple(self.view_size) == size:
             return
-        self.asks.put(self.remote, {"id": self.sid, "name": self.name},
+        self.asks.put(self.remote, self.whose(),
                       {"op": "resize", "width": size[0], "height": size[1], "fit": True, "from_pane": True}, lambda _r: None)

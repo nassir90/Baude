@@ -1,7 +1,7 @@
 """The Kubernetes and database views out in a window of their own and back, as ☰ → Terminal's terminals go
 (terminalpane.TerminalView) and a Bot's browser (Emission's): Out is a view's Move to Its Own Window button and its
-close (×), at its bar's end; ViewWindow the window it's out in. The same view moves, nothing read again: its cluster or
-database, its watch, its logs and shells go on. That window closed (its ×, the view's ×), the view's back over the
+close (×), at its bar's end; ViewWindow the window it's out in, its bar that window's header bar (no band of its own
+above it). The same view moves, nothing read again: its cluster or database, its watch, its logs and shells go on. That window closed (its ×, the view's ×), the view's back over the
 window it came from, shown; the window it came from closed, it goes too."""
 import gi  # noqa: E402
 
@@ -24,17 +24,17 @@ class Out:
     and its find entry (search). out() moves it to a window of its own titled title; window: that window, or None."""
 
     def __init__(self, view, bar, title, search, zoom=None):
-        self.view, self.title, self.search, self.zoom = view, title, search, zoom
+        self.view, self.bar, self.title, self.search, self.zoom = view, bar, title, search, zoom
         self.window = self.home = None
         self.gap = getattr(bar, "gap", None)
         self.button = Gtk.Button(icon_name="window-new-symbolic", tooltip_text=wording.say("common.move_out"))
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: self.out())
         bar.append(self.button)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
-        close.add_css_class("circular")
-        close.connect("clicked", lambda *_: self.window.close() if self.window is not None else self.view.close())
-        bar.append(close)
+        self.close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
+        self.close_btn.add_css_class("circular")
+        self.close_btn.connect("clicked", lambda *_: self.window.close() if self.window is not None else self.view.close())
+        bar.append(self.close_btn)
 
     def here(self):
         """Whether it's over its window (not out), and open."""
@@ -44,20 +44,28 @@ class Out:
         view = self.view
         self.home = view.get_parent()
         self.home.remove_overlay(view)
-        self.window = ViewWindow(view.win, view, self.title, self.search, self.back, self.zoom)
-        self.button.set_visible(False)
-        if self.gap is not None:
-            self.gap.set_visible(False)
+        self.show_home_bar(False)
+        self.window = ViewWindow(view.win, view, self.bar, self.title, self.search, self.back, self.zoom)
         view.set_visible(True)
         view.win.input.grab_focus()
         self.window.present()
 
+    def show_home_bar(self, home):
+        """The bar in its place at the view's top (home), or out of it, for its window's header bar to take: then its
+        place hidden (no empty band), and its own Move Out, × and traffic lights' room too (the window has its own)."""
+        if home:
+            self.handle.set_child(self.bar)
+        else:
+            self.handle = self.bar.get_parent()
+            self.handle.set_child(None)
+        self.handle.set_visible(home)
+        for w in (self.button, self.close_btn, *((self.gap,) if self.gap is not None else ())):
+            w.set_visible(home)
+
     def back(self, closing_home=False):
         """Its window's closed: the view over the window it came from, shown (that window closing: closed too)."""
         view, self.window = self.view, None
-        self.button.set_visible(True)
-        if self.gap is not None:
-            self.gap.set_visible(True)
+        self.show_home_bar(True)
         if closing_home:
             view.close()
         self.home.add_overlay(view)
@@ -74,16 +82,18 @@ class Out:
 
 
 class ViewWindow(Adw.ApplicationWindow):
-    """A view out in a window of its own: the view is all of it (its bar is the window's to drag, as it is over the
-    window it came from). Ctrl+F (⌘F) finds in it; zoom(steps), if it has one, is Ctrl +/−/0's (⌘). back(closing_home):
-    it's closed, the view to go back."""
+    """A view out in a window of its own: the view is all of it, its bar (bar) the window's header bar, beside the
+    window's controls. Ctrl+F (⌘F) finds in it; zoom(steps), if it has one, is Ctrl +/−/0's (⌘). back(closing_home):
+    it's closed, the view to go back (its bar given back first)."""
 
-    def __init__(self, main, view, title, search, back, zoom=None):
+    def __init__(self, main, view, bar, title, search, back, zoom=None):
         super().__init__(application=main.get_application(), title=title, default_width=1200, default_height=780)
-        self.view, self.back, self.main = view, back, main
+        self.view, self.back, self.main, self.bar = view, back, main, bar
         frame = Adw.ToolbarView(content=view)  # (a header bar of its own, as Multiplex's window has: the window's controls)
         frame.add_css_class("baude-frame")
-        frame.add_top_bar(Adw.HeaderBar(show_title=False))
+        self.margins = self.set_margins(bar, (0, 0, 0, 0))  # (the header bar's own padding instead)
+        self.head = Adw.HeaderBar(title_widget=bar)
+        frame.add_top_bar(self.head)
         self.set_content(frame)
         keys = Gtk.ShortcutController()
         keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Meta>f|<Control>f"),
@@ -102,11 +112,23 @@ class ViewWindow(Adw.ApplicationWindow):
         self.gone_id = main.get_application().connect("window-removed",
                                                       lambda _a, w: w is main and self._closed(True) and self.destroy())
 
+    @staticmethod
+    def set_margins(widget, margins):
+        """widget's margins (start, end, top, bottom) set; the ones it had returned."""
+        sides = ("start", "end", "top", "bottom")
+        had = tuple(getattr(widget, f"get_margin_{side}")() for side in sides)
+        for side, m in zip(sides, margins):
+            getattr(widget, f"set_margin_{side}")(m)
+        return had
+
     def _closed(self, closing_home):
         if self.back is None:
             return True
         back, self.back = self.back, None
         self.get_application().disconnect(self.gone_id)
+        self.set_focus(None)  # (its focus may be in the bar, going back: let go of it here first)
+        self.head.set_title_widget(None)
+        self.set_margins(self.bar, self.margins)
         self.get_content().set_content(None)
         self.set_content(None)
         back(closing_home)

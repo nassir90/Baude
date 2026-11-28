@@ -598,7 +598,7 @@ class HostPicker(Gtk.MenuButton):
 
     def __init__(self, tooltip, on_pick, chars=30):
         super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice"])
-        self.on_pick, self.labels, self.quiet = on_pick, {}, False
+        self.on_pick, self.labels, self.keys, self.dimmed, self.quiet = on_pick, {}, [], set(), False
         self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=chars)
         self.set_child(self.shown)
         self.action = Gio.SimpleAction.new_stateful("pick", GLib.VariantType.new("s"), GLib.Variant.new_string(""))
@@ -613,10 +613,11 @@ class HostPicker(Gtk.MenuButton):
         if not self.quiet and value.get_string() in self.labels:
             self.on_pick(value.get_string())
 
-    def set_choices(self, hosts):
+    def set_choices(self, hosts, dimmed=()):
         """hosts: [(host name, [(key, label)])], in order; a host named None: its choices with no heading, each
-        shown as its label alone. The key picked stays picked if it's still there."""
-        menu, self.labels = Gio.Menu(), {}
+        shown as its label alone. dimmed: keys whose menu labels are greyed (a disabled subscription, say), still
+        there to pick. The key picked stays picked if it's still there."""
+        menu, self.labels, self.keys = Gio.Menu(), {}, []
         for host, choices in hosts:
             section = Gio.Menu()
             for key, label in choices:
@@ -624,9 +625,29 @@ class HostPicker(Gtk.MenuButton):
                 item.set_action_and_target_value("hostpicker.pick", GLib.Variant.new_string(key))
                 section.append_item(item)
                 self.labels[key] = label if host is None else f"{host} / {label}"
+                self.keys.append(key)
             menu.append_section(host, section)
         self.set_menu_model(menu)
+        if (pop := self.get_popover()) is not None and not getattr(pop, "hostpicker_dim_hook", False):
+            pop.hostpicker_dim_hook = True
+            pop.connect("show", self._apply_dimmed)
+        self.set_dimmed(dimmed)
         self.select(self.value())
+
+    def set_dimmed(self, keys):
+        """Those keys greyed in its menu (a disabled subscription, say), still there to pick."""
+        self.dimmed = set(keys)
+        self._apply_dimmed()
+
+    def _apply_dimmed(self, *_):
+        pop = self.get_popover()
+        if pop is None:
+            return
+        buttons = [w for w in walk(pop) if w.__gtype__.name == "GtkModelButton"]
+        for key, btn in zip(self.keys, buttons):
+            label = next((w for w in walk(btn) if isinstance(w, Gtk.Label)), None)
+            if label is not None:
+                (label.add_css_class if key in self.dimmed else label.remove_css_class)("dim-label")
 
     def select(self, key):
         """Show key as picked (None, or one not listed: nothing), without on_pick."""

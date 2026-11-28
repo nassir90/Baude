@@ -148,6 +148,7 @@ class HostAccounts(val hostId: String) {
     fun took(r: JSONObject): String? {
         if (r.optString("op") == Op.ERROR) return Msg.Error.from(r).said.orEmpty().also { if (!loaded.value) error.value = it }
         val g = Msg.AccountsReply.from(r)
+        HostSubscriptions.took(hostId, g)
         g.accounts?.let { accounts.value = it }
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
         g.claudeCli?.let { claudeCli.value = it }

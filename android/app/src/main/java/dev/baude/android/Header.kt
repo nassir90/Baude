@@ -286,6 +286,7 @@ private const val GONE_ACCOUNT = "\u0000gone" // (the provider picker's value fo
 object HostSubscriptions {
     const val ACCOUNTS_MS = 30_000L
     val listed = mutableStateMapOf<String, List<Msg.Account>>()
+    val disabled = mutableStateMapOf<String, Set<String>>()
     private val asked = HashMap<String, Long>()
 
     fun ask(hostId: String) {
@@ -293,8 +294,13 @@ object HostSubscriptions {
         if (now - (asked[hostId] ?: 0L) < ACCOUNTS_MS) return
         asked[hostId] = now
         Mesh.ask(hostId, Msg.Accounts(what = "list").json()) { r ->
-            if (r.optString("op") == Op.ACCOUNTS) Msg.AccountsReply.from(r).accounts?.let { listed[hostId] = it }
+            if (r.optString("op") == Op.ACCOUNTS) took(hostId, Msg.AccountsReply.from(r))
         }
+    }
+
+    fun took(hostId: String, reply: Msg.AccountsReply) {
+        reply.accounts?.let { listed[hostId] = it }
+        reply.disabled?.let { disabled[hostId] = it.toSet() }
     }
 }
 
@@ -406,11 +412,17 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
             val on = if (gone) GONE_ACCOUNT else asked["account"] ?: listed("account").orEmpty()
             val subs = listOf(Wording.Subscriptions.cliDefault to "") + mine.map { it.name.orEmpty() to it.id.orEmpty() } +
                 if (gone) listOf(Wording.Subscriptions.removedAccount to GONE_ACCOUNT) else emptyList()
+            val off = HostSubscriptions.disabled[hostId].orEmpty()
+            val muted = buildSet {
+                if (HostAccounts.cliKey(prog) in off) add("")
+                for (a in mine) if (a.id.orEmpty() in off) add(a.id.orEmpty())
+            }
             fun named(id: String) = subs.firstOrNull { it.second == id }?.first ?: Wording.Subscriptions.cliDefault
-            Picker(middleCut(named(on)), Wording.Subscriptions.accountTip, subs, on) { v ->
+            Picker(middleCut(named(on)), Wording.Subscriptions.accountTip, subs, on, muted = muted) { v ->
                 if (v == on || v == GONE_ACCOUNT) return@Picker
                 asked["account"] = v
                 Mesh.ask(hostId, Msg.Accounts(what = "use", session = sid, id = v).json()) { r ->
+                    if (r.optString("op") == Op.ACCOUNTS) HostSubscriptions.took(hostId, Msg.AccountsReply.from(r))
                     val e = if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else Msg.AccountsReply.from(r).error
                     if (!e.isNullOrBlank()) { asked.remove("account"); said(e) }
                     else said(Wording.Subscriptions.accountNote(name = named(v)))
@@ -520,10 +532,10 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
 fun middleCut(s: String) = if (s.length > 24) s.take(11) + "…" + s.takeLast(12) else s
 
 /** A dropdown as the header bar's (a flat button, its choice and ▾): its choices (label, value), the one picked
- * checked, those dimmed greyed and not to be picked. */
+ * checked, those dimmed greyed and not to be picked, those muted greyed and still there to pick. */
 @Composable
 fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picked: String?, enabled: Boolean = true,
-           dimmed: Set<String> = emptySet(), pick: (String) -> Unit) {
+           dimmed: Set<String> = emptySet(), muted: Set<String> = emptySet(), pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -535,7 +547,8 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.END) {
-            for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed) { open = false; pick(value) }
+            for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed,
+                textColor = if (value in muted) c.dim else null) { open = false; pick(value) }
         }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -51,7 +52,7 @@ private fun cutMiddle(s: String, n: Int) = if (s.length > n) s.take((n - 1) / 2)
 /** The cut of a cell's text the rows grid shows. */
 private const val CELL_MAX = 120
 
-/** Database Schemas (schemaview.SchemaView): the running databases' tables as a diagram, read through the host: pick a
+/** Databases (schemaview.SchemaView): the running databases' tables as a diagram, read through the host: pick a
  * server, a database and a schema; a table's first rows under it. table and column (and hint, code) name what to find. */
 @Composable
 fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, column: String? = null, hint: String = "",
@@ -154,6 +155,67 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
         }
     }
 
+    /** The servers looked for again (a local cluster added or deleted, schemaview.servers_again): the pickers keep up,
+     * the diagram shown stays while its server's still there; gone, the first server's shown, as on opening. */
+    fun serversAgain() {
+        Mesh.ask(hostId, Msg.Databases(what = "servers").json()) { r ->
+            val g = Msg.DatabasesReply.from(r)
+            if (r.optString("op") == Op.ERROR || !g.error.isNullOrBlank() || g.missing != null) return@ask
+            val list = g.servers.orEmpty()
+            if (list.map { it.container } == servers.map { it.container }) return@ask
+            servers = list
+            dbs = g.databases?.let { o -> o.keys().asSequence().associateWith { k -> o.optJSONArray(k).strings() } }.orEmpty()
+            if (server != null && list.any { it.container == server }) return@ask
+            server = null
+            database = null
+            all = null
+            diagram.set(emptyList(), emptyList())
+            val s = list.firstOrNull()?.container
+            if (s == null) {
+                status = Wording.Databases.noPostgres
+                return@ask
+            }
+            val names = dbs[s].orEmpty()
+            val pick = names.filter { it != "postgres" }.ifEmpty { names }
+            if (pick.isNotEmpty()) load(s, pick.first()) else status = ""
+        }
+    }
+
+    // (the host's local Kubernetes clusters followed while the page is open, schemaview.watch_clusters: its kubeconfig's
+    // contexts whose API server is on it, as tools add and delete them; the connection dropped, followed again in a while)
+    DisposableEffect(hostId) {
+        var clusters: List<String>? = null
+        var following: KubeFollow? = null
+        var done = false
+        fun follow() {
+            var f: KubeFollow? = null
+            val again = {
+                if (following === f) {
+                    following = null
+                    Mesh.later(5_000) { if (!done && following == null) { follow(); serversAgain() } }
+                }
+            }
+            f = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "contexts"),
+                onContexts = { r ->
+                    if (following === f) {
+                        val local = r.contexts.orEmpty().filter { it.local == true }
+                            .map { "${it.name}\u0000${it.server.orEmpty()}" }.sorted()
+                        if (clusters != null && local != clusters) serversAgain()
+                        clusters = local
+                    }
+                },
+                onEnd = { again() }, onError = { again() })
+            following = f
+            if (!f.start()) following = null
+        }
+        follow()
+        onDispose {
+            done = true
+            following?.stop()
+            following = null
+        }
+    }
+
     // (laid out: the table asked for centred, else all of it fitted)
     LaunchedEffect(frame, diagram.width) {
         val want = framing ?: return@LaunchedEffect
@@ -212,7 +274,7 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
 
     BackHandler(rowsOf != null) { rowsOf = null }
     Column(Modifier.fillMaxSize().background(c.inside)) {
-        Bar(Wording.Databases.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
+        Bar(Wording.Window.databaseSchemas, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             end = { IconButton(Adwaita.WindowClose, Wording.Images.close, onClick = back) })
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             fun engine(s: Msg.DbServer) = if (s.engine == "arango") "ArangoDB" else "Postgres"

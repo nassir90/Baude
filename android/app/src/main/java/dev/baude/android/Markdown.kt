@@ -63,6 +63,19 @@ private val ITEM = Regex("""^(\s*)([-*+•◦]|\d+[.)])\s+(.*)$""")
 private val QUOTE_MARK = Regex("""^>\s?""")
 private val IMAGE = Regex("""^\s*!\[([^\]]*)]\(([^)\s]+)\)\s*$""")
 
+/** A line or a table's cell that's only `![alt](src)`: (alt, src); else null. */
+fun imageOnly(text: String): Pair<String, String>? = IMAGE.matchEntire(text)?.let { it.groupValues[1] to it.groupValues[2] }
+
+/** Pictures a markdown body names by their own names (an ask's: InboxAsk.page.json), drawn in their places instead of
+ * MarkdownImage's: one on a line of its own as wide as the text, one alone in a table's cell (cellWidth wide). */
+interface MarkdownPictures {
+    fun cellWidth(src: String): androidx.compose.ui.unit.Dp
+    @Composable fun Line(alt: String, src: String)
+    @Composable fun Cell(alt: String, src: String)
+}
+
+val LocalMarkdownPictures = androidx.compose.runtime.staticCompositionLocalOf<MarkdownPictures?> { null }
+
 private val blocksCache = LruCache<String, List<Block>>(256)
 
 /** markdownBlocks, kept by text (a long chat's items that scroll back in aren't parsed again). */
@@ -411,7 +424,7 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
             Block.Rule -> Box(Modifier.padding(vertical = Tokens.Markdown.ruleGap).fillMaxWidth().height(1.dp).background(c.rule))
             is Block.Code -> CodeBlock(b.code, b.lang, under = under)
             is Block.Table -> MarkdownTable(b.rows, color, under)
-            is Block.Image -> MarkdownImage(b.alt, b.src)
+            is Block.Image -> LocalMarkdownPictures.current?.Line(b.alt, b.src) ?: MarkdownImage(b.alt, b.src)
         }
     }
 }

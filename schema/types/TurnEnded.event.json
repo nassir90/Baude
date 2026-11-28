@@ -11,6 +11,14 @@
       "type": "string",
       "description": "The session's id."
     },
+    "uuid": {
+      "type": ["string", "null"],
+      "description": "The uuid of the message it ended with (its listing's ended's: what a notification of it is known by); null for a chat that keeps no turn's end (ended)."
+    },
+    "size": {
+      "type": ["integer", "null"],
+      "description": "Its transcript's size as it ended (its listing's ended's)."
+    },
     "result": {
       "type": ["string", "null"],
       "description": "Its result."

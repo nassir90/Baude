@@ -1,0 +1,4 @@
+{
+  "description": "A database query's rows, at most (databases' query): the rest aren't read.",
+  "const": 1000
+}

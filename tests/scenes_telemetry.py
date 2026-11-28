@@ -1,6 +1,6 @@
 """scenes_telemetry — tests/screenshots.py's scenes of telemetry (baudelib.telemetry, telemetryview): Settings →
-Telemetry, what this machine's host keeps: its turns' tokens by day, the models used, its machine now, its chats'
-latest activity, and line profiling."""
+Telemetry, what this machine's host keeps: its turns' tokens by day, the models used, its machine and its processes
+now, and line profiling."""
 import datetime
 import json
 import os
@@ -45,7 +45,10 @@ def seed(host_id):
                 rows.setdefault(("events", datetime.date.fromtimestamp(at)), []).append({
                     "at": at, "app": "host", "kind": "turn_ended", "host": host_id, "session": f"s{back}",
                     "seconds": rng.randint(8, 400), "turn": f"t{back}-{at}", "model": model, "effort": effort,
-                    "tokens_in": rng.randint(20_000, 900_000), "tokens_out": rng.randint(500, 30_000)})
+                    "tokens_out": rng.randint(500, 30_000),
+                    **({"tokens_in": rng.randint(20_000, 900_000)} if back > 30 else {  # (kept before they were apart)
+                        "tokens_input": rng.randint(200, 20_000), "tokens_cache_write": rng.randint(5_000, 80_000),
+                        "tokens_cache_read": rng.randint(50_000, 4_000_000)})})
     chats = ["c1a7e4f0-0000-4000-8000-000000000001", "5be2d913-0000-4000-8000-000000000002"]
     for i, (kind, chat, more) in enumerate([("chat_opened", 0, {}), ("chat_front", 0, {}), ("turn_sent", 0, {}),
                                             ("turn_ended", 0, {"seconds": 131.4}), ("chat_left", 0, {}),
@@ -57,13 +60,22 @@ def seed(host_id):
     lines = [("baudelib/telemetry.py", 271, "sample", "stats = proc_stats(sorted(pids))", 120, 0.912),
              ("baudelib/telemetry.py", 106, "proc_stats", "text = subprocess.run([\"ps\", \"-o\", \"pid=,time=,rss=\", \"-p\",",
               120, 0.774),
-             ("baudelib/telemetry.py", 131, "memory", "text = subprocess.run([\"vm_stat\"], capture_output=True, text=True,",
+             ("baudelib/telemetry.py", 131, "_mac_memory", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:",
               120, 0.402),
              ("baudelib/telemetry.py", 300, "_write", "f.write(\"\".join(json.dumps(r, separators=(\",\", \":\")) + \"\\n\" for r in these))",
               121, 0.051)]
     rows.setdefault(("profiles", datetime.date.today()), []).append({
         "at": now - 30, "from": now - 60, "app": "host",
         "lines": [{"file": f, "line": n, "function": fn, "code": c, "hits": h, "seconds": s} for f, n, fn, c, h, s in lines]})
+    for app, these in (("baude", [("markdownview.py", 652, "markdown_parse", "blocks = markdown_blocks(md[start:])", 64,
+                                   0.733),
+                                  ("windowview.py", 761, "load_history", "items = self.history.load(self.HISTORY_CHUNK)",
+                                   3, 0.288)]),
+                       ("record", [("recordstore.py", 498, "take", "self.merged_page(mine, theirs, was)", 41, 0.164)])):
+        rows[("profiles", datetime.date.today())].append({
+            "at": now - 30, "from": now - 60, "app": app,
+            "lines": [{"file": f, "line": n, "function": fn, "code": c, "hits": h, "seconds": s}
+                      for f, n, fn, c, h, s in these]})
     for (kind, day), these in rows.items():
         os.makedirs(os.path.join(folder, kind), exist_ok=True)
         with open(os.path.join(folder, kind, f"{day.isoformat()}.jsonl"), "a") as f:
@@ -77,15 +89,15 @@ def settings(app, profile=True, scrolled=False):
     host_id = ask({"op": "telemetry_read", "from": 0})["host"]
     seed(host_id)
     if profile:
-        ask({"op": "telemetry_set", "on": True, "app": "host", "functions": ["baudelib.telemetry.Telemetry.sample"]})
+        ask({"op": "telemetry_set", "on": True, "line_profiling": True})
     time.sleep(6)  # (a sample of the machine taken)
     dialog = win.open_settings()
     import telemetryview
     page = next(p for p in T.find(dialog, telemetryview.Page))
     dialog.set_visible_page(page)
-    T.wait_for(lambda: {"tokens", "machine", "chats", "profiling"} <= set(page.groups), "the host's telemetry", 30)
+    T.wait_for(lambda: {"tokens", "machine", "processes", "profiling"} <= set(page.groups), "the host's telemetry", 30)
     T.pump(0.5)
-    if scrolled:  # (its foot: the machine, the chats, line profiling)
+    if scrolled:  # (its foot: the machine, the processes, line profiling)
         from gi.repository import Gtk
         sw = T.find(page, Gtk.ScrolledWindow)[0]
         adj = sw.get_vadjustment()
@@ -98,14 +110,14 @@ def settings(app, profile=True, scrolled=False):
 
 @scene("39g-telemetry", "Settings → Telemetry: the host picked beside New session (this machine's here), Collect "
                         "Telemetry, its tokens by day over a year, the most used model and effort, each model's turns, "
-                        "its machine now, its chats' latest activity, and line profiling with its top lines",
+                        "its machine and its processes now, and line profiling with its top lines",
        size=(1200 + SIDEBAR, H + 100))
 def _(app):
     return settings(app)
 
 
-@scene("39g-telemetry-foot", "Settings → Telemetry scrolled to its foot: its machine now, its chats' latest "
-                             "activity, line profiling with its top lines", size=(1200 + SIDEBAR, H + 100))
+@scene("39g-telemetry-foot", "Settings → Telemetry scrolled to its foot: its machine and its processes now, "
+                             "line profiling with its top lines", size=(1200 + SIDEBAR, H + 100))
 def _(app):
     return settings(app, scrolled=True)
 

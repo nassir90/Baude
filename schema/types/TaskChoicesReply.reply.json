@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "task_choices' answer.",
+  "properties": {
+    "op": {
+      "const": "task_choices",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "type": {
+      "type": "string",
+      "description": "The type asked for."
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "$ref": "TaskChoice.json"
+      },
+      "description": "What it could be bound to, best first."
+    }
+  },
+  "required": [
+    "op",
+    "session"
+  ],
+  "additionalProperties": false
+}

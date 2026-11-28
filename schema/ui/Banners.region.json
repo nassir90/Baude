@@ -17,7 +17,14 @@
     "chatparts.py:UpdateBar",
     "chatparts.py:HostState",
     "meshui.py:HostApart",
-    "chatparts.py:ShutBar"
+    "chatparts.py:ShutBar",
+    "ChatBanner.kt:Away",
+    "Mesh.kt:Mesh.reach",
+    "windowproc.py:WindowProc.subscription_off",
+    "ChatBanner.kt:subscriptionOff",
+    "baudewindow.py:BaudeWindow.show_resume",
+    "CutShort.kt:ResumeLine",
+    "baudelib/hostresume.py"
   ],
   "copy": [
     "host_status",
@@ -30,15 +37,16 @@
   "parts": [
     {
       "name": "chat banner",
-      "shows": "A full-width strip (an Adw banner) revealed with a slide under the header and above the chat, one title line (markup) and an optional button at its right. It is hidden when nothing applies. When several things apply, the one shown is the first of: host gone, chat missing, active elsewhere, connection dropped, API retrying, daemon/app older. The composer's send button is switched off while the host is gone, the chat is missing, or the connection dropped.",
+      "shows": "A full-width strip (an Adw banner) revealed with a slide under the header and above the chat, one title line (markup) and an optional button at its right. It is hidden when nothing applies. When several things apply, the one shown is the first of: host gone, chat missing, active elsewhere, connection dropped, subscription disabled, API retrying, daemon/app older. The composer's send button is switched off while the host is gone, the chat is missing, the connection dropped, or the chat's subscription is disabled.",
       "parts": [
         {
           "name": "host gone",
-          "shows": "A network chat whose host is out of reach: \"Can't connect to <host> at the moment\" (\"Can't connect to <host> at the moment: <why>\" when the last try said why) for a host that is down; \"Looking for <host> on the network…\" while it is being looked for; this machine's host is called Daemon (\"Looking for daemon…\"). No button. The viewed chat is shown as it was last seen.",
+          "shows": "A network chat whose host is out of reach: \"Can't connect to <host> at the moment\" (\"Can't connect to <host> at the moment: <why>\" when the last try said why) for a host that is down; \"Looking for <host> on the network…\" while it is being looked for; this machine's host is called Daemon (\"Looking for daemon…\"). No button. The viewed chat is shown as it was last seen. Where the operating system closes the app's link while it's put away (the phone; a web version's tab), a host lost a moment ago, or being reached again after the app is brought back, shows only a dim cloud and \"Reconnecting…\" centred over the chat, no strip, for its first 30 seconds; the strip with the reason comes after that, or at once for a reason a retry won't fix (the phone's key, its sign-in, no Baude commands on the host). The send button stays on: what's sent waits in the queue (see Composer).",
           "copy": [
             "hosts.down",
             "hosts.down_because",
-            "hosts.looking"
+            "hosts.looking",
+            "hosts.reconnecting"
           ],
           "text": [
             "Looking for daemon…"
@@ -51,6 +59,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#87"
+                }
+              ]
+            },
+            {
+              "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+              "rule": "Every app whose link the OS or browser closes while it's put away gives a lost host 30 seconds of leeway (from when it went, or from when the app is brought back, whichever is later) shown as a quiet cloud and \"Reconnecting…\", never an alarming banner, and tries the link again the moment it's brought back or its network comes back; it says it can't connect only once the host has stayed away past the leeway, or at once for a reason a retry won't fix.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#243"
                 }
               ]
             }
@@ -125,6 +143,27 @@
           ]
         },
         {
+          "name": "subscription disabled",
+          "shows": "The subscription the chat runs on (its account, or its provider's CLI default) is disabled on its host (Settings → Subscriptions, or Auto Disable on Exhaustion): \"Subscription <name> is disabled\" (CLI default's name for the CLI's own sign-in). No button. The send button is off till it's enabled or another subscription is picked in the chat's provider picker; a held message's ↑ says it can't be sent while it is.",
+          "copy": [
+            "subscriptions.disabled_chat",
+            "subscriptions.cli_default",
+            "held_send.while_disabled"
+          ],
+          "decisions": [
+            {
+              "said": "(BaudeInternal#280, paraphrased) a provider should be able to be disabled without removing it: its chats turned off and the send button blocked for chats on it, since some providers don't stop when usage runs out and bill extra instead",
+              "rule": "Every app's Subscriptions page lets any subscription (an account, or a provider's CLI default) be disabled and enabled again from its ⋮, without removing it; while it's disabled its card says Disabled, its host stops the agent of every chat on it (a turn going on cut short) and refuses anything sent to them or anything that would start them, and every app's chat on it has its send button off with a banner \"Subscription <name> is disabled\" (Meta's box, where Meta runs on it, the same line over it), till it's enabled or the chat's moved to another subscription",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#280"
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "API retrying",
           "shows": "While claude retries the model's API: \"The API returned <status>: retrying, attempt 2 of 5\" or \"The API didn't answer: retrying\" (attempt part only when known), dots stepping; gone when the next thing arrives or the turn ends.",
           "text": [
@@ -154,7 +193,7 @@
           "actions": [
             {
               "by": "click button",
-              "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" after"
+              "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N things are done\" with Details while it waits (Sidebar's \"Daemon restart toast\"), \"Daemon restarted\" after"
             }
           ],
           "decisions": [
@@ -202,14 +241,15 @@
     },
     {
       "name": "host state note",
-      "shows": "Over the sidebar's chat list (not the chat column): a small outlined island, text centred and wrapped, slid down, saying why the host picked beside New session can't be reached: \"Looking for <host> on the network…\", \"Can't connect to <host> at the moment[: why]\", \"<host> is deactivated\", or its stopping/restarting line. The host's chats stay listed as they were last seen. Gone when the host is there.",
+      "shows": "Over the sidebar's chat list (not the chat column): a small outlined island, text centred and wrapped, slid down, saying why the host picked beside New session can't be reached: \"Looking for <host> on the network…\", \"Can't connect to <host> at the moment[: why]\", \"<host> is deactivated\", or its stopping/restarting line. The host's chats stay listed as they were last seen. Gone when the host is there. Where the operating system closes the app's link (the phone), a host away less than 30 seconds shows a dim cloud and \"Reconnecting…\" instead, its chats listed as they were, not dimmed.",
       "copy": [
         "hosts.looking",
         "hosts.down",
         "hosts.down_because",
         "hosts.deactivated",
         "host_status.stopping",
-        "host_status.restarting"
+        "host_status.restarting",
+        "hosts.reconnecting"
       ],
       "decisions": [
         {
@@ -219,6 +259,16 @@
           "source": [
             {
               "issue": "BaudeInternal#110"
+            }
+          ]
+        },
+        {
+          "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+          "rule": "Every app whose link the OS closes lists a host's chats as last seen, not dimmed or crossed out, with a cloud and \"Reconnecting…\" over them, while the host has been away less than the leeway; the can't-connect island and crossed-out clouds come after it.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#243"
             }
           ]
         }
@@ -236,6 +286,38 @@
         {
           "by": "click Continue",
           "does": "Sends the continue message to the chat"
+        }
+      ]
+    },
+    {
+      "name": "resumes after a usage limit line",
+      "shows": "At the end of the transcript (a chat line, not a banner, after the cut-short line if both are there): dim \"Resumes at 3:20 PM\" (\"Resumes Friday at 3:20 PM\" where it isn't today; the viewer's local time and clock format) with a button \"Cancel\". Shown while the chat's host is to resume it (its listing's resume_at): its last turn was stopped by a usage limit and its subscription has Auto Resume on Reset on. Gone once the host sends the continue message, something else is sent, it's cancelled, or the subscription is disabled or the switch turned off.",
+      "copy": [
+        "limit_resume.line",
+        "limit_resume.line_day",
+        "common.cancel",
+        "limit_resume.not_cancelled"
+      ],
+      "actions": [
+        {
+          "by": "click Cancel",
+          "does": "Tells the chat's host not to resume it (resume_cancel); the line goes. If the host refuses, a toast \"Not cancelled: <why>\" and the line stays"
+        },
+        {
+          "by": "(none)",
+          "does": "At the time, the host sends the chat \"Continue where you left off: the usage limit has reset.\" as its user's message, and the turn goes on as any other"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "(BaudeInternal#307, paraphrased) a chat that stops because its five-hour usage limit is used up should carry on by itself once the limit resets",
+          "rule": "Every app's Subscriptions page has Auto Resume on Reset in each subscription's ⋮ (a check item, off until turned on); while it's on, a chat on that subscription whose turn a usage limit stops is sent \"Continue where you left off: the usage limit has reset.\" by its host a minute after the limit resets, over a host restart, unless something is sent to it first, it's cancelled, the switch is turned off, or the subscription is disabled by hand (a subscription disabled by hand is never resumed onto or enabled again by itself). Where Auto Disable on Exhaustion is on too, the subscription that disabled itself as it was exhausted is enabled again a minute after the limit resets (a by-hand Enable or Disable forgets that it disabled itself), and its chats are resumed then; their line stays meanwhile. A chat whose resumes keep being refused again waits at least 5 minutes after each (doubling), and is let be after three in a row with no turn going through; a scheduled task run's chat isn't resumed (its schedule runs it again). Every app's chat says when at its end (\"Resumes at 3:20 PM\", with the day where it isn't today) with Cancel beside it.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#307"
+            }
+          ]
         }
       ]
     },

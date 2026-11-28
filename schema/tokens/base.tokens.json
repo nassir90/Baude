@@ -238,6 +238,7 @@
       "$value": {"value": 20, "unit": "px"}
     },
     "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
+    "device-code": {"$description": "The phone's one-time code of a device-code sign-in (Subscriptions' Codex sign-in card), read off and typed in elsewhere.", "$type": "dimension", "$value": {"value": 26, "unit": "px"}},
     "small": {
       "$description": "A note's size (.sysnote, Meta's .meta-note), and a folder's name's (.sidebar-folder), in em.",
       "$type": "number",
@@ -247,6 +248,11 @@
       "$description": "Code's size (.mono; a file's, .code-view, and its lines' numbers', .code-gutter), in em.",
       "$type": "number",
       "$value": 0.9
+    },
+    "device-code-scale": {
+      "$description": "That one-time code's size on the desktop (.device-code), in em.",
+      "$type": "number",
+      "$value": 1.8
     },
     "semibold": {"$description": "A Bot's name (.bot-name).", "$type": "fontWeight", "$value": 600},
     "bold": {"$description": "A folder's name, a title.", "$type": "fontWeight", "$value": "bold"}
@@ -552,6 +558,10 @@
     "picture": {"$description": "The picture's side.", "$value": {"value": 128, "unit": "px"}},
     "badge": {"$description": "The logo's side, in its corner.", "$value": {"value": 52, "unit": "px"}},
     "badge-gap": {"$description": "The gap cut round the logo.", "$value": {"value": 4, "unit": "px"}}
+  },
+  "subscriptions": {
+    "stale-opacity": {"$type": "number", "$description": "A Claude card's usage as the host last read it, till the page's own read answers (subscriptionpage.STALE_OPACITY).", "$value": 0.5},
+    "menu-usage-width": {"$type": "dimension", "$description": "The main menu's usage row's least width (MenuUsage), at the text size: the row is as wide as the longest limit line a host can say needs at the viewer's clock and text size, this at least.", "$value": {"value": 300, "unit": "px"}}
   },
   "lightbox": {
     "fly": {"$type": "duration", "$description": "A picture opened into the large view, and closed back (Lightbox.FLY_MS).", "$value": {"value": 240, "unit": "ms"}},

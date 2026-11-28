@@ -1,0 +1,935 @@
+"""A Bot's tasks, on the side panel's Tasks page (schema/ui/Tasks.panel.json, docs/tasks-design.md): scripts its host
+keeps and runs (baudelib.tasks), by hand or as their triggers fire; their scripts are the Bot's to write (its set_task
+tool). The list of them; a task's page (its triggers, inputs and runs); a run's page (its log, its asks of the Bot and
+the Bot's answers, the chats it started and how they are). Each read from the Bot's host and set there."""
+import datetime
+import json
+import os
+import time
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+
+from baudelib import wire, wording  # noqa: E402
+from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY, number_of  # noqa: E402
+from markdownview import CodeBlock  # noqa: E402
+from panels import natural_height  # noqa: E402
+from widgets import Spinner, load_settings, save_settings, themed_icon  # noqa: E402
+
+PAGE = wording.say("tasks.title")
+DAY_NAMES = tuple(wording.say(f"tasks.{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
+TYPES = (("text", "tasks.text"), ("number", "tasks.number"), ("bool", "tasks.yes_no"), ("choice", "tasks.choice"))
+KINDS = (("schedule", "tasks.schedule"), ("git_push", "tasks.git_push"))
+VARIABLE_TYPES = {"model": "common.model", "decider": "tasks.decider", "host": "new_session.host",
+                  "browser_host": "tasks.browser_host", "terminal_host": "tasks.terminal_host",
+                  "kube_context": "tasks.kube_context", "pod": "tasks.pod", "container": "kube.container",
+                  "database": "databases.database", "text": "tasks.text"}
+PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "after", "commit", "message", "author")}
+STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
+                "skipped": "go-next-symbolic", "asking": "baude-waiting-symbolic"}
+GOING = ("running", "asking")
+REPORTS_S = 3600  # (a run's page looks for what the chats it started said till this long after it's over, at most)
+INVALID = object()  # (a number field's value while its text isn't a number)
+
+
+def branch_icon():
+    return themed_icon("vcs-branch-symbolic", "media-playlist-shuffle-symbolic")
+
+
+def kind_icon(kind):
+    return {"schedule": "alarm-symbolic", "git_push": branch_icon()}.get(kind)
+
+
+def when(t):
+    """What fires a trigger, said: every 2 hours; weekdays at 09:00; push to main in ~/site."""
+    if t.get("kind") == "git_push":
+        repo = t.get("repo") or ""
+        home = os.path.expanduser("~")
+        if repo == home or repo.startswith(home + os.sep):
+            repo = "~" + repo[len(home):]
+        return wording.say("tasks.push_to", branch=t.get("branch") or "", repo=repo)
+    if t.get("every"):
+        m = t["every"]
+        return wording.say("tasks.every_hours", n=m // 60) if m % 60 == 0 and m >= 120 else (
+            wording.say("tasks.every_hour") if m == 60 else wording.say("tasks.every_minutes", n=m))
+    days = t.get("days") or []
+    said = {(0, 1, 2, 3, 4): wording.say("tasks.weekdays"), (5, 6): wording.say("tasks.weekends"),
+            (0, 1, 2, 3, 4, 5, 6): wording.say("tasks.every_day")}.get(
+        tuple(days), ", ".join(DAY_NAMES[d] for d in days))
+    return wording.say("tasks.days_at", days=said, time=t.get("at"))
+
+
+def stamp(t, clock=None, short=False):
+    """A time as the host's clock has it: HH:MM today, else its day too (short: without the weekday)."""
+    if not t:
+        return wording.say("tasks.never")
+    zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
+    d = datetime.datetime.fromtimestamp(t, zone)
+    return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else \
+        d.strftime("%d %b %H:%M" if short else "%a %d %b %H:%M")
+
+
+def all_reported(run, log):
+    """Has every chat the run started said how its first turn finished (an agent line of its log, finished), or is the
+    run over long enough ago (REPORTS_S) that its page stops looking?"""
+    finished = {x.get("session") for x in log if x.get("kind") == "agent" and (x.get("over") or "finished") == "finished"}
+    return set(run.get("chats") or ()) <= finished or \
+        isinstance(run.get("ended"), (int, float)) and time.time() - run["ended"] > REPORTS_S
+
+
+def ran_at(run, clock=None, short=False):
+    """When a run started, as its host's clock had it then (its own offset), else as it has it now."""
+    offset = run.get("offset")
+    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock, short)
+
+
+def took(seconds):
+    s = int(round(seconds or 0))
+    return wording.say("tasks.seconds", n=s) if s < 60 else wording.say("tasks.minutes_took", m=s // 60, s=s % 60)
+
+
+def status_icon(run):
+    """A run's state, as an icon (a spinner while it's running, an hourglass in the warning colour while it waits
+    for input; nothing for none)."""
+    if run is None:
+        return Gtk.Box(width_request=16)
+    if run.get("status") == "running":
+        w = Spinner(width_request=16, height_request=16, valign=Gtk.Align.CENTER)
+    else:
+        w = Gtk.Image(icon_name=STATUS_ICONS.get(run.get("status"), "object-select-symbolic"))
+        if run.get("status") == "failed":
+            w.add_css_class("error")
+        elif run.get("status") == "done":
+            w.add_css_class("success")
+        elif run.get("status") == "asking":
+            w.add_css_class("warning")
+    w.set_tooltip_text(wording.say("tasks.status", status=run.get("status") or ""))
+    return w
+
+
+def warning_icon(tip):
+    w = Gtk.Image(icon_name="dialog-warning-symbolic", tooltip_text=tip, valign=Gtk.Align.CENTER)
+    w.add_css_class("warning")
+    return w
+
+
+def bound_text(b):
+    """What a variable's bound to, as its row says it: its label (a model's name, a host's) or value, a model's effort
+    after it."""
+    if not b:
+        return wording.say("tasks.not_bound")
+    return (b.get("label") or b.get("value") or "") + (f" · {b['effort']}" if b.get("effort") else "")
+
+
+def matches(choice, words):
+    """Does a choice offered for a variable have each word typed in its name, value or where it is?"""
+    b = choice.get("binding") or {}
+    hay = " ".join(x for x in (b.get("label"), b.get("value"), choice.get("detail")) if x).lower()
+    return all(w in hay for w in words)
+
+
+def flat(icon, tip, fn):
+    b = Gtk.Button(icon_name=icon, tooltip_text=tip, valign=Gtk.Align.CENTER)
+    b.add_css_class("flat")
+    b.connect("clicked", lambda *_: fn())
+    return b
+
+
+def dim(text, **kw):
+    lbl = Gtk.Label(label=text, xalign=0, **kw)
+    lbl.add_css_class("dim-label")
+    return lbl
+
+
+def dropdown(pairs, picked):
+    """A drop-down of (value, copy key) pairs, picked's selected: (it, its values)."""
+    dd = Gtk.DropDown.new_from_strings([wording.say(k) for _v, k in pairs])
+    values = [v for v, _k in pairs]
+    if picked in values:
+        dd.set_selected(values.index(picked))
+    return dd, values
+
+
+def alert(win, heading, child, responses, done):
+    """An alert dialog: child, scrolled if it's tall; responses [(id, label, suggested)]; done(id) for each but
+    cancel."""
+    fits = Gtk.ScrolledWindow(child=child, propagate_natural_height=True, max_content_height=520,
+                              hscrollbar_policy=Gtk.PolicyType.NEVER)
+    dlg = Adw.AlertDialog(heading=heading, extra_child=fits, close_response="cancel",
+                          default_response=responses[-1][0])
+    for rid, label, suggested in responses:
+        dlg.add_response(rid, label)
+        if suggested:
+            dlg.set_response_appearance(rid, Adw.ResponseAppearance.SUGGESTED)
+    dlg.connect("response", lambda _d, r: r != "cancel" and done(r))
+    dlg.present(win)
+    return dlg
+
+
+class TasksPage(Gtk.Box):
+    """The Tasks page: the open Bot's tasks, read from its host and set there; a task's page; a run's."""
+
+    def __init__(self, win):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.win, self.sid, self.remote, self.asked, self.clock = win, None, None, 0, None
+        self.tasks, self.task, self.runs, self.run, self.log, self.bot = [], None, [], None, [], None
+        self.drawn, self.tail = None, None  # (the run drawn: (its id, how many lines, its last); the block last drawn)
+        self.chats_drawn = None  # (the chats it started, as they were drawn: chats_now's)
+        self.wrap = load_settings().get("task_log_wrap", True) is not False  # (its output and errors wrapped)
+        self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.append(self.stack)
+        # the list
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10, margin_top=10,
+                                valign=Gtk.Align.START)
+        self.list.add_css_class("boxed-list")
+        empty = Gtk.Label(label=wording.say("tasks.no_tasks"), margin_top=24, margin_bottom=24)
+        empty.add_css_class("dim-label")
+        self.list.set_placeholder(empty)
+        self.list.connect("row-activated", lambda _l, row: self.open_task(row.task_id))
+        box.append(Gtk.ScrolledWindow(vexpand=True, child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.stack.add_named(box, "list")
+        # a task's page and a run's: their header rows, and what scrolls under them
+        self.task_box, self.task_title, self.task_body = self._sub("list")
+        self.run_box, self.run_title, self.run_body = self._sub("task")
+        self.stack.add_named(self.task_box, "task")
+        self.stack.add_named(self.run_box, "run")
+        self.said = Gtk.Label(wrap=True, xalign=0, visible=False, margin_start=10, margin_end=10, margin_top=6,
+                              margin_bottom=6)
+        self.said.add_css_class("dim-label")
+        self.append(self.said)
+        self.ticks = 0
+        self.timer = GLib.timeout_add_seconds(1, self.tick)
+        self.connect("destroy", lambda *_: GLib.source_remove(self.timer))
+        self.connect("map", lambda *_: self.refresh())  # (switched to: read as it is now)
+
+    def _sub(self, back_to):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        head = Gtk.Box(spacing=4, margin_start=6, margin_end=6, margin_top=6, margin_bottom=4)
+        back = Gtk.Button(icon_name="go-previous-symbolic")
+        back.add_css_class("flat")
+        back.connect("clicked", lambda *_: self.go(back_to))
+        head.append(back)
+        title = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+        title.add_css_class("heading")
+        head.append(title)
+        box.append(head)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin_start=10, margin_end=10,
+                       margin_bottom=12)
+        box.append(natural_height(Gtk.ScrolledWindow(vexpand=True, child=body,
+                                                     hscrollbar_policy=Gtk.PolicyType.NEVER)))
+        box.head, box.back = head, back
+        return box, title, body
+
+    # ---- the host
+    def show(self, info):
+        """The open chat (the sidebar's info, or None): a Bot's tasks read from its host."""
+        info = info or {}
+        bot = bool(info.get("bot")) and info.get("id") and info.get("remote") is not None
+        sid, remote = (info.get("id"), info.get("remote")) if bot else (None, None)
+        if sid == self.sid and remote is self.remote:
+            return
+        self.sid, self.remote, self.clock = sid, remote, None
+        self.bot = (info.get("bot") or {}).get("name") if bot else None
+        self.tasks, self.task, self.run = [], None, None
+        self.said.set_visible(False)
+        self.stack.set_visible_child_name("list")
+        self.draw_list()
+        self.refresh()
+
+    def refresh(self):
+        """What's shown read again: the list, and the task or run open."""
+        if self.sid is None:
+            return
+        self.ask({"op": "tasks", "session": self.sid})
+        shown = self.stack.get_visible_child_name()
+        if shown == "task" and self.task:
+            self.ask({"op": "task", "session": self.sid, "id": self.task["id"]})
+        if shown == "run" and self.run:
+            self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})
+
+    def tick(self):
+        self.ticks += 1
+        if self.sid is None or not self.get_mapped():
+            return True
+        shown = self.stack.get_visible_child_name()
+        going = any((t.get("last") or {}).get("status") in GOING for t in self.tasks)
+        if shown == "run" and self.run and self.run.get("status") in GOING:
+            self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})
+        elif shown == "run" and self.run and self.run.get("chats"):
+            if self.chats_now() != self.chats_drawn:  # (how they are, as the host lists them: their cards' titles too)
+                self.drawn = None
+                self.draw_run()
+            if self.ticks % 5 == 0 and not all_reported(self.run, self.log):
+                self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})  # (what they said, logged)
+        if self.ticks % (5 if going else 30) == 0:
+            self.ask({"op": "tasks", "session": self.sid})
+            if shown == "task" and self.task and going:
+                self.ask({"op": "task", "session": self.sid, "id": self.task["id"]})
+        return True
+
+    def ask(self, msg):
+        self.asked += 1
+        sid = self.sid
+        op = msg.get("op")
+        doing = "run" if op == "run_task" else "stop" if op == "task_stop" else \
+            "save" if "set" in msg or op == "task_bind" else \
+            "delete" if "delete" in msg else "load"
+
+        def got(r):
+            if sid != self.sid:
+                return
+            if r.get("op") == "error":
+                self.said.set_label(wording.say("tasks.couldnt", doing=doing))
+                self.said.set_tooltip_text(wire.said(r) or None)
+                self.said.set_visible(True)
+                return
+            self.said.set_visible(False)
+            self.took(r)
+        self.remote.request(msg, got)
+
+    def took(self, r):
+        op = r.get("op")
+        self.clock = r.get("clock") or self.clock
+        if op == "tasks":
+            self.tasks = r.get("tasks") or []
+            self.draw_list()
+            if self.task and not any(t["id"] == self.task["id"] for t in self.tasks):
+                self.task = None
+                self.go("list")
+        elif op == "task":
+            self.task, self.runs = r.get("task"), r.get("runs") or []
+            self.draw_task()
+        elif op in ("task_run", "task_started"):
+            self.run = r.get("run")
+            if op == "task_run":
+                self.log, self.bot = r.get("log") or [], r.get("bot") or self.bot
+                self.draw_run()
+                if self.run and self.run.get("task") and (self.task or {}).get("id") != self.run["task"]:
+                    self.task, self.runs = None, []  # (opened from a link: Back goes to its own task)
+                    self.ask({"op": "task", "session": self.sid, "id": self.run["task"]})
+            else:
+                self.ask({"op": "tasks", "session": self.sid})
+                if self.task and self.task["id"] == self.run["task"]:
+                    self.ask({"op": "task", "session": self.sid, "id": self.task["id"]})
+
+    def go(self, name):
+        self.stack.set_visible_child_name(name)
+        self.refresh()
+
+    def save(self, task):
+        self.ask({"op": "tasks", "session": self.sid, "set": task})
+
+    def kept(self, task, **changed):
+        """task as it's sent to be set again (its script left as it is: the Bot's to change), with changed."""
+        return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "notify_failure",
+                                            "notify_exit", "timeout_s", "paused")}, **changed}
+
+    # ---- the list
+    def draw_list(self):
+        while (row := self.list.get_row_at_index(0)) is not None:
+            self.list.remove(row)
+        for t in self.tasks:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(t.get("name") or wording.say("tasks.task")),
+                                activatable=True)
+            row.task_id = t["id"]
+            row.add_prefix(status_icon(t.get("last")))
+            if t.get("warnings"):  # (a variable bound to what isn't there now: said before it runs)
+                row.add_suffix(warning_icon("\n".join(wording.say("tasks.variable_warning", name=k, warning=w)
+                                                      for k, w in t["warnings"].items())))
+            on = Gtk.Switch(active=not t.get("paused"), valign=Gtk.Align.CENTER,
+                            tooltip_text=wording.say("tasks.turn_off"))
+            on.connect("notify::active", lambda sw, _p, x=t: self.save(self.kept(x, paused=not sw.get_active())))
+            row.add_suffix(on)
+            row.add_suffix(flat("media-playback-start-symbolic", wording.say("tasks.run"), lambda x=t: self.start(x)))
+            self.list.append(row)
+
+    def start(self, task):
+        """task run now: its inputs filled first, if it has any."""
+        if task.get("form"):
+            return self.run_form(task)
+        self.ask({"op": "run_task", "session": self.sid, "id": task["id"]})
+
+    # ---- a task's page
+    def open_task(self, tid):
+        self.task = next((t for t in self.tasks if t["id"] == tid), None)
+        self.runs = []
+        self.draw_task()
+        self.stack.set_visible_child_name("task")
+        self.ask({"op": "task", "session": self.sid, "id": tid})
+
+    def group(self, title, *suffix):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        head = Gtk.Box(spacing=6)
+        lbl = Gtk.Label(label=title, xalign=0, hexpand=True)
+        lbl.add_css_class("heading")
+        head.append(lbl)
+        for w in suffix:
+            head.append(w)
+        box.append(head)
+        self.task_body.append(box)
+        return box
+
+    def listbox(self, into):
+        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        lb.add_css_class("boxed-list")
+        lb.add_css_class("tasks-rows")
+        into.append(lb)
+        return lb
+
+    def draw_task(self):
+        while (c := self.task_body.get_first_child()) is not None:
+            self.task_body.remove(c)
+        head = self.task_box.head
+        while (c := head.get_last_child()) is not self.task_title:
+            head.remove(c)
+        t = self.task
+        if t is None:
+            return
+        self.task_title.set_label(t.get("name") or wording.say("tasks.task"))
+        self.task_box.back.set_tooltip_text(PAGE)
+        head.append(flat("media-playback-start-symbolic", wording.say("tasks.run"), lambda: self.start(t)))
+        head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.change(t)))
+        head.append(flat("user-trash-symbolic", wording.say("common.delete"), lambda: self.delete(t)))
+        # failures
+        if t.get("runtime") != "bot":  # (a Bot's own turn: nothing to notify it of)
+            lb = self.listbox(self.task_body)
+            lb.set_margin_top(2)
+            for key, active in (("notify_failure", t.get("notify_failure", True)),
+                                ("notify_exit", t.get("notify_exit", False))):
+                row = Adw.SwitchRow(title=wording.say(f"tasks.{key}"), use_markup=False, active=active)
+                row.connect("notify::active", lambda r, _p, key=key: self.save(self.kept(t, **{key: r.get_active()})))
+                lb.append(row)
+        # triggers
+        g = self.group(wording.say("tasks.triggers"),
+                       flat("list-add-symbolic", wording.say("tasks.add_trigger"), lambda: self.add_trigger(t)))
+        if not t.get("triggers"):
+            g.append(dim(wording.say("tasks.by_hand")))
+        else:
+            lb = self.listbox(g)
+            for tr in t["triggers"]:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(when(tr)))
+                row.add_prefix(Gtk.Image(icon_name=kind_icon(tr["kind"])))
+                if tr.get("error"):
+                    warn = Gtk.Image(icon_name="dialog-warning-symbolic", tooltip_text=tr["error"])
+                    warn.add_css_class("warning")
+                    row.add_suffix(warn)
+                row.add_suffix(flat("list-remove-symbolic", wording.say("tasks.remove_trigger"),
+                                    lambda x=tr: self.save(self.kept(t, triggers=[y for y in t["triggers"]
+                                                                                  if y["id"] != x["id"]]))))
+                lb.append(row)
+        # inputs
+        g = self.group(wording.say("signal_card.inputs"),
+                       flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.edit_form(t)))
+        if not t.get("form"):
+            g.append(dim(wording.say("signal_card.no_inputs")))
+        else:
+            lb = self.listbox(g)
+            for f in t["form"]:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(f.get("label") or f["name"]))
+                row.add_suffix(dim(wording.say(dict(TYPES)[f["type"]])))
+                lb.append(row)
+        # variables
+        if t.get("variables"):
+            g = self.group(wording.say("tasks.variables"))
+            lb = self.listbox(g)
+            lb.connect("row-activated", lambda _l, row: self.bind(t, row.variable))
+            for v in t["variables"]:
+                b = (t.get("bindings") or {}).get(v["name"])
+                row = Adw.ActionRow(title=GLib.markup_escape_text(v["name"]), activatable=True,
+                                    tooltip_text=v.get("description"))
+                row.variable = v
+                if (w := (t.get("warnings") or {}).get(v["name"])) and b:
+                    row.add_suffix(warning_icon(w))
+                said = dim(bound_text(b), ellipsize=Pango.EllipsizeMode.END, max_width_chars=28)
+                if b and b.get("label") and b["label"] != b.get("value"):
+                    said.set_tooltip_text(b["value"])
+                row.add_suffix(said)
+                lb.append(row)
+        # runs
+        g = self.group(wording.say("tasks.runs"))
+        if not self.runs:
+            g.append(dim(wording.say("tasks.no_runs")))
+        else:
+            lb = self.listbox(g)
+            lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
+            for r in self.runs:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(ran_at(r, self.clock, True)), activatable=True)
+                row.run = r
+                row.add_prefix(status_icon(r))
+                if kind_icon(r.get("kind")):
+                    row.add_suffix(Gtk.Image(icon_name=kind_icon(r.get("kind"))))
+                v = dim(r.get("version") or "")
+                v.add_css_class("mono")
+                row.add_suffix(v)
+                lb.append(row)
+
+    # ---- a run's page
+    def open_run(self, run):
+        self.run, self.log, self.drawn = run, [], None
+        self.draw_run()
+        self.stack.set_visible_child_name("run")
+        self.ask({"op": "task_run", "session": self.sid, "run": run["id"]})
+
+    def draw_run(self):
+        """The run's header and facts drawn again, and its log's lines since it was last drawn added (all of it
+        drawn again only for another run, or a log cut at its start)."""
+        head = self.run_box.head
+        while (c := head.get_last_child()) is not self.run_title:
+            head.remove(c)
+        r = self.run
+        if r is None:
+            while (c := self.run_body.get_first_child()) is not None:
+                self.run_body.remove(c)
+            self.drawn = None
+            return
+        self.run_title.set_label(f"{r.get('name') or wording.say('tasks.task')} · {ran_at(r, self.clock)}")
+        self.run_box.back.set_tooltip_text(r.get("name") or wording.say("tasks.task"))
+        wrap = Gtk.ToggleButton(icon_name="baude-wrap-symbolic", tooltip_text=wording.say("code_view.wrap"),
+                                active=self.wrap, valign=Gtk.Align.CENTER, css_classes=["flat"])
+        wrap.connect("toggled", lambda b: self.set_wrap(b.get_active()))
+        head.append(wrap)
+        self.wrap_button = wrap
+        if r.get("status") in GOING:
+            head.append(flat("media-playback-stop-symbolic", wording.say("common.stop"),
+                             lambda: self.ask({"op": "task_stop", "session": self.sid, "run": r["id"]})))
+        kind = {"manual": "tasks.by_hand", "schedule": "tasks.schedule", "git_push": "tasks.git_push"}
+        facts = [r.get("error") or wording.say("tasks.status", status=r["status"]),
+                 wording.say(kind.get(r.get("kind"), "tasks.by_hand"))]
+        if r.get("ended"):
+            facts.append(took(r.get("seconds")))
+        facts.append(r.get("version") or "")
+        line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        said = Gtk.Box(spacing=6)
+        said.append(status_icon(r))
+        said.append(dim(" · ".join(f for f in facts if f), wrap=True))
+        line.append(said)
+        if (chats := self.chats_now()):
+            line.append(self.started(chats))
+        self.chats_drawn = chats
+        drawn, log = self.drawn, self.log
+        n = drawn[1] if drawn and drawn[0] == r["id"] and drawn[1] <= len(log) < LOG_SHOWN and \
+            (drawn[1] == 0 or log[drawn[1] - 1] == drawn[2]) else None
+        if n is None:
+            while (c := self.run_body.get_first_child()) is not None:
+                self.run_body.remove(c)
+            self.tail, n = None, 0
+        else:
+            self.run_body.remove(self.run_body.get_first_child())
+        self.run_body.prepend(line)
+        for x in log[n:]:
+            self.log_line(x)
+        self.drawn = (r["id"], len(log), log[-1] if log else None)
+
+    def chats_now(self):
+        """The chats the run started, as its host lists them now: [(id, title, state)], those gone left out. Its
+        state as Started's dot shows it: waiting (it asks something, as the sessions list says), working, or done."""
+        listed = getattr(self.remote, "sessions", None) or {}
+
+        def state(x):
+            return "waiting" if x.get("state") == "waiting" or x.get("asks") else \
+                "working" if x.get("state") == "working" else "done"
+        return [(c, listed[c].get("title") or wording.say("tasks.task"), state(listed[c]))
+                for c in (self.run or {}).get("chats") or () if c in listed]
+
+    def started(self, chats):
+        """Started: a row for each chat the run started, its state as the sessions list shows it (working, waiting
+        on an answer, or done: they go on after the run's over), opened as it's clicked."""
+        from sessionsidebar import StatusDot
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        h = Gtk.Label(label=wording.say("tasks.started_chats"), xalign=0)
+        h.add_css_class("heading")
+        box.append(h)
+        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        lb.add_css_class("boxed-list")
+        lb.add_css_class("tasks-rows")
+        for cid, title, state in chats:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
+            row.chat = cid
+            row.add_prefix(StatusDot(state))
+            row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+            lb.append(row)
+        lb.connect("row-activated", lambda _l, row: self.open_chat(row.chat))
+        box.append(lb)
+        return box
+
+    def open_chat(self, cid):
+        if self.remote is not None and cid in self.remote.sessions:
+            self.win.open_mesh_chat({**self.remote.sessions[cid], "server": self.remote})
+
+    def set_wrap(self, on):
+        """The run's output and errors wrapped, or scrolled sideways: kept, and the log drawn again."""
+        if on == self.wrap:
+            return
+        self.wrap = on
+        save_settings(task_log_wrap=on)
+        self.drawn = None
+        self.draw_run()
+
+    def log_line(self, x):
+        """One line of the run's log added: output and errors run together in a code block of their own (errors in
+        the error colour), each ask of the Bot and its answer a card, and what each chat it started said as its turn
+        ended (told the Bot too), the rest plain lines."""
+        k, text = x.get("kind"), x.get("text") or ""
+        if k in ("out", "err"):
+            if self.tail is not None and self.tail[0] == k:
+                self.tail[2].append(text)
+                self.tail[1].set_code("\n".join(self.tail[2]))
+                return
+            block = CodeBlock(text, wrap=self.wrap)
+            if k == "err":
+                block.label.add_css_class("error")
+            self.run_body.append(block)
+            self.tail = (k, block, [text])
+            return
+        self.tail = None
+        if k == "warning":  # (a variable bound to what wasn't there as it started)
+            line = Gtk.Box(spacing=6)
+            line.append(warning_icon(None))
+            line.append(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, hexpand=True,
+                                  wrap_mode=Pango.WrapMode.WORD_CHAR))
+            self.run_body.append(line)
+            return
+        if k in ("ask", "answer", "agent"):
+            bot = self.bot or wording.say("sidebar.bot")
+            chat = ((getattr(self.remote, "sessions", None) or {}).get(x.get("session")) or {}).get("title") or \
+                wording.say("tasks.a_chat")
+            over = x.get("over") or ("failed" if x.get("error") else "finished")
+            head_text = wording.say({"failed": "tasks.agent_failed", "stopped": "tasks.agent_stopped"}.get(
+                over, "tasks.agent_done"), name=chat) \
+                if k == "agent" else wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
+                wording.say("tasks.handed_bot", bot=bot) if x.get("error") else \
+                wording.say("tasks.asked_bot", bot=bot)
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.add_css_class("card")
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=10, margin_end=10,
+                            margin_top=8, margin_bottom=8)
+            h = Gtk.Label(label=head_text, xalign=0)
+            h.add_css_class("heading")
+            inner.append(h)
+            said = json.dumps(x["values"], ensure_ascii=False) if x.get("values") else text
+            inner.append(Gtk.Label(label=said, xalign=0, wrap=True, selectable=True,
+                                   wrap_mode=Pango.WrapMode.WORD_CHAR))
+            card.append(inner)
+            self.run_body.append(card)
+            return
+        self.run_body.append(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True,
+                                       wrap_mode=Pango.WrapMode.WORD_CHAR))
+
+    # ---- dialogs
+    def change(self, t):
+        """t renamed."""
+        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=t.get("name") or "", valign=Gtk.Align.CENTER)
+        alert(self.win, wording.say("tasks.change_heading"), name,
+              [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)],
+              lambda _r: self.save(self.kept(t, name=name.get_text())))
+
+    def bind(self, t, v):
+        """t's variable v bound: to one of what its host has of its type (each word typed found in its name or where
+        it is), picked from the list under what's typed, or to whatever's typed; a model's effort picked beside it.
+        Clear unbinds it."""
+        kind, bound = v["type"], (t.get("bindings") or {}).get(v["name"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        entry = Gtk.Entry(placeholder_text=wording.say(VARIABLE_TYPES.get(kind, "tasks.text")), hexpand=True,
+                          text=(bound or {}).get("label") or (bound or {}).get("value") or "")
+        box.append(entry)
+        listed = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        listed.add_css_class("boxed-list")
+        listed.add_css_class("tasks-rows")
+        scroll = Gtk.ScrolledWindow(child=listed, propagate_natural_height=True, max_content_height=260,
+                                    hscrollbar_policy=Gtk.PolicyType.NEVER, visible=False)
+        box.append(scroll)
+        effort_row = Gtk.Box(spacing=8, visible=kind == "model")
+        effort_row.append(Gtk.Label(label=wording.say("meta_settings.effort"), xalign=0, hexpand=True))
+        effort = Gtk.DropDown.new_from_strings([wording.say("meta_settings.effort_default")])
+        effort_row.append(effort)
+        box.append(effort_row)
+        state = {"choices": [], "picked": bound, "efforts": []}
+
+        def efforts(levels):
+            levels = list(levels or [])
+            have = (state["picked"] or {}).get("effort")
+            if have and have not in levels:
+                levels.append(have)
+            state["efforts"] = levels
+            effort.set_model(Gtk.StringList.new([wording.say("meta_settings.effort_default"), *levels]))
+            effort.set_selected(levels.index(have) + 1 if have in levels else 0)
+
+        def shown_text(b):
+            return (b or {}).get("label") or (b or {}).get("value") or ""
+
+        def fill(*_):
+            while (row := listed.get_row_at_index(0)) is not None:
+                listed.remove(row)
+            words = entry.get_text().lower().split()
+            if state["picked"] is not None and entry.get_text() == shown_text(state["picked"]):
+                words = []  # (what's picked shown: every choice offered again)
+            hits = [c for c in state["choices"] if matches(c, words)]
+            for c in hits[:100]:
+                row = Adw.ActionRow(title=GLib.markup_escape_text(shown_text(c["binding"])), activatable=True)
+                row.choice = c
+                if state["picked"] is not None and c["binding"].get("value") == state["picked"].get("value"):
+                    row.add_suffix(Gtk.Image(icon_name="object-select-symbolic"))  # (what it's bound to now)
+                if c.get("detail"):
+                    row.add_suffix(dim(c["detail"], ellipsize=Pango.EllipsizeMode.END, max_width_chars=24))
+                listed.append(row)
+            scroll.set_visible(bool(hits))
+
+        def picked(_l, row):
+            state["picked"] = dict(row.choice["binding"])
+            entry.set_text(shown_text(state["picked"]))
+            efforts(row.choice.get("efforts"))
+            fill()
+        listed.connect("row-activated", picked)
+
+        def typed(*_):
+            if state["picked"] is not None and entry.get_text() != shown_text(state["picked"]):
+                state["picked"] = None  # (typed over: what's typed is what it's bound to)
+            fill()
+        entry.connect("changed", typed)
+
+        def got(r):
+            if r.get("op") != "task_choices":
+                return
+            state["choices"] = r.get("choices") or []
+            hit = next((c for c in state["choices"] if bound and c["binding"].get("value") == bound.get("value")), None)
+            efforts((hit or {}).get("efforts"))
+            fill()
+        efforts([])
+        if kind != "text":
+            self.remote.request({"op": "task_choices", "session": self.sid, "type": kind}, got)
+
+        def done(r):
+            if r == "clear":
+                binding = None
+            else:
+                text = entry.get_text().strip()
+                same = next((c["binding"] for c in state["choices"]
+                             if text.lower() in (str(c["binding"].get("label") or "").lower(),
+                                                 str(c["binding"].get("value") or "").lower())), None) if text else None
+                binding = dict(state["picked"]) if state["picked"] is not None and \
+                    entry.get_text() == shown_text(state["picked"]) else dict(same) if same else {"value": text} if text else None
+                if binding is not None and kind == "model":
+                    binding.pop("effort", None)
+                    if effort.get_selected() > 0:
+                        binding["effort"] = state["efforts"][effort.get_selected() - 1]
+            self.ask({"op": "task_bind", "session": self.sid, "id": t["id"], "name": v["name"], "binding": binding})
+        responses = [("cancel", wording.say("common.cancel"), False)] + \
+            ([("clear", wording.say("common.clear"), False)] if bound else []) + [("save", wording.say("common.save"), True)]
+        dlg = alert(self.win, wording.say("tasks.bind_heading", name=v["name"]), box, responses, done)
+        dlg.set_size_request(420, -1)
+        entry.connect("activate", lambda _e: (dlg.close(), done("save")))
+        return dlg
+
+    def delete(self, t):
+        """t deleted, once that's confirmed: its runs and scripts too."""
+        name = t.get("name") or wording.say("tasks.task")
+        dlg = Adw.AlertDialog(heading=wording.say("tasks.delete_heading", name=name), close_response="cancel",
+                              default_response="cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("delete", wording.say("common.delete"))
+        dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda _d, r: r == "delete" and self.ask(
+            {"op": "tasks", "session": self.sid, "delete": t["id"]}, lambda _r: self.go("list")))
+        dlg.present(self.win)
+        return dlg
+
+    def field_row(self, f):
+        """(an input's row, as a setting's: a switch, a drop-down or an entry beside a title that wraps, as its label
+        may be long; its value as it's read (None: a number left empty, nothing to send; INVALID: not a number); whether
+        it's fit to run; its entry, if it has one)"""
+        title = f.get("label") or f["name"]
+        if f["type"] == "bool":
+            row = Adw.SwitchRow(title=title, use_markup=False, active=bool(f.get("default")))
+            return row, row.get_active, lambda: True, None
+        if f["type"] == "choice":
+            choices = f.get("choices") or [""]
+            row = Adw.ComboRow(title=title, use_markup=False, model=Gtk.StringList.new(choices))
+            if f.get("default") in choices:
+                row.set_selected(choices.index(f["default"]))
+            return row, lambda: choices[row.get_selected()], lambda: True, None
+        default = f.get("default")
+        number = f["type"] == "number"
+        entry = Gtk.Entry(valign=Gtk.Align.CENTER, width_request=150, hexpand=False,
+                          input_purpose=Gtk.InputPurpose.NUMBER if number else Gtk.InputPurpose.FREE_FORM,
+                          text="" if default is None else repr(default) if number else str(default))
+        row = Adw.ActionRow(title=title, use_markup=False, activatable_widget=entry)
+        row.add_suffix(entry)
+        if not number:
+            return row, entry.get_text, lambda: True, entry
+
+        def read():
+            try:
+                return number_of(entry.get_text())
+            except ValueError:
+                return INVALID
+
+        def valid():
+            n = read()
+            return n is not INVALID and (n is not None or not f.get("required"))
+        entry.connect("changed", lambda e: (e.remove_css_class if valid() else e.add_css_class)("error"))
+        if not valid():
+            entry.add_css_class("error")
+        return row, read, valid, entry
+
+    def run_form(self, t):
+        """Run t, its inputs filled here first, each a row as the settings have them."""
+        group = Adw.PreferencesGroup()
+        read, valid, entries = {}, [], []
+        for f in t.get("form") or []:
+            row, read[f["name"]], ok, entry = self.field_row(f)
+            valid.append(ok)
+            group.add(row)
+            if entry is not None:
+                entries.append(entry)
+
+        def run():
+            self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
+                      "inputs": {k: v for k, fn in read.items() if (v := fn()) is not None}})
+        dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), group,
+                    [("cancel", wording.say("common.cancel"), False), ("run", wording.say("tasks.run"), True)],
+                    lambda _r: run())
+        dlg.set_size_request(420, -1)
+
+        def filled(*_):
+            ok = all(v() for v in valid)
+            dlg.set_response_enabled("run", ok)
+            return ok
+        for entry in entries:
+            entry.connect("changed", filled)
+            entry.connect("activate", lambda _e: filled() and (dlg.close(), run()))
+        filled()
+        return dlg
+
+    def add_trigger(self, t):
+        """A trigger added to t: a schedule or a git push, and which of its payload's keys fills each field."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        kind, kinds = dropdown(KINDS, "schedule")
+        box.append(kind)
+        sched = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        how = Gtk.DropDown.new_from_strings([wording.say("tasks.every"), wording.say("tasks.at_a_time")])
+        sched.append(how)
+        every = Gtk.Box(spacing=6)
+        amount = Gtk.SpinButton.new_with_range(1, MAX_EVERY // 60, 1)
+        amount.set_value(1)
+        unit = Gtk.DropDown.new_from_strings([wording.say("tasks.minutes"), wording.say("tasks.hours")])
+        unit.set_selected(1)
+        unit.connect("notify::selected", lambda *_: amount.set_range(*((1, MAX_EVERY // 60) if unit.get_selected()
+                                                                       else (MIN_EVERY, MAX_EVERY))))
+        every.append(amount)
+        every.append(unit)
+        sched.append(every)
+        daily = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        daily.append(Gtk.Label(label=wording.say("tasks.times_in", zone=self.clock["zone"])
+                               if self.clock and self.clock.get("zone") else wording.say("tasks.host_clock"), xalign=0))
+        at = Gtk.Entry(placeholder_text="HH:MM", text="09:00", max_width_chars=6)
+        daily.append(at)
+        days_row, days = Gtk.Box(spacing=2), []
+        for i, d in enumerate(DAY_NAMES):
+            b = Gtk.ToggleButton(label=d, active=i < 5)
+            days.append(b)
+            days_row.append(b)
+        daily.append(days_row)
+        sched.append(daily)
+        box.append(sched)
+        push = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        repo = Gtk.Entry(placeholder_text=wording.say("tasks.repo"))
+        branch = Gtk.Entry(placeholder_text=wording.say("lookup.branch"), text="main")
+        push.append(Gtk.Label(label=wording.say("tasks.repo"), xalign=0))
+        push.append(repo)
+        push.append(Gtk.Label(label=wording.say("lookup.branch"), xalign=0))
+        push.append(branch)
+        box.append(push)
+        fills_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.append(fills_box)
+        fills = {}
+
+        def shown(*_):
+            k = kinds[kind.get_selected()]
+            sched.set_visible(k == "schedule")
+            push.set_visible(k == "git_push")
+            every.set_visible(how.get_selected() == 0)
+            daily.set_visible(how.get_selected() == 1)
+            while (c := fills_box.get_first_child()) is not None:
+                fills_box.remove(c)
+            fills.clear()
+            if t.get("form"):
+                fills_box.append(Gtk.Label(label=wording.say("tasks.fills"), xalign=0, css_classes=["heading"]))
+            keys = PAYLOAD[k]
+            for f in t.get("form") or []:
+                row = Gtk.Box(spacing=8)
+                row.append(Gtk.Label(label=wording.say("tasks.fills_field", field=f.get("label") or f["name"]),
+                                     xalign=0, hexpand=True))
+                dd = Gtk.DropDown.new_from_strings([wording.say("tasks.nothing"), *keys])
+                if f["name"] in keys:
+                    dd.set_selected(keys.index(f["name"]) + 1)
+                fills[f["name"]] = (dd, keys)
+                row.append(dd)
+                fills_box.append(row)
+        for w in (kind, how):
+            w.connect("notify::selected", shown)
+        shown()
+
+        def done(_r):
+            k = kinds[kind.get_selected()]
+            tr = {"kind": k, "fills": {n: keys[dd.get_selected() - 1] for n, (dd, keys) in fills.items()
+                                       if dd.get_selected() > 0}}
+            if k == "git_push":
+                tr.update(repo=repo.get_text().strip(), branch=branch.get_text().strip() or "main")
+            elif how.get_selected() == 0:
+                tr["every"] = int(amount.get_value()) * (60 if unit.get_selected() == 1 else 1)
+            else:
+                tr.update(at=at.get_text().strip(), days=[i for i, b in enumerate(days) if b.get_active()])
+            self.save(self.kept(t, triggers=[*(t.get("triggers") or []), tr]))
+        return alert(self.win, wording.say("tasks.trigger_heading"), box,
+                     [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)],
+                     done), kind
+
+    def edit_form(self, t):
+        """t's inputs changed: each a name, a type, its choices and its default."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        rows = []
+
+        def add(f):
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            line = Gtk.Box(spacing=6)
+            name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=f.get("name") or "",
+                             hexpand=True)
+            kind, kinds = dropdown(TYPES, f.get("type") or "text")
+            line.append(name)
+            line.append(kind)
+            choices = Gtk.Entry(placeholder_text=wording.say("tasks.choices"), text=", ".join(f.get("choices") or []))
+            default = Gtk.Entry(placeholder_text=wording.say("meta_settings.effort_default"), text="" if f.get("default") is None else str(f["default"]))
+            item = (card, name, kind, kinds, choices, default)
+            line.append(flat("list-remove-symbolic", wording.say("tasks.remove_input"),
+                             lambda: (rows.remove(item), fields.remove(card))))
+            card.append(line)
+            card.append(choices)
+            card.append(default)
+            kind.connect("notify::selected", lambda *_: choices.set_visible(kinds[kind.get_selected()] == "choice"))
+            choices.set_visible(kinds[kind.get_selected()] == "choice")
+            rows.append(item)
+            fields.append(card)
+        fields = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.append(fields)
+        for f in t.get("form") or []:
+            add(f)
+        more = Gtk.Button(label=wording.say("tasks.add_input"), halign=Gtk.Align.START)
+        more.connect("clicked", lambda *_: add({}))
+        box.append(more)
+
+        def done(_r):
+            form = []
+            for _card, name, kind, kinds, choices, default in rows:
+                f = {"name": name.get_text().strip(), "type": kinds[kind.get_selected()]}
+                if f["type"] == "choice":
+                    f["choices"] = [c.strip() for c in choices.get_text().split(",") if c.strip()]
+                if default.get_text():
+                    f["default"] = default.get_text()
+                form.append(f)
+            self.save(self.kept(t, form=form))
+        alert(self.win, wording.say("tasks.inputs_heading"), box,
+              [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)], done)

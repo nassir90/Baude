@@ -574,10 +574,11 @@ def remote_info(s):
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),
             "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
-            "archived": bool(s.get("archived")), "bot": s.get("bot"),
+            "archived": bool(s.get("archived")), "bot": s.get("bot"), "rotated": s.get("rotated"),
             "desktop": bool(s.get("desktop")), "elsewhere": bool(s.get("elsewhere")),  # (Claude Desktop's; writing it now)
             "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
             "held": len(s.get("held") or []),  # (messages its host holds for it, to send or drop: HeldTurn)
+            "unseen": baudelib.client.unseen(s),  # (its last turn's end not seen on any head yet: its dot's done)
             "account": (s.get("account") or {}).get("name") if isinstance(s.get("account"), dict) else None}
 
 
@@ -635,10 +636,19 @@ def bot_picture(info, then):
 
 def can_be_bot(info):
     """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and takes bot, on a
-    model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat)."""
+    model whose program's told who it is and given a Bot's tools (claude's, pi's, codex's), not a fork (a Bot's a
+    top-level chat); a Bot on any model."""
     r = info.get("remote")
     return r is not None and not info.get("dead") and r.state == "alive" and baudelib.wire.takes(r.info, "bot") and \
-        modelslib.model_program(info.get("model")) in ("claude", "pi")
+        (bool(info.get("bot")) or modelslib.model_program(info.get("model")) in ("claude", "pi", "codex"))
+
+
+def can_rotate(info):
+    """Can a Bot be rotated (its conversation archived, a new one begun): one on a host that's there and takes rotate,
+    on whatever model."""
+    r = info.get("remote")
+    return bool(info.get("bot")) and r is not None and not info.get("dead") and r.state == "alive" and \
+        baudelib.wire.takes(r.info, "rotate")
 
 
 def chat_groups(st=None):

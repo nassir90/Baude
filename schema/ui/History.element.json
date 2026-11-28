@@ -14,6 +14,8 @@
     "windowview.py:WindowView.render_history",
     "windowview.py:WindowView.update_earlier_btn",
     "windowview.py:WindowView.show_earlier",
+    "windowview.py:WindowView.place_earlier_spin",
+    "windowview.py:WindowView.earlier_spin_at",
     "windowview.py:WindowView.settle_tasks",
     "baudelib/transcripts.py:history_item",
     "baudelib/transcripts.py:history_items",
@@ -31,8 +33,8 @@
   "parts": [
     {
       "name": "Show earlier messages",
-      "decisions": [{"said": "On mobile baude, I don't seem to get anywhere near the full transcript for long threads.", "rule": "Every app opens a long chat on its newest part and reads further back, to the transcript's first record, as it's scrolled up to the top (the desktop's Show earlier messages, the phone's scrolling)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#199"}]}],
-      "shows": "A button centred at the top of the chat while earlier parts aren't drawn: \"Show earlier messages (N more)\" (or without the count). Earlier chunks (60 items each) also draw by themselves as you scroll near them; the chat is about its full height from the start so the scrollbar doesn't jump.",
+      "decisions": [{"said": "On mobile baude, I don't seem to get anywhere near the full transcript for long threads.", "rule": "Every app opens a long chat on its newest part and reads further back, to the transcript's first record, as it's scrolled up to the top (the desktop's Show earlier messages, the phone's scrolling)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#199"}]}, {"said": "Scrolled to the top of a chat, there wasn't enough sign that more of it was loading above (paraphrased).", "rule": "Every app shows its spinner, centred and with no words, at the top of what's still to come above while older messages are being read or drawn there, and keeps what's in view where it is when they arrive", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#244"}]}],
+      "shows": "A button centred at the top of the chat while earlier parts aren't drawn: \"Show earlier messages (N more)\" (or without the count). Earlier chunks (60 items each) also draw by themselves as you scroll near them; the chat is about its full height from the start so the scrollbar doesn't jump. While what's above is still to come, the spinner (no words) shows where it will appear: in the button's place while the start of a long chat is still being indexed; at the top of the part in view of an earlier chunk's place not drawn yet; on the phone, in the chat's first row while there's more of the transcript before its lines, read from the host as it's scrolled up to, for as long as that's asked for (asked again when its host is back up, and a little later each time it fails while up). When it arrives, what was in view stays where it was.",
       "text": [
         "Show earlier messages",
         "Show earlier messages (N more)"

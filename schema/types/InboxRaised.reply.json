@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "inbox_raise's and inbox_revise's answer.",
+  "properties": {
+    "op": {
+      "const": "inbox_raised",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "version": {
+      "type": "integer",
+      "description": "Its version now (1 for the first)."
+    },
+    "answered": {
+      "anyOf": [
+        {
+          "$ref": "InboxAnswer.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A revised chat's ask's answer to the version before, if its chat hadn't been told it yet."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "version"
+  ],
+  "additionalProperties": false
+}

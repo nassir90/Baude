@@ -12,7 +12,8 @@
     "toolcards.py:ToolCard.ask",
     "toolcards.py:ToolCard.answered",
     "toolcards.py:ToolCard.set_decision",
-    "windowsignal.py:WindowSignal.allowed_in"
+    "windowsignal.py:WindowSignal.allowed_in",
+    "windowremote.py:WindowRemote.withdraw_asks"
   ],
   "copy": [
     "asks",
@@ -25,7 +26,7 @@
     },
     {
       "name": "own box (no card)",
-      "shows": "A box with a 1px amber border, 8px corners, 8px/12px padding, items 6px apart: first \"Allow <tool>?\" in bold, then dimmed (60%) after two spaces the call's one-line summary; MCP tools are named \"<Server>: <Tool title>\" (\"Allow GitHub: Create issue?\"). Under it the same input view a card would show, then the buttons.",
+      "shows": "A box with a 1px amber border, 8px corners, 8px/12px padding, items 6px apart: first \"Allow <tool>?\" in bold, then dimmed (60%) after two spaces the call's one-line summary; MCP tools are named \"<Server> / <Tool>\" (\"Allow GitHub / Create issue?\"), as their cards name them (ToolCall), in Always allow too. Under it the same input view a card would show, then the buttons.",
       "copy": [
         "asks.allow_tool"
       ]
@@ -68,6 +69,22 @@
     {
       "name": "turn ends unanswered",
       "shows": "Stopped (Esc) or ended otherwise: the buttons go and the card shows interrupted."
+    },
+    {
+      "name": "answered on another head",
+      "shows": "A host's chat's ask that its host no longer lists (answered on another head, or the phone): its buttons go here too, as they do on the phone, so no head keeps asking what's been answered.",
+      "decisions": [
+        {
+          "said": "(BaudeInternal#247, paraphrased) the wire and the main chat should keep widgets the same on every head viewing a chat",
+          "rule": "Every app takes a host's chat's permission prompt down once its host stops listing that ask (answered on another head), rather than leaving its buttons up till the turn ends",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#247"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "AskUserQuestion",

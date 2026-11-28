@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "access's answer.",
+  "properties": {
+    "op": {
+      "const": "access",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "state": {
+      "$ref": "AccessState.json",
+      "description": "The host's rules now."
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The chat asked about."
+    },
+    "chat": {
+      "anyOf": [
+        {
+          "$ref": "AccessChat.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "That chat's own rules for managing it (null, or a side not there: the host's)."
+    }
+  },
+  "required": [
+    "op",
+    "state"
+  ],
+  "additionalProperties": false
+}

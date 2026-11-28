@@ -40,47 +40,87 @@ import java.io.File
 
 /** A message you sent that its transcript doesn't show yet: drawn as the transcript will draw it (lines), its text and
  * files kept to put back in the box if its host says no. */
-class Outgoing(val id: String, val lines: List<Line>, val text: String, val files: List<Picked>)
+class Outgoing(val id: String, val lines: List<Line>, val text: String, val files: List<Picked>, val kept: Boolean = false) {
+    var accepted = false // (its host said it took it; kept: in its chat's draft on disk as tried till then)
+}
 
-/** A message written while a turn runs, queued under the chat. uuid: the one it was sent by, if it was and its host may
- * not have taken it (Mesh.sendQueued): sent by it again, so its host takes it once. */
-class Queued(val text: String, val files: List<Picked>, val uuid: String? = null)
+/** A message written while a turn runs, or while its host isn't reached (offline), queued under the chat. uuid: the
+ * one it's sent by: if it was sent and its host may have taken it (tried: its link went before the answer came), sent
+ * by it again, so its host takes it once. failed: why its host said no to it, sent by itself; it waits for you (↑). */
+class Queued(val text: String, val files: List<Picked>, val uuid: String? = null, val offline: Boolean = false,
+             val tried: Boolean = false, val failed: String? = null) {
+    var hosted = 0 // (in its chat's queue on its host, by its uuid, which sends it: 1 asked to add it, 2 it has it)
+}
 
 object Queue {
     private val ALL = Queued("", emptyList())
 
-    /** What's written, sent as the desktop's send does: at once, or, while a turn runs, queued under the chat. */
+    /** What's written, sent as the desktop's send does: at once, or, while a turn runs, queued under the chat; while
+     * its host isn't reached, queued to go once it's back (resend). */
     fun submit(chat: Chat, working: Boolean, text: String, files: List<Picked>) {
-        if (chat.sender == null && working) chat.queued.add(Queued(text.trim(), files)) else chat.send(text, files)
+        val reached = Mesh.conn(chat.hostId)?.state == "up"
+        if (chat.sender == null && (working || !reached))
+            chat.queued.add(Queued(text.trim(), files, java.util.UUID.randomUUID().toString(), offline = !reached)
+                .also { if (reached) Mesh.queueAdd(chat, it) }) // (a host's chat's: kept there, and sent by it)
+        else chat.send(text, files)
+    }
+
+    /** A message whose host didn't answer as it was sent (its link went: it may have been taken) put back in the queue,
+     * after those put back before it, to go by its uuid once its host's back. */
+    fun putBackTried(chat: Chat, q: Queued) {
+        val at = chat.queued.indexOfFirst { !it.tried }.let { if (it < 0) chat.queued.size else it }
+        chat.queued.add(at, Queued(q.text, q.files, q.uuid, offline = true, tried = true))
+    }
+
+    /** (its host back, and what it missed read: those it took already are gone from the queue) What was queued while
+     * its host wasn't reached sent, each by its own uuid, in order, unless a turn's going (then at its end: flush). */
+    fun resend(chat: Chat) {
+        val going = chat.queued.filter { it.offline && it.failed == null }
+        if (going.isEmpty()) return
+        chat.queued.removeAll(going.toSet())
+        for (q in going) chat.send(q.text, q.files, q.uuid)
     }
 
     /** The queue sent as one message when a turn ends, including interruption (up to the one ↑ was pressed on, if one was). */
-    fun flush(chat: Chat) {
+    fun flush(chat: Chat, taken: (() -> Unit)? = null) {
         val upto = chat.queueUpto ?: ALL
         chat.stopAsked = false
         chat.queueUpto = null
         if (chat.queued.isEmpty()) return
-        val turns = if (upto === ALL) chat.queued.toList() else chat.queued.take(chat.queued.indexOf(upto) + 1)
+        val turns = if (upto === ALL) chat.queued.filter { it.failed == null && it.hosted == 0 } // (one its host said no
+            // to: by ↑ only; one its host has: sent by it)
+            else chat.queued.take(chat.queued.indexOf(upto) + 1)
+        if (turns.isEmpty()) return
+        if (Mesh.conn(chat.hostId)?.state != "up") { // (kept, to go once its host's back: resend)
+            for (q in turns) chat.queued[chat.queued.indexOf(q)] = Queued(q.text, q.files, q.uuid ?: java.util.UUID.randomUUID().toString(),
+                offline = true, tried = q.tried)
+            return
+        }
+        Mesh.queueDrop(chat, turns)
         chat.queued.removeAll(turns.toSet())
+        if (turns.any { it.tried }) { // (one its host may have taken: each by its own uuid, so it's taken once)
+            for (q in turns) chat.send(q.text, q.files, q.uuid, if (q === turns.last()) taken else null)
+            return
+        }
         val text = turns.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         val files = turns.flatMap { it.files }
-        if (Mesh.conn(chat.hostId)?.state == "up") chat.send(text, files, turns.singleOrNull()?.uuid)
-        else {
-            chat.edit.value = text
-            chat.files.addAll(0, files)
-        }
+        chat.send(text, files, turns.singleOrNull()?.uuid, taken)
     }
 
-    /** ↑ on a queued message: it and those before it sent together, now, or once the interrupted turn has ended. */
-    fun sendNow(chat: Chat, q: Queued, working: Boolean) {
-        if (working) {
-            val now = chat.queueUpto
-            if (now == null || chat.queued.indexOf(q) > chat.queued.indexOf(now)) chat.queueUpto = q
-            interrupt(chat)
-        } else {
-            chat.queueUpto = q
-            flush(chat)
-        }
+    /** ↑ on a queued message: it and those before it sent together, now: to the turn going on, which takes it in and
+     * goes on (as Baude's send_at_turn), or as a turn of its own. Claude Code's commands and subagents running in the
+     * foreground are moved to the background once it's given it (background_tasks), where they go on, so the turn
+     * takes it in now. */
+    fun sendNow(chat: Chat, q: Queued) {
+        chat.queueUpto = q
+        val claude = isWorking(chat) && program(Mesh.session(chat.hostId, chat.sid)?.model) == "claude"
+        flush(chat, if (claude) ({ moveForeground(chat) }) else null)
+    }
+
+    /** A queued message taken out (✕, or its revert): out of its host's queue too, if it has it. */
+    fun drop(chat: Chat, q: Queued) {
+        Mesh.queueDrop(chat, listOf(q))
+        chat.queued.remove(q)
     }
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -103,8 +143,9 @@ object Queue {
         }
         val o = JSONObject().put("key", key).put("text", d.text).put("files", filesJson(d.files))
             .put("queued", org.json.JSONArray(d.queue.map { q -> JSONObject().put("text", q.text)
-                .put("files", filesJson(q.files)).apply { q.uuid?.let { put("uuid", it) } } }))
-            .put("hold", d.hold).apply { d.upto?.let { put("upto", it) } }
+                .put("files", filesJson(q.files)).put("offline", q.offline).put("tried", q.tried)
+                .apply { q.uuid?.let { put("uuid", it) }; q.failed?.let { put("failed", it) } } }))
+            .put("hold", d.hold).put("dirty", d.dirty).put("epoch", d.epoch).put("base", d.base).apply { d.upto?.let { put("upto", it) } }
         File(dir, f.name + ".new").apply { writeText(o.toString()) }.renameTo(f)
     }
 
@@ -117,9 +158,11 @@ object Queue {
                 val o = JSONObject(f.readText())
                 val queued = o.optJSONArray("queued")
                 val queue = (0 until (queued?.length() ?: 0)).map { queued!!.getJSONObject(it).let { q ->
-                    Queued(q.optString("text"), filesOf(q.optJSONArray("files")), q.optString("uuid").ifBlank { null }) } }
+                    Queued(q.optString("text"), filesOf(q.optJSONArray("files")), q.optString("uuid").ifBlank { null },
+                        q.optBoolean("offline"), q.optBoolean("tried"), q.optString("failed").ifBlank { null }) } }
                 Mesh.drafts[o.getString("key")] = Mesh.Draft(o.optString("text"), filesOf(o.optJSONArray("files")), queue,
-                    if (o.has("upto")) o.optInt("upto") else null, o.optBoolean("hold"))
+                    if (o.has("upto")) o.optInt("upto") else null, o.optBoolean("hold"), o.optBoolean("dirty"),
+                    o.optLong("epoch"), o.optString("base"))
             } catch (_: Exception) {
             }
         }
@@ -144,45 +187,75 @@ object Queue {
         val key = "$hostId/$sid"
         val was = Mesh.drafts[key]
         setDraft(key, Mesh.Draft(joined(was?.text.orEmpty(), text), was?.files.orEmpty() + files, was?.queue.orEmpty(),
-            was?.upto, was?.hold == true))
+            was?.upto, was?.hold == true, dirty = text.isNotBlank() || was?.dirty == true, epoch = was?.epoch ?: 0L,
+            base = was?.base.orEmpty()))
     }
 
     /** A chat's draft as it stands: what's written and its files, and its queue: the one ↑ was pressed on (its place)
      * and whether its turn was stopped (hold: its end sends nothing). */
     private fun draftOf(chat: Chat): Mesh.Draft {
         val text = listOf(chat.draft.value.orEmpty(), chat.typed).filter { it.isNotBlank() }.joinToString("\n\n")
-        return Mesh.Draft(text, chat.files.toList(), chat.queued.toList(),
-            chat.queued.indexOf(chat.queueUpto).takeIf { it >= 0 }, chat.stopAsked && chat.queued.isNotEmpty())
+        val going = chat.sent.filter { it.kept && !it.accepted } // (sent, its host's answer not come: sent again by its
+            .map { Queued(it.text, it.files, it.id, offline = true, tried = true) } // uuid if the app's ended first)
+        val mine = chat.queued.filter { it.hosted == 0 } // (its host's kept there)
+        val upto = mine.indexOf(chat.queueUpto).takeIf { it >= 0 }?.let { it + going.size }
+        return Mesh.Draft(text, chat.files.toList(), going + mine, upto, chat.stopAsked && mine.isNotEmpty(),
+            chat.draftDirty, chat.draftTypedIn, chat.draftBase)
+    }
+
+    /** A message its host took (its uuid): out of its chat's queue, the open chat's or its draft's. */
+    fun taken(chat: Chat, uuid: String) = taken(chat.hostId, chat.sid, uuid)
+
+    fun taken(hostId: String, sid: String, uuid: String) = change(hostId, sid, uuid) { null }
+
+    /** A queued message its host said no to (why), sent by itself (Mesh.sendQueued): kept in its queue as not sent,
+     * not sent again till you say (↑). */
+    fun refused(hostId: String, sid: String, uuid: String, why: String) = change(hostId, sid, uuid) { q ->
+        Queued(q.text, q.files, q.uuid, q.offline, q.tried, failed = why)
+    }
+
+    /** The queued message by uuid in a chat's queue (the open chat's, or its draft's) changed to what to says, or
+     * taken out (null). */
+    private fun change(hostId: String, sid: String, uuid: String, to: (Queued) -> Queued?) {
+        val chat = Mesh.open?.takeIf { it.hostId == hostId && it.sid == sid && it.sender == null }
+        if (chat != null) {
+            val i = chat.queued.indexOfFirst { it.uuid == uuid }
+            val now = if (i >= 0) to(chat.queued[i]) else null
+            if (now != null) chat.queued[i] = now else if (i >= 0) chat.queued.removeAt(i)
+            save(chat)
+            return
+        }
+        val key = "$hostId/$sid"
+        val d = Mesh.drafts[key] ?: return
+        val i = d.queue.indexOfFirst { it.uuid == uuid }
+        if (i < 0) return
+        val now = to(d.queue[i])
+        val queue = d.queue.toMutableList().apply { if (now == null) removeAt(i) else set(i, now) }
+        val upto = d.upto?.let { if (now == null && i <= it) it - 1 else it }?.takeIf { it >= 0 }
+        setDraft(key, Mesh.Draft(d.text, d.files, queue, upto, d.hold && queue.isNotEmpty(), d.dirty, d.epoch, d.base))
     }
 
     /** (a host's sessions listed) A chat not open that was left with a queue (its draft's), whose turn that host lists
      * over now, where it was at one before: what's queued sent to it, as the open chat's is as its turn ends (flush):
      * all of it, or up to the one ↑ was pressed on. */
     fun sendLeft(hostId: String, before: List<Msg.Session>?, now: List<Msg.Session>) {
-        if (before == null) return
-        fun working(sid: String, l: List<Msg.Session>) = l.firstOrNull { it.id == sid }?.state.let { it == "working" || it == "waiting" }
+        fun working(sid: String, l: List<Msg.Session>?) = l?.firstOrNull { it.id == sid }?.state.let { it == "working" || it == "waiting" }
         for ((key, d) in Mesh.drafts.toList()) {
             val sid = key.substringAfterLast('/')
             if (d.queue.isEmpty() || key != "$hostId/$sid" || Mesh.open?.let { it.hostId == hostId && it.sid == sid } == true) continue
-            if (!working(sid, before) || working(sid, now)) continue
-            val turns = if (d.upto != null) d.queue.take(d.upto + 1) else d.queue
-            setDraft(key, Mesh.Draft(d.text, d.files, d.queue.drop(turns.size)))
-            Mesh.sendQueued(hostId, sid, turns.singleOrNull() ?: Queued(turns.map { it.text }.filter { it.isNotBlank() }
-                .joinToString("\n\n"), turns.flatMap { it.files }))
+            if (working(sid, now) || d.queue.any { it.uuid in Mesh.flying }) continue // (or being sent: its answer waited for)
+            val ended = before != null && working(sid, before)
+            if (!ended && (d.hold || d.queue.none { it.offline && it.failed == null })) continue // (its turn's ended; or
+            // it was written while its host wasn't reached, and it's back)
+            val turns = (if (d.upto != null) d.queue.take(d.upto + 1) else d.queue).takeWhile { it.failed == null }
+            if (turns.isEmpty()) continue // (one its host said no to first: it waits for you)
+            fun tried(q: Queued) = Queued(q.text, q.files, q.uuid ?: java.util.UUID.randomUUID().toString(), offline = true, tried = true)
+            val going = if (turns.any { it.offline || it.tried }) turns.map(::tried) // (each by its own uuid: taken once,
+                else listOf(tried(turns.singleOrNull() ?: Queued(turns.map { it.text }.filter { it.isNotBlank() } // if it
+                    .joinToString("\n\n"), turns.flatMap { it.files })))                                      // was before)
+            setDraft(key, Mesh.Draft(d.text, d.files, going + d.queue.drop(turns.size), dirty = d.dirty, epoch = d.epoch, base = d.base)) // (kept till its host takes it:
+            going.forEach { Mesh.sendQueued(hostId, sid, it) }                            // Queue.taken)
         }
-    }
-
-    /** A queued message its host didn't take (Mesh.sendQueued) back at the front of its chat's queue: the open chat's,
-     * or its draft's. */
-    fun putBack(hostId: String, sid: String, q: Queued) {
-        val chat = Mesh.open?.takeIf { it.hostId == hostId && it.sid == sid && it.sender == null }
-        if (chat != null) {
-            chat.queued.add(0, q)
-            return
-        }
-        val key = "$hostId/$sid"
-        val was = Mesh.drafts[key]
-        setDraft(key, Mesh.Draft(was?.text.orEmpty(), was?.files.orEmpty(), listOf(q) + was?.queue.orEmpty()))
     }
 
     /** The open chat's draft kept on disk, as it changes. */
@@ -200,7 +273,8 @@ object Queue {
         val keys = listOfNotNull("$hostId/$sid", machine?.let { "mesh:$it/$sid" })
         return keys.mapNotNull { Mesh.drafts.remove(it) }.reduceOrNull { a, b ->
             Mesh.Draft(joined(a.text, b.text), a.files + b.files, a.queue + b.queue, b.upto?.let { a.queue.size + it } ?: a.upto,
-                if (b.queue.isEmpty()) a.hold else b.hold) }
+                if (b.queue.isEmpty()) a.hold else b.hold, a.dirty || b.dirty, if (b.dirty && !a.dirty) b.epoch else a.epoch,
+                if (b.dirty && !a.dirty) b.base else a.base) }
     }
 
     /** (the app started, before any chat opens) What the old unsent folder kept put into each message's chat's draft,
@@ -226,7 +300,8 @@ object Queue {
                 val key = hostOf(o.optString("machine").ifBlank { null }, o.optString("host")) + "/" + o.optString("session")
                 val was = Mesh.drafts[key]
                 val now = Mesh.Draft(joined(was?.text.orEmpty(), o.optString("text")), was?.files.orEmpty() + files,
-                    was?.queue.orEmpty(), was?.upto, was?.hold == true)
+                    was?.queue.orEmpty(), was?.upto, was?.hold == true, dirty = true, epoch = was?.epoch ?: 0L,
+                    base = was?.base.orEmpty())
                 write(key, now)
                 Mesh.drafts[key] = now
                 d.deleteRecursively()
@@ -240,7 +315,7 @@ object Queue {
 /** A round flat button on a turn (a queued or held message's): its content, its label for what it does. */
 @Composable
 fun TurnButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onClick).semantics(mergeDescendants = true) {
+    Box(Modifier.size(24.dp).clip(CircleShape).clickable(onClick = onClick.tapping(label)).semantics(mergeDescendants = true) {
         contentDescription = label
     }, contentAlignment = Alignment.Center) { content() }
 }
@@ -263,28 +338,34 @@ private fun Revealed(shown: Boolean, modifier: Modifier, buttons: @Composable ()
 
 /** A message queued under the chat while a turn ran, as Baude's queued turn is: grey, right-aligned, its buttons
  * (✕ drops it, ↑ sends it now, revert puts it in the box) level with its last line, shown by a tap (or a long press)
- * and hidden by another tap. */
+ * and hidden by another tap. While its host isn't reached, a cloud beside it: it goes once it's back. One its host said
+ * no to, sent by itself: a warning beside it, saying why; it goes again only by ↑. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
+fun QueuedRow(chat: Chat, q: Queued) {
     val c = LocalBaude.current
     var shown by remember { mutableStateOf(false) }
     val level = rememberLastLine()
+    Mesh.tick.value
+    val waiting = Mesh.conn(chat.hostId)?.state != "up" || q.failed != null
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
         .combinedClickable(onClick = { shown = !shown }, onLongClick = { shown = true }),
         horizontalArrangement = Arrangement.End) {
+        if (waiting && !shown) Icon(if (q.failed != null) Adwaita.DialogWarning else Adwaita.WeatherOvercast,
+            q.failed?.let { Wording.HeldSend.notSent(why = it) } ?: Wording.Hosts.waitsFor(host = Mesh.label(chat.hostId)),
+            tint = if (q.failed != null) c.warning else c.dim, modifier = Modifier.alignBy(level.buttons).padding(end = 6.dp).size(14.dp.icon))
         Revealed(shown, Modifier.alignBy(level.buttons)) {
-            TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
+            TurnButton(Wording.ChatTurns.queuedDelete, { Queue.drop(chat, q) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
-            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q, working) }) { UpArrow() }
+            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q) }) { UpArrow() }
             TurnButton(Wording.ChatTurns.queuedEdit, {
-                chat.queued.remove(q)
+                Queue.drop(chat, q)
                 chat.edit.value = q.text
                 chat.files.addAll(0, q.files)
             }) { Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(12.dp.icon)) }
         }
-        Column(Modifier.alignBy(level.bubble).weight(1f, fill = false).padding(start = if (shown) 0.dp else 48.dp)
+        Column(Modifier.alignBy(level.bubble).weight(1f, fill = false).padding(start = if (shown) 0.dp else if (waiting) 26.dp else 48.dp)
             .clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.quiet)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             for (f in q.files) Text(when {
@@ -326,12 +407,14 @@ fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     }
 }
 
-/** A held message's ↑: refused, and why, as a toast, while a turn runs or its host isn't there. */
+/** A held message's ↑: refused, and why, as a toast, while a turn runs, its host isn't there or its subscription's
+ * disabled. */
 private fun heldSend(ctx: Context, chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val why = when {
         working -> Wording.HeldSend.afterTurn
         Mesh.conn(chat.hostId) == null -> Wording.HeldSend.whileNoHost
         Mesh.conn(chat.hostId)?.state != "up" -> Wording.HeldSend.whileDown
+        subscriptionOff(chat) -> Wording.HeldSend.whileDisabled
         else -> null
     }
     if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show() else Mesh.held(chat, h.id.orEmpty(), true)

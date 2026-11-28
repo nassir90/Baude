@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A decision asked of one of the host's deciders, or a member's through it (baudetask.decide): the state, and each question about it by name. Answered with decided once it's asked. A task's script asks on its host's own socket with its run's token; a member, as its access rules let it use the host's providers.",
+  "properties": {
+    "op": {
+      "const": "decide",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "decider": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Which (a Decider's value: one of this host's by its id or name, another member's as <member>/<its id or name>); none: this host's first."
+    },
+    "state": {
+      "type": [
+        "string",
+        "object",
+        "array"
+      ],
+      "description": "Text, or structured data the decider renders as it does text."
+    },
+    "questions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "DecideQuestion.json"
+      },
+      "description": "The questions, by name."
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Base64 images, part of the state."
+    },
+    "run": {
+      "type": "string",
+      "description": "A task's script's run (BAUDE_TASK_RUN)."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    }
+  },
+  "required": [
+    "op",
+    "questions"
+  ],
+  "additionalProperties": false
+}

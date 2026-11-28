@@ -242,8 +242,20 @@ abstract class Parity(private val theme: String, private val scene: String) {
             val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
             return at.firstOrNull { it.exists() } ?: at.last()
         }
-        if (op == "kube" || op == "databases") return hostAnswer(msg)
+        if (op == "kube" || op == "databases" || op == "docker") return hostAnswer(msg)
         when (op) {
+            "accounts" -> { // (the host's Claude subscriptions: Work the current one, its usage, as hostaccounts says them)
+                val now = System.currentTimeMillis() / 1000
+                fun limits(five: Int, week: Int) = JSONArray(listOf(
+                    JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five).put("resets", now + 2 * 3600),
+                    JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", week).put("resets", now + 3 * 86400)))
+                return reply("what" to msg.optString("what"),
+                    "accounts" to JSONArray(listOf(JSONObject().put("id", "w1").put("provider", "claude").put("name", "Work")
+                        .put("kind", "folder"))),
+                    "defaults" to JSONObject().put("claude", "w1").put("codex", ""), "claude_cli" to true,
+                    "last_usage" to JSONObject().put("w1", JSONObject().put("usage", limits(38, 61)).put("read", now - 600)),
+                    "usage" to if (msg.optString("what") == "usage") limits(42, 63) else null)
+            }
             "transcript" -> {
                 val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
                 val part = shown.copyOfRange(from, shown.size)
@@ -322,6 +334,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         HomePrefs.made.clear()
         HomePrefs.chatGroups.clear()
         HomePrefs.groups.clear()
+        HomePrefs.noGroups.value = false
         dev.baude.android.Find.open.clear()
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
@@ -509,12 +522,55 @@ abstract class Parity(private val theme: String, private val scene: String) {
             name == "changelog" -> show { ChangelogScreen(null, {}) }
             name == "databases" -> show { DatabaseScreen(host.getString("id"), {}) }
             name == "kubernetes" -> {
-                show { KubeScreen(host.getString("id"), {}) }
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
             }
-            name == "kubernetes-shell" -> {
+            name == "kubernetes-column-filter" -> {
+                dev.baude.android.Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit()
+                    .putString("kube_hidden", """{"pods": {"Status": ["Failed", "Succeeded"]}}""").commit()
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
+                tap("CPU")
+                tap("CPU")
+                repeat(5) { if (find("CPU") == null) flush(true) }
+                sideways(2500f) // (the table scrolled to its end: Status in sight)
+            }
+            name == "docker-column-filter" -> {
+                dev.baude.android.Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit()
+                    .putString("docker_hidden", """{"containers": {"Status": ["Exited"]}}""").commit()
+                show { dev.baude.android.DockerScreen(host.getString("id"), {}) }
+                repeat(10) { if (find("CPU") == null && find("Status") == null) flush(true) }
+                tapDescribed(Wording.Browser.back)
+                tap("All")
+                repeat(10) { flush(true) }
+                sideways(400f) // (Status in sight)
+            }
+            name == "kubernetes-home" -> {
                 show { KubeScreen(host.getString("id"), {}) }
+                repeat(10) { if (find("shop") == null) flush(true) } // (contexts, connect, then the summary: a host.py each)
+            }
+            name == "kubernetes-home-prod" -> {
+                show { KubeScreen(host.getString("id"), {}, context = "prod") }
+                repeat(10) { if (find("shop") == null) flush(true) }
+            }
+            name == "kubernetes-home-crowded" -> { // (scrolled to its tables' end: the Other rows)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
+                    n.config.contains(SemanticsProperties.VerticalScrollAxisRange) && n.config.contains(SemanticsActions.ScrollBy)
+                }.forEach { n -> repeat(4) { n.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f); settle() } }
+                flush(true)
+            }
+            name == "kubernetes-home-hover" -> { // (a long press on the memory history, then dragged to four fifths across)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                // (the memory card's history, where the crowded scene draws it: its semantics report no size here)
+                val v = activity.window.decorView
+                touch(v.width * 0.66f, v.height * 0.636f, v.width * 0.74f, lift = false, holdMs = 800)
+                flush(true)
+            }
+            name == "kubernetes-shell" -> {
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
                 tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
@@ -523,12 +579,36 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 flush(true)
             }
             name == "kubernetes-dock" -> {
-                show { KubeScreen(host.getString("id"), {}) }
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
                 tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
                 tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
                 dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
+                flush(true)
+            }
+            name == "kubernetes-contexts" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                // (a tool's test clusters added to the kubeconfig, as the host's kube_contexts says them)
+                val extra = listOf("staging") + (1..18).map { "slice-$it" } + listOf(412, 418, 431, 455).map { "pr-$it-preview" } +
+                    listOf("kind-ci")
+                st.contextsIn(st.contexts + extra.map { Msg.KubeContext(name = it, server = "https://k3d-dev.local:6443") })
+                st.level = "contexts"
+                flush(true)
+            }
+            name == "kubernetes-removed" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
+                tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
+                dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ".toByteArray())
+                // (k3d-dev deleted from the kubeconfig by a tool, as the host's kube_contexts says it)
+                st.contextsIn(st.contexts.filter { it.name != "k3d-dev" })
                 flush(true)
             }
             name == "terminal" -> {
@@ -669,6 +749,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     /** The chat's list (the one that scrolls up and down, with items) scrolled to its end. */
+    /** The first sideways-scrolling thing (a table's columns) scrolled by px. */
+    private fun sideways(px: Float) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsProperties.HorizontalScrollAxisRange) && n.config.contains(SemanticsActions.ScrollBy)
+        } ?: return
+        node.config[SemanticsActions.ScrollBy].action?.invoke(px, 0f)
+        settle()
+    }
+
     private fun toEnd() {
         val list = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             val c = n.config
@@ -782,7 +871,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     /** A finger put down at (x, y) and moved across to toX in steps a frame apart, then lifted (or held there). */
-    private fun touch(x: Float, y: Float, toX: Float, lift: Boolean = true) {
+    private fun touch(x: Float, y: Float, toX: Float, lift: Boolean = true, holdMs: Long = 0) {
         val v = activity.window.decorView
         val down = android.os.SystemClock.uptimeMillis()
         fun send(action: Int, at: Float) {
@@ -793,6 +882,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
         }
         send(android.view.MotionEvent.ACTION_DOWN, x)
+        repeat((holdMs / 16).toInt()) { // (held still: a long press)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        }
         val steps = 12
         if (toX != x) for (i in 1..steps) send(android.view.MotionEvent.ACTION_MOVE, x + (toX - x) * i / steps)
         if (lift) send(android.view.MotionEvent.ACTION_UP, toX)
@@ -956,9 +1048,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 c.shown = dev.baude.android.ShownKey("ssh-ed25519", ByteArray(51) { (it * 7 + 3).toByte() })
                 show { Home(open = { _, _ -> }, feedback = {}); dev.baude.android.HostKeyAsk() }
             }
-            "pop-routine-form", "pop-routine-when" -> show {
-                dev.baude.android.RoutinesPage(h, first.getString("id"), true)
-            }
+            "pop-task-change" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.page()) }
+            "pop-task-trigger" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.page()) }
+            "pop-task-run" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.list()) }
             else -> error("no custom scene $name")
         }
     }

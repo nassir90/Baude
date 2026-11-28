@@ -19,6 +19,8 @@ const val PING_MS = WireConstants.PING_S * 1000L     // (each end says something
 const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the other end's taken for gone)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
 const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
+const val CHECK_MS = PING_MS + 2_000L // (after the phone's slept: this long for a link to be heard from, or it's taken for gone)
+const val LEEWAY_MS = 30_000L // (a host not reached this long, the app on screen: said plainly; till then, only that it's reconnecting)
 /** msg as it goes, as wire.py's Channel.send has it: its nulls left out where its fields can't be null
  * (WireCheck.unnulled). One the wire's schema hasn't (an op, a field: WireCheck.problem) is said in the log and not
  * sent (null); a host's answer (answer true) goes as its request's INVALID refusal instead, if it has a req. */
@@ -108,6 +110,28 @@ sealed class Place {
     }
 }
 
+/** The channel a connection talks to its host process on: ssh's (ExecPipe), or a test's. */
+interface Pipe {
+    val input: java.io.InputStream
+    val output: OutputStream
+    val errors: java.io.InputStream
+    val closed: Boolean
+    val exit: Int // (its command's exit status, once it's closed: -1 till then)
+    fun connect(ms: Int)
+    fun disconnect()
+}
+
+/** An ssh channel running CONNECT, as a Pipe. */
+class ExecPipe(private val ch: ChannelExec) : Pipe {
+    override val input: java.io.InputStream = ch.inputStream
+    override val output: OutputStream = ch.outputStream
+    override val errors: java.io.InputStream = ch.errStream
+    override val closed get() = ch.isClosed
+    override val exit get() = ch.exitStatus
+    override fun connect(ms: Int) = ch.connect(ms)
+    override fun disconnect() = ch.disconnect()
+}
+
 /** What ssh runs on a host for its host process: the command Baude installs on every machine, then connect. */
 const val CONNECT = "${WireConstants.HOST_COMMAND} connect"
 
@@ -158,7 +182,14 @@ open class Connection(
         end()
     }
 
+    /** (SystemClock.elapsedRealtime) Since when it's been without its host: since it first went (tries that fail
+     * meanwhile, and the network coming and going, don't count it again), or since the app was last brought back
+     * (resume, fresh) if that's later; 0 while it's up. */
+    @Volatile var awaySince = SystemClock.elapsedRealtime()
+        private set
+
     private fun set(state: String, why: String? = null) {
+        if (state == "up") awaySince = 0L else if (awaySince == 0L) awaySince = SystemClock.elapsedRealtime()
         this.state = state
         this.why = why
         changed(this)
@@ -171,7 +202,7 @@ open class Connection(
             var reached = false
             try {
                 reached = run()
-                if (!stopped) set("down", said.ifBlank { if (reached) "the host went" else "the host's Baude didn't start" })
+                if (!stopped) set("down", said.ifBlank { if (reached) "the host went" else "the link closed before the host answered" })
             } catch (e: Exception) {
                 if (stopped) break
                 val repo = lastRepo
@@ -209,6 +240,16 @@ open class Connection(
         if (state == "down") wake.offer(Unit)
     }
 
+    /** The app brought back (fresh), or the network given back after Doze: down, tried again now; up, given CHECK_MS
+     * to be heard from (its silence while the phone slept isn't held against it, and a socket the OS closed meanwhile
+     * is found out in seconds, not SILENT_MS). The app brought back: the time it's been away counted from now. */
+    fun resume(fresh: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (state == "up") heardAt = maxOf(heardAt, now - SILENT_MS + CHECK_MS)
+        else if (fresh) awaySince = now
+        kick()
+    }
+
     private class NoRoute(why: String) : Exception(why)
 
     /** Another CONNECT on this host's ssh, for a member reached through it (null if it isn't up). */
@@ -220,7 +261,7 @@ open class Connection(
 
     /** The channel to the host process: ssh to a host you added, or one on the ssh of the host a member's reached
      * through. */
-    private fun open(): ChannelExec = when (val p = place) {
+    protected open fun open(): Pipe = when (val p = place) {
         is Place.Direct -> {
             val jsch = JSch()
             signError = null
@@ -239,7 +280,7 @@ open class Connection(
             session = s
             end = { s.disconnect() }
             s.connect(15_000)
-            (s.openChannel("exec") as ChannelExec).apply { setCommand(CONNECT) }
+            ExecPipe((s.openChannel("exec") as ChannelExec).apply { setCommand(CONNECT) })
         }
         is Place.Phone -> throw NoRoute("this phone's own host isn't reached over ssh")
         is Place.Member -> {
@@ -251,7 +292,7 @@ open class Connection(
                 null
             } ?: throw NoRoute("${v.host?.label ?: "its host"} went")
             end = { ch.disconnect() }
-            ch
+            ExecPipe(ch)
         }
     }
 
@@ -260,13 +301,15 @@ open class Connection(
         set("connecting")
         said = ""
         val ch = open()
-        val input = object : java.io.FilterInputStream(ch.inputStream) { // (every byte heard: a long line coming
+        val opened = end
+        end = { opened(); ch.disconnect() }
+        val input = object : java.io.FilterInputStream(ch.input) { // (every byte heard: a long line coming
             override fun read(): Int = super.read().also { heardAt = SystemClock.elapsedRealtime() } // slowly isn't
             override fun read(b: ByteArray, off: Int, len: Int): Int =                                // silence)
                 super.read(b, off, len).also { heardAt = SystemClock.elapsedRealtime() }
         }
-        val stream = ch.outputStream
-        val errors = ch.errStream
+        val stream = ch.output
+        val errors = ch.errors
         ch.connect(15_000)
         val stderr = thread(name = "stderr-$id", isDaemon = true) {
             try {
@@ -324,10 +367,17 @@ open class Connection(
             if (member != null) OPEN_MS else 0L              // a member's tunnel, the time it has to open)
         val pinger = thread(name = "ping-$id", isDaemon = true) {
             try {
+                var pinged = SystemClock.elapsedRealtime()
                 while (!stopped && out != null) {
-                    Thread.sleep(PING_MS)
-                    send(Msg.Ping().json())
-                    if (SystemClock.elapsedRealtime() - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
+                    val before = SystemClock.elapsedRealtime()
+                    Thread.sleep(1_000)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - before > 4_000) heardAt = maxOf(heardAt, now - SILENT_MS + CHECK_MS) // (the phone slept:
+                    if (now - pinged >= PING_MS) {                                                  // a moment to hear)
+                        send(Msg.Ping().json())
+                        pinged = now
+                    }
+                    if (now - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
                         said = "the host stopped answering"                   // the socket says)
                         end()
                         break
@@ -358,10 +408,10 @@ open class Connection(
             writes = null
             queue.put(ByteArray(0))
             writer.join(1_000)
-            for (i in 0 until 10) if (!ch.isClosed) Thread.sleep(50) // (its exit status comes after its end: a moment)
+            for (i in 0 until 10) if (!ch.closed) Thread.sleep(50) // (its exit status comes after its end: a moment)
             stderr.join(500)
-            if (said.isBlank() && ch.exitStatus > 0) said = "the host's command ended (status ${ch.exitStatus})"
-            if (place is Place.Direct && (ch.exitStatus == 127 || "No such file or directory" in said || "not found" in said))
+            if (said.isBlank() && ch.exit > 0) said = "the host's command ended (status ${ch.exit})"
+            if (place is Place.Direct && (ch.exit == 127 || "No such file or directory" in said || "not found" in said))
                 said = Wording.Hosts.noCommands(host = host?.label ?: id)
         }
         return reached

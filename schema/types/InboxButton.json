@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of an ask's buttons, as its task gives it: pressing it tells the task, with the form's values. Sized to its label, wrapping with the others as a whole.",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "What it says."
+    },
+    "style": {
+      "enum": [
+        "primary",
+        "secondary",
+        "blue",
+        "teal",
+        "green",
+        "yellow",
+        "orange",
+        "red",
+        "pink",
+        "purple",
+        "slate"
+      ],
+      "description": "How it's drawn: primary (the accent), secondary (plain, the default), or one of the accent palette's colours (schema/tokens accent.*)."
+    },
+    "picture": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "One of the ask's pictures, by its name, drawn over its label: a picture button."
+    }
+  },
+  "required": [
+    "label"
+  ],
+  "additionalProperties": false
+}

@@ -132,13 +132,19 @@ def objc_send(obj, sel, *args, types=(), ret=None):
         rt.objc_getClass.argtypes = rt.sel_registerName.argtypes = [ctypes.c_char_p]
     if isinstance(obj, bytes):
         obj = rt.objc_getClass(obj)
-    f = ctypes.CFUNCTYPE(ret or ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, *types)(
-        ctypes.cast(rt.objc_msgSend, ctypes.c_void_p).value)
+    key = (ret, types)  # (each kind of call's function made once)
+    if (f := _SENDS.get(key)) is None:
+        f = _SENDS[key] = ctypes.CFUNCTYPE(ret or ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, *types)(
+            ctypes.cast(rt.objc_msgSend, ctypes.c_void_p).value)
     return f(obj, rt.sel_registerName(sel), *args)
 
 
+_SENDS = {}
+
+
 DOCK_PX = 512  # (the Dock's tile at its largest, magnified: 256 points, 512 px on a Retina screen. Each tile set (the
-# accent changed) holds on to memory in AppKit, none of it given back: 8.7 MB each from 1024 px, 2.6 MB from 512)
+# accent changed) leaves CoreGraphics a decoded copy of it, 2.6 MB from 512 px (8.7 MB from 1024), the last 16 kept:
+# in malloc's purgeable zone, which the system takes back as it needs and doesn't count in the footprint)
 
 
 def dock_image(png):
@@ -166,12 +172,14 @@ def ns_string(text):
 
 
 def _rect():
+    if (cls := getattr(_rect, "cls", None)) is not None:  # (made once: a class made each time costs, every frame)
+        return cls
     import ctypes
 
     class Rect(ctypes.Structure):  # (NSRect: its origin, then its size, in points)
         _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double), ("w", ctypes.c_double), ("h", ctypes.c_double)]
-    _rect.cls = getattr(_rect, "cls", None) or Rect
-    return _rect.cls
+    _rect.cls = Rect
+    return Rect
 
 
 def native_window(window):
@@ -285,3 +293,33 @@ def give_front_to(pid):
     if objc_send(nsapp, b"respondsToSelector:", yield_sel, types=(ctypes.c_void_p,), ret=ctypes.c_bool):
         objc_send(nsapp, b"yieldActivationToApplication:", other, types=(ctypes.c_void_p,))
     return bool(objc_send(other, b"activateWithOptions:", 0, types=(ctypes.c_ulong,), ret=ctypes.c_bool))
+
+
+def presence():
+    """Someone at this Mac, as macOS says it: (seconds since the last input, from any device; whether the screen's
+    locked; whether the main display's asleep), or None if it can't be read."""
+    import ctypes
+    try:
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cg.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
+        cg.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
+        idle = cg.CGEventSourceSecondsSinceLastEventType(0, 0xFFFFFFFF)  # (the session's, any input: kCGAnyInputEventType)
+        cg.CGMainDisplayID.restype = ctypes.c_uint32
+        cg.CGDisplayIsAsleep.restype, cg.CGDisplayIsAsleep.argtypes = ctypes.c_bool, [ctypes.c_uint32]
+        asleep = cg.CGDisplayIsAsleep(cg.CGMainDisplayID())
+        cg.CGSessionCopyCurrentDictionary.restype = ctypes.c_void_p
+        session = cg.CGSessionCopyCurrentDictionary()
+        locked = False
+        if session:
+            cf.CFDictionaryGetValue.restype = ctypes.c_void_p
+            cf.CFDictionaryGetValue.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            value = cf.CFDictionaryGetValue(session, ns_string("CGSSessionScreenIsLocked"))
+            if value:
+                cf.CFBooleanGetValue.restype, cf.CFBooleanGetValue.argtypes = ctypes.c_bool, [ctypes.c_void_p]
+                locked = cf.CFBooleanGetValue(value)
+            cf.CFRelease.argtypes = [ctypes.c_void_p]
+            cf.CFRelease(session)
+        return idle, locked, asleep
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None

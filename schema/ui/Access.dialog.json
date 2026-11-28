@@ -1,0 +1,256 @@
+{
+  "description": "The Settings dialog's Access page (Baude's, Record's and the phone's; on the phone the fifth page of Settings, switched to by the bar at its foot): for the host picked beside New session, who in the mesh may use each of its capabilities, read and write apart where a capability has both, as it answers access. The host enforces each rule on the wire ops the capability uses (baudelib/access.py, PhoneAccess.kt): a member it refuses is answered access_denied, and a head on the host's own machine, or over ssh, is never refused. Who's asking comes from the signed open of the member's tunnel (mesh.py), or, for a chat's own tools, the member that started the chat.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "Settings… → Access (the dialog's page switcher; the phone's: the bar at Settings' foot)"
+  ],
+  "code": [
+    "accessview.py:Page",
+    "baudelib/access.py:Access",
+    "Access.kt:PillFlow",
+    "Access.kt:ToField",
+    "accessview.py:Pills",
+    "accessview.py:RuleField",
+    "accessview.py:RuleRow",
+    "baudelib/serverrun.py:ServerRunning.access_op",
+    "baudelib/serverrun.py:ServerRunning.handle",
+    "Access.kt:AccessPage",
+    "Access.kt:AccessRule",
+    "PhoneAccess.kt:PhoneAccess",
+    "PhoneHost.kt:PhoneHost",
+    "accessview.py:meta_settings",
+    "meta.py:shared_settings",
+    "accessview.py:host_row",
+    "accessview.py:narrow",
+    "metatools.py:MetaTools.set_setting",
+    "baudelib/mesh.py:Mesh.opener"
+  ],
+  "copy": [
+    "access",
+    "new_session",
+    "kube",
+    "deps",
+    "window",
+    "subscriptions"
+  ],
+  "parts": [
+    {
+      "name": "Host",
+      "shows": "Row \"Host\" with the picked host's name after it (dim), as Telemetry's.",
+      "copy": [
+        "new_session.host"
+      ]
+    },
+    {
+      "name": "Capability rows",
+      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Docker, Databases, Subscriptions, Access Rules. A row is the capability's name, then its rule's field filling the rest of the row (desktop: the names in one column, Read and Write in the next, every field lined up in the third; phone: the name over its fields). A capability split into read and write (Emission Browser, Agent Management, Kubernetes, Docker, Subscriptions, Access Rules) has a line for each, \"Read\" and \"Write\" (dim), each with its field. A field is like an email's To: who the rule lets in as pills, each a member's picture (its initials) and name with ×; Everybody is one accent pill with the people icon; no pills is Nobody, said dim where typing goes. Past its room it shows the pills that fit (desktop: one line; phone: two lines, wrapped) and an \"<n> more\" pill, which opens the field out to every pill, wrapped. Typing in it (on the phone, once tapped) lists under it who may be added, Everybody first, then the members the host can name (those it reaches, has lately, or a rule names), each with its picture, but those it has, matched as typed (names starting with it first). With no other member, \"No other members\" in the list. A host without all of a capability's rules (older code) has that row hidden. A field the asking app may not change (editable false: a member Access Rules' Write refuses) is greyed with no ×.",
+      "copy": [
+        "access.browser",
+        "access.model_files",
+        "access.spawn",
+        "access.manage",
+        "window.database_schemas",
+        "access.access",
+        "kube.shell",
+        "deps.providers",
+        "window.kubernetes",
+        "subscriptions.title",
+        "access.everybody",
+        "access.nobody",
+        "access.no_members",
+        "access.read",
+        "access.write",
+        "access.n_more",
+        "common.remove"
+      ],
+      "actions": [
+        {
+          "by": "Enter (or Tab), the phone keyboard's Done, or a click on a row in the list",
+          "does": "Adds the lit (first) one and sends access_set at once (capability: the rule's name, e.g. kube_write; rule: everybody, nobody, or chosen with the members). Everybody takes the place of every member pill; a member added to Everybody takes its place (that member alone). Naming every member one by one is those members, not Everybody."
+        },
+        {
+          "by": "click ×, or Backspace with nothing typed (the last pill)",
+          "does": "Takes that pill out and sends the rule at once; the last pill out is Nobody."
+        },
+        {
+          "by": "key Up / Down, Esc",
+          "does": "Moves the lit row in the list / closes the list"
+        },
+        {
+          "by": "click \"<n> more\"",
+          "does": "Opens the field out to every pill; it closes back when the focus leaves it"
+        },
+        {
+          "by": "any change",
+          "does": "The field shows the change at once and then what the host answers. Write lets a member read too, and the host keeps the two together: whoever Write is given to is added to Read, and whoever Read loses is taken out of Write. A refusal says \"Couldn't change access: <why>\" in a toast and the field goes back to what the host has."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The owner wants to configure who may use each of a host's capabilities from the mesh: everybody, nobody, or chosen principals; shell through Multiplex, the Emission browser, providers, model files, agent spawn, managing existing agents, Kubernetes and databases (paraphrased)",
+          "rule": "Every app's Settings has an Access page after Telemetry: a row for each capability with Everybody / Nobody / Chosen Members, the members chosen by switches; the host keeps the rules and enforces them on the wire, never only in the UI",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        },
+        {
+          "said": "The UI for this should be in Settings (paraphrased)",
+          "rule": "Access rules are set in Settings → Access on every app, for the host picked beside New session",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        },
+        {
+          "said": "The Access Rules capability defaults to Nobody: only local and ssh heads change rules until members are listed (paraphrased)",
+          "rule": "Access Rules starts at Nobody; every other capability at Everybody",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
+        },
+        {
+          "said": "A rule is only as good as its weakest path; who is asking must come from the authenticated link, not a claim a member can forge (paraphrased)",
+          "rule": "Every op reaching a capability's effect is guarded by it (reading a chat's folder, git and @ names by Agent Management, Kubernetes and databases parts of @ by theirs, host-admin ops by Access Rules, subscription accounts and sign-in by Subscriptions, approving commands by Shell, Bots by Shell and Emission Browser), and members are told by their signed keys",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
+        },
+        {
+          "said": "Each capability showing two dropdowns (a mode dropdown and the expander's) is odd; Everybody / Nobody / chosen members should be read off a group-like list (paraphrased)",
+          "rule": "Every app gives an access rule one control: a button naming who may, opening a checklist with Everybody over a check per member (the Groups and Namespaces checklist); all checked is Everybody, none Nobody, some those members. No separate mode dropdown, no expander",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#238"
+            }
+          ]
+        },
+        {
+          "said": "Signing in to a subscription from another host was refused as Access Rules; access policy isn't subscription management, and the owner wants to allow managing subscriptions while still stopping another host from changing the other policies (paraphrased)",
+          "rule": "Every host has a Subscriptions capability of its own, its row before Access Rules: listing, adding, renaming, removing (signing out of) and picking subscription accounts, reading their usage, signing in and passing sign-in codes (accounts, login, login_code), and moving a chat to another subscription (with the chat's Agent Management too). Access Rules covers changing rules and the host's own admin only, never subscriptions. Subscriptions starts at Everybody, as every capability but Access Rules does, since mesh membership is trust and a member that may start chats already spends the host's subscriptions",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#240"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
+        },
+        {
+          "said": "Access policies should be split into read and write where that applies (paraphrased)",
+          "rule": "Every app shows a capability whose ops part into reading and changing as two rules, Read and Write, each Everybody, Nobody or chosen members, under the capability's name; Write lets a member read too. Split: Emission Browser (watch / drive), Agent Management (see a chat and its transcript / send, answer, stop and change it), Kubernetes (get, list, logs / delete), Subscriptions (see accounts and usage / sign in or out, add, switch), Access Rules (see the rules / change them and the host's own admin). Not split, as nothing in them reads apart from using: Shell, Providers, Model Files and Databases (read-only through the mesh), Agent Spawn. Read and Write keep the old rule's defaults: Everybody, but Access Rules' Write, Nobody; Access Rules' Read is Everybody, as reading the rules always was. A rule kept before the split becomes both sides (Access Rules': Write)",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#246"
+            }
+          ]
+        },
+        {
+          "said": "For now none of these look that nice. id say we just stick with something like email \"to \" lists where you get a nice drop-down, auto complete combined with pills-likes for added hosts and an \"N more\" suffix.",
+          "rule": "Every app shows each access rule as an email-To-style field: the members it lets in as pills with ×, a drop-down with autocomplete over the mesh's members (picture and name) as you type, and the first pills that fit then an \"<n> more\" pill that opens the field out. Everybody is a pill offered first in the drop-down that replaces the others; an empty field is Nobody, said as its placeholder. No member groups and no \"Everybody except\" for now. The fields fill the row, so the page has no empty middle.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a0907a25-207a-43de-b530-25de510ac3ea"
+            },
+            {
+              "issue": "BaudeInternal#310"
+            }
+          ]
+        },
+        {
+          "said": "The Access screen looks nasty: a massive, vacuous empty middle; there must be a better way to show these toggles (paraphrased)",
+          "rule": "An access row's control fills the row beside its name; nothing sits alone at the row's far end with empty space before it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#310"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Meta's rows",
+      "shows": "Meta has a setting for each rule (access_<rule>: access_shell, access_kube_read, access_kube_write, …), read on every host of the mesh, in its index as \"<host>: <rule>; …\" (everybody, nobody, or chosen: the members' names), looked up off the main loop. Meta may set a rule narrower itself ([<host>:] nobody, or chosen with fewer members); a wider one it shows for the user. Shown under a reply (show setting:access_<rule>), it is a row for each host titled \"<host> / <capability>\", the same row as Settings: one button, or Read and Write for a split capability, greyed where that host's Access Rules refuse this one.",
+      "copy": [
+        "access.setting"
+      ],
+      "decisions": [
+        {
+          "said": "Meta should help configure access and show UI for the altered attributes, like a row of the host and the capability with a dropdown (paraphrased)",
+          "rule": "Every app's Meta can show a host's access rule as a \"<host> / <capability>\" row with its dropdown; the rule is the user's to change there",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        },
+        {
+          "said": "Meta may narrow a rule itself; widening shows the row for the user to flip; rows for any mesh host, not only this machine's (paraphrased)",
+          "rule": "Meta narrows access rules on any host itself and shows the row for a wider one; it never widens one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
+        },
+        {
+          "said": "Access policies should be split into read and write where that applies (paraphrased)",
+          "rule": "Every app's Meta has a setting per rule, a split capability's Read and Write each one, and shows the capability's whole row (both lines) under its reply",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#246"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    "default: every rule Everybody, Read and Write alike (Subscriptions too), but Access Rules' Write, Nobody (a mesh with no rules works as before; only this machine's heads, and those over ssh, change the rules till members are chosen; every member may read them)",
+    "error: the host's error in one dim row",
+    "read-only: every button greyed (editable false)",
+    "no members: \"No other members\" in the field's list"
+  ],
+  "scenes": [
+    "40g-access",
+    "40g-access-foot",
+    "40g-access-many",
+    "40g-access-more",
+    "40g-access-open",
+    "40g-access-typing",
+    "40l-meta-access-split"
+  ]
+}

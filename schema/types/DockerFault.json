@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Why Docker can't be reached, as docker's failure says.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "What went wrong."
+    },
+    "why": {
+      "type": "string",
+      "description": "What docker said that says why."
+    },
+    "fix": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A command to run in a terminal that fixes it (Docker started), or null."
+    },
+    "said": {
+      "type": "string",
+      "description": "All docker wrote."
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "additionalProperties": false
+}

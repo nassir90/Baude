@@ -125,6 +125,14 @@ def _settings_read():
 CSS = tokens.css("""
 .update-bar button { font-weight: normal; }  /* (the text's own colour: white on a dark sidebar, as its rows are) */
 .cut-note { margin-top: 2px; }
+/* (☰'s usage row: its words the menu's, in line with its items') */
+.baude-menu-usage { font-weight: normal; padding-left: 28px; }
+.baude-menu-usage .heading { font-weight: bold; }
+/* (☰'s Kubernetes, Docker, Databases, Terminal and Browser: each a split, its name as the menu's items are, its
+   host dropdown a caret at its end) */
+.baude-family-row { min-height: 30px; }
+.baude-family-row button.baude-family-main { font-weight: normal; padding: 0 8px 0 34px; min-height: 30px; }
+.baude-family-row .baude-family-hosts > button { padding: 0 8px; min-height: 30px; }
 .cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
 /* One look for Baude and Record: the frame round the work (the bars, the lists on the left, the panels on the
    right: one colour, no lines between them), the inside where it's read and written (a box set into the frame),
@@ -172,6 +180,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .perm-card { border: 1px solid @warning_color; border-radius: {radius.card}; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
 .mono { font-family: monospace; font-size: {font.mono-scale}em; }
+.device-code { font-family: monospace; font-size: {font.device-code-scale}em; font-weight: bold; letter-spacing: 0.08em; }  /* (a device-code sign-in's one-time code: read off, typed in elsewhere) */
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
@@ -294,6 +303,12 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel { background: transparent; }
 .side-panel .boxed-list, .boxed-list.host-state, .side-panel .composer-box.side-question-ask {
   box-shadow: none; border: 1px solid @baude_rule; }
+/* a task's inputs, triggers and runs (TasksPage.listbox): as tall as a navigation list's rows (the Fixes page's,
+   Record's notebooks'), their buttons sized to fit */
+list.tasks-rows > row { min-height: 36px; padding-top: 1px; padding-bottom: 1px; }
+list.tasks-rows > row > box.header { min-height: 36px; }
+list.tasks-rows > row > box.header > box.title { margin-top: 0; margin-bottom: 0; }
+list.tasks-rows > row button { min-height: 24px; min-width: 24px; padding: 0; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */
 .side-question-full { min-width: 28px; min-height: 28px; padding: 0; }
 /* a process's row: its line where a subagent's row has its own, on the same padding (Adwaita's for a list's row); its
@@ -315,6 +330,23 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .composer-box:disabled { opacity: 0.55; }
 .ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
 .ref-pop listview { background: none; }
+/* an access rule's field, as an email's To (accessview.RuleField): an entry's fill, its pills rounded, each a picture
+   (or Everybody's icon), a name and × */
+.access-field { background-color: alpha(currentColor, 0.1); border-radius: 6px; padding: 3px 4px; min-height: 28px; }
+.access-field:focus-within { outline: 2px solid alpha(@accent_color, 0.5); outline-offset: -2px; }
+.access-field:disabled { opacity: 0.55; }
+.access-field text { padding: 0 4px; min-height: 24px; }
+.access-field text placeholder { color: alpha(currentColor, 0.55); }
+.access-pill { border-radius: 99px; background-color: alpha(currentColor, 0.1); padding: 1px 1px 1px 3px; min-height: 22px; }
+.access-pill.fixed { padding-right: 10px; }
+.access-pill.access-all { background-color: alpha(@accent_bg_color, 0.22); color: @accent_color; padding-left: 7px; }
+.access-pill button { min-width: 20px; min-height: 20px; padding: 0; }
+.access-pill button image { -gtk-icon-size: 10px; }
+button.access-more { border-radius: 99px; min-height: 22px; padding: 1px 10px; background-color: alpha(currentColor, 0.06);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15); }
+.access-pop contents { padding: 4px; }
+.access-pop list { background: none; }
+.access-pop list > row { border-radius: 6px; }
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }
@@ -403,6 +435,13 @@ columnview.kube-table > header { background: @baude_raised;
                                  box-shadow: inset 0 -1px @baude_rule; }
 columnview.kube-table > listview > row > cell { padding-top: {kube.row-pad}; padding-bottom: {kube.row-pad}; }
 .kube-row-btn, .kube-row-btn > button { padding: 0 4px; min-height: 0; min-width: 0; }
+/* a column's filter (kubeview.ColumnFilters): at its heading's right end, seen while the heading's hovered, kept (in
+   the accent) while it filters or its checks are open */
+.kube-col-filter > button { padding: 0 2px; min-height: 0; min-width: 0; margin: -2px 0; }
+.kube-col-filter { opacity: 0; }
+columnview > header > button:hover .kube-col-filter, .kube-col-filter.kube-col-filtering,
+.kube-col-filter.kube-col-open { opacity: 1; }
+.kube-col-filter.kube-col-filtering > button { color: @accent_color; }
 .kube-side-head { font-weight: bold; font-size: 0.85em; opacity: 0.7; }
 /* the side panel's page names (Subagents, Processes, Side questions, Artifacts…): libadwaita draws them bold */
 .side-panel viewswitcher button label { font-weight: normal; }
@@ -422,6 +461,23 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .kube-ok { color: @success_color; }
 .kube-warn { color: @warning_color; }
 .kube-bad { color: @error_color; }
+/* Home: a card each for CPU and memory, a bar each for requested (the accent), used (green) and limits (grey), the
+   part past what the nodes can give a segment of its own in orange, a tick where that is; its tables plain, on the
+   inside */
+.kube-home-card { border: 1px solid @baude_rule; border-radius: 10px; padding: 14px 16px; }
+.kube-bar { min-height: 10px; border-radius: 5px; background: alpha(currentColor, 0.1); }
+.kube-fill { border-radius: 5px; }
+.kube-fill.kube-joined { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.kube-requested { background: @accent_bg_color; }
+.kube-used { background: @success_color; }
+.kube-limits { background: alpha(currentColor, 0.45); }
+.kube-fill.kube-over { background: @warning_color; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.kube-tick { background: alpha(currentColor, 0.75); border-radius: 1px; }
+.kube-spark { color: @success_color; }
+.proc-spark { color: @success_color; }
+.proc-head { font-size: 0.85em; font-weight: bold; }
+.proc-sort { padding: 2px 4px; min-height: 0; margin-left: -4px; }
+.kube-home-head { font-size: 0.85em; font-weight: bold; opacity: 0.6; padding: 2px 4px; min-height: 0; }
 .schema-canvas { font-size: 0.92em; }
 .schema-rows { background: @baude_inside; }  /* (opaque: nothing of the diagram shows through) */
 .schema-status { background: alpha(@baude_inside, 0.85); border-radius: 6px; padding: 3px 8px; font-size: 0.85em; }

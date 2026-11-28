@@ -16,7 +16,7 @@ made on the phone ("This phone") run there, their models served by a machine of 
 | <img src="../docs/screenshots/android/meta-light.png" width="270" alt="Meta"><br>Meta: chats moved to a group, with undo | <img src="../docs/screenshots/android/phone-use-light.png" width="270" alt="Phone Use"><br>Phone Use: a Bot driving the phone's browser |
 | <img src="../docs/screenshots/android/this-phone-dark.png" width="270" alt="This phone"><br>This phone: its agents, and the mesh's models | |
 
-The pages along the bottom are Baude's side panel: Chat, Meta, Memory, Browser and Routines (a Bot's), then Subagents,
+The pages along the bottom are Baude's side panel: Chat, Meta, Memory, Browser and Tasks (a Bot's), then Subagents,
 Processes, Side questions, Artifacts, Files, Git and Signal.
 
 ## Building it

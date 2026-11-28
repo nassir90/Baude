@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a trigger fires, its form filled, its Bot asked when it can't decide or fails.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "runtime": {
+      "enum": [
+        "python",
+        "shell",
+        "bot"
+      ],
+      "description": "How its script's run: Python 3, /bin/sh, or given to its Bot as a turn (a prompt)."
+    },
+    "script": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its script (task's answer, and a set's; tasks' listing leaves it out)."
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its script's version: the first 12 hex of its SHA-256."
+    },
+    "form": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Its form's fields."
+    },
+    "triggers": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskTrigger.json"
+      },
+      "description": "What starts it."
+    },
+    "variables": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskVariable.json"
+      },
+      "description": "Its variables, each bound once (bindings), its script reading them (baudetask.vars)."
+    },
+    "bindings": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "$ref": "TaskBinding.json"
+      },
+      "description": "A variable's name: what it's bound to (one not here is unbound)."
+    },
+    "warnings": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A bound variable's name: why what it's bound to isn't there now (a model not served, a host out of reach, a pod gone), as the host last looked (the host's to say: not set)."
+    },
+    "notify_failure": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "A run that fails is sent to its Bot, with its log."
+    },
+    "fallback": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Notify on failure under its old name, for older heads: read when notify_failure isn't given, and sent as notify_failure is."
+    },
+    "notify_exit": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "A run that finishes, exit 0 and not stopped, is told to its Bot, with the end of its output; the Bot isn't asked to act."
+    },
+    "timeout_s": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The longest a run may take; it's stopped after."
+    },
+    "paused": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Its triggers don't fire (it can still be run by hand)."
+    },
+    "last": {
+      "anyOf": [
+        {
+          "$ref": "TaskRun.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its latest run."
+    },
+    "next": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "When a schedule of its fires next."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "runtime"
+  ],
+  "additionalProperties": false
+}

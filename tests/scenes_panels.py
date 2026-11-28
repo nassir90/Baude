@@ -182,6 +182,118 @@ def _(app):
     return win
 
 
+def offer_update(app, result=("0123456789", None), busy=False):
+    """A new version's there (or why it can't be restarted onto, or Update clicked and being checked), as a look at git
+    with nothing applied finds it: in this app's updater."""
+    u = app.app.updater
+    if u is None:
+        u = app.app.updater = baude.update.Updater("baude", app.app.idle, app.app.restart,
+                                                   blocked=app.app.update_waiting)
+    u.seen(result)
+    u.busy = busy
+    u.changed()
+
+
+def update_scene(app, result, busy=False):
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    offer_update(app, result, busy)
+    T.wait_for(lambda: win.sidebar.update_bar.get_visible(), "Update bar shown")
+    T.pump(0.3)
+    return win
+
+
+@scene("56c-update-offered", "A newer version there, Auto restart on update off: Update at the foot of the sessions list, "
+                            "restarted onto only when it's clicked")
+def _(app):
+    return update_scene(app, ("0123456789", None))
+
+
+@scene("56d-update-second-window", "A newer version offered, then a second window opened: Update at the foot of its "
+                                   "sessions list too")
+def _(app):
+    sidebar_sessions(T.TMP)
+    first = app.window()
+    offer_update(app)
+    T.wait_for(lambda: first.sidebar.update_bar.get_visible(), "Update shown")
+    second = app.window()
+    T.wait_for(lambda: second.sidebar.update_bar.get_visible(), "Update shown in the second window")
+    T.pump(0.3)
+    return second
+
+
+@scene("56e-update-checking", "Update clicked: a spinner on the button while the new version is fetched in and checked")
+def _(app):
+    return update_scene(app, ("0123456789", None), busy=True)
+
+
+@scene("56f-update-dirty", "A newer version there, something tracked changed in the checkout: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "dirty"))
+
+
+@scene("56g-update-diverged", "A newer version there that won't fast-forward: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "diverged"))
+
+
+@scene("56h-update-broken", "A newer version that didn't start: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "broken"))
+
+
+RESTART_BLOCKERS = [{"kind": "chat", "session": "11111111-0000-4000-8000-000000000001", "name": "Refactor settings",
+                     "what": "npm test -- --watch=false"},
+                    {"kind": "task", "session": "22222222-0000-4000-8000-000000000002", "task": "t1", "run": "r1",
+                     "name": "Nightly deploy", "what": "a task's run"},
+                    {"kind": "agent", "session": "33333333-0000-4000-8000-000000000003", "host": "lab-mac-id",
+                     "name": "apple-foundation", "what": "Running apple-foundation for a chat on lab-mac"},
+                    {"kind": "terminal", "terminal": "abc123", "name": "zsh", "what": "/bin/zsh -l"}]
+
+
+def _restart_pending(app, paused, blockers=RESTART_BLOCKERS):
+    """This Mac's host process (the run's own, in this process) keeping a restart that a chat running a command and a
+    task's run hold up (blockers, as its blockers say them), and paused if paused: as the heads hear it."""
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    srv = baude.baudelib.hosts._HERE[0]
+    srv.blockers = lambda: blockers
+    if paused:
+        srv.restart_holds.add("a head")
+    srv.restart_when_free("head")
+    baude.meshui._TOASTED.clear()  # (toasted in a scene before: this one's is new)
+    win.get_application().show_update_bars()
+    T.wait_for(lambda: win.sidebar.restart_toasts.shown, "the restart toasted")
+    T.pump(0.3)
+    return win
+
+
+@scene("56d-daemon-restart-pending", "Restart Daemon with a chat running a command and a task running: the daemon "
+                                     "keeps the restart, toasted with Details till they're done")
+def _(app):
+    return _restart_pending(app, False)
+
+
+@scene("56e-daemon-restart-blockers", "Details on that toast: what the restart waits for, the restart paused meanwhile "
+                                      "(every app says so), with Restart (once they're done) and Force Restart (now)")
+def _(app):
+    return _restart_details(_restart_pending(app, False))
+
+
+def _restart_details(win):
+    """Details on the pending restart's toast pressed: its Waiting For open."""
+    toast = next(iter(win.sidebar.restart_toasts.shown.values()))
+    toast.emit("button-clicked")
+    T.wait_for(lambda: isinstance(win.get_visible_dialog(), baude.Adw.AlertDialog), "Waiting For")
+    T.pump(0.5)
+    return win
+
+
+@scene("56e2-daemon-restart-one-blocker", "Waiting For with one thing in it: a single row")
+def _(app):
+    return _restart_details(_restart_pending(app, False, RESTART_BLOCKERS[:1]))
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
                                 "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):
@@ -238,9 +350,10 @@ def _(app):
     return folder_plus_chat(app)
 
 
-def open_folder_step(app, typed=None, into=None):
+def open_folder_step(app, typed=None, into=None, keys=()):
     """A window on lab-mac, Open folder… pressed: "Open a folder on lab-mac" from the folder last used there, its
-    folders listed; typed: a path typed instead; into: a folder in the list clicked."""
+    folders listed; typed: a path typed instead; into: a folder in the list clicked; keys: then these pressed in the
+    path (Gdk keyvals)."""
     win = network_window(app)
     r = NET["lab"][1]
     net = os.path.dirname(NET["folders"][0])
@@ -260,6 +373,10 @@ def open_folder_step(app, typed=None, into=None):
     if into is not None:
         rows.emit("row-activated", listed(into))
         T.wait_for(lambda: listed("src"), "its folders")
+    for keyval in keys:
+        press = next(c for c in entry.observe_controllers() if isinstance(c, Gtk.EventControllerKey))
+        press.emit("key-pressed", keyval, 0, 0)
+        T.pump(0.4)
     T.pump(0.5)
     return win
 
@@ -278,6 +395,24 @@ def _(app):
 @scene("55f5-network-open-folder-browsed", "A folder in the list clicked: it's the path, its folders listed")
 def _(app):
     return open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), into="parser")
+
+
+@scene("55f5b-network-open-folder-tab", "Tab with the path's last part beginning one folder: that folder, with a /, "
+                                       "its folders listed")
+def _(app):
+    network_fixture()
+    win = open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), keys=(Gdk.KEY_Tab,))
+    T.wait_for(lambda: win.folder_parts[0].get_text().endswith("/parser/") and
+               any((row := win.folder_parts[1].get_row_at_index(i)) is not None and row.path.endswith("/src")
+                   for i in range(5)), "parser's folders")
+    T.pump(0.3)
+    return win
+
+
+@scene("55f5c-network-open-folder-picked", "Down twice in the path: the second folder in the list picked, the path "
+                                           "still being typed")
+def _(app):
+    return open_folder_step(app, into="parser", keys=(Gdk.KEY_Down, Gdk.KEY_Down))
 
 
 @scene("55f6-network-open-folder-opened", "Open: a blank chat on lab-mac, in that folder")
@@ -433,7 +568,7 @@ def lab_bots(win):
     win.connect("unrealize", lambda *_: made(False))
     made(True)
     T.wait_for(lambda: sum(win.sidebar.list.get_row_at_index(i).has_css_class("bot-row") for i in range(40)
-                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows")
+                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows", 30)
 
 
 @scene("55v-network-bots", "Two of lab-mac's chats made Bots: listed first, each by its picture (its initials) and its "
@@ -1283,4 +1418,343 @@ def _(app):
     held_read()
     win.open_fixes()
     T.pump(0.3)
+    return win
+
+
+TASK_AGENTS = '''import baudetask as task
+task.say("deploying", "site")
+task.agent("The deploy of site failed at its upload. Find out why.", title="Why the deploy failed")
+task.agent("EXPIRED: renew the upload key.", title="Renew the upload key")
+task.agent("LINGER: check the release links", wait=False, title="Check the release links")
+'''
+
+
+def task_agents(win, chat="Write the release notes for 2.4"):
+    """A Bot's (Juniper's, else the chat's: Fern's) task Deploy site run, falling back to three one-shot agents
+    (task.agent): one finished and one failed (what each said told the Bot), one still working; all nested under the
+    Bot and kept with the run. (the Bot, the run's id, its chats)."""
+    server = NET["lab"][0]
+    bot = NET["ids"][chat]
+    os.environ["FAKE_LINGER_S"] = "120"  # (the last agent's turn: going on as it's drawn)
+    os.environ["FAKE_ANSWERS"] = json.dumps({  # (the first agent's answer, and Juniper's to what each says)
+        "Find out why.": "The bucket's key expired yesterday. Renew it, then run the task again.",
+        "The bucket's key expired": "I'll renew the bucket's key, then run Deploy site again.",
+        "Failed to authenticate": "That agent's sign-in has run out: I'll do the renewal myself."})
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_AGENTS})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "done" and len(st.runs[rid].get("chats") or ()) == 3, "the run", 30)
+    T.wait_for(lambda: sum(x["kind"] == "agent" for x in st.read_log(rid)) == 2, "what the agents said, logged", 20)
+    def gone(*_):  # (for the next scene: the task, and the chats it started archived)
+        with server.lock:
+            for c in st.runs[rid].get("chats") or ():
+                server.sessions[c].meta["archived"] = True
+                server.save(server.sessions[c])
+            server.changed()
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    return bot, rid, st.runs[rid]["chats"]
+
+
+@scene("57a-task-started-chats", "A Bot's task run that started three one-shot agents: nested under the Bot in the "
+                                 "sessions list, and listed on the run's page as Started, each with its state "
+                                 "(two done, one working); what the done ones said is in the log, and told the Bot",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, rid, _chats = task_agents(win)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.sid == bot, "Juniper open")
+    win.show_panel(True, "tasks")
+    win.panel.tasks.open_run({"id": rid, "name": "Deploy site", "status": "done"})
+    T.wait_for(lambda: win.panel.tasks.chats_drawn and len(win.panel.tasks.chats_drawn) == 3, "the run's chats")
+    T.pump(3)
+    return win
+
+
+@scene("57b-task-agent-chat", "A chat a Bot's task run started, open: its first message from the task, its line a "
+                              "link to that run on the Bot's Tasks page", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    _bot, _rid, chats = task_agents(win)
+    T.wait_for(lambda: session_row(win, chats[0]) is not None, "the agent's row")
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, chats[0]))
+    T.wait_for(lambda: win.session_id == chats[0], "the agent's chat open")
+    T.pump(1.5)
+    return win
+
+
+@scene("57c-task-agent-link", "That chat's first line clicked: the Bot's chat opened on its Tasks page, at the run "
+                              "that started it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, rid, chats = task_agents(win)
+    T.wait_for(lambda: session_row(win, chats[0]) is not None, "the agent's row")
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, chats[0]))
+    T.wait_for(lambda: win.session_id == chats[0], "the agent's chat open")
+    def links():
+        return T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and x.get_mapped())
+    T.wait_for(lambda: links(), "the line it's from", 20)
+    links()[0].emit("activate-link", "sender")
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.run and win.panel.tasks.run["id"] == rid and
+               win.panel.tasks.chats_drawn, "the run, open")
+    T.pump(2)
+    return win
+
+
+@scene("57d-task-bot-told", "A Bot's chat (Fern's) told what two chats its task's run started said: each bubble only the "
+                            "chat's own words, its from line the chat (a link), the task's run (a link) and how its "
+                            "turn ended (finished, failed)", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    if "told" not in NET:  # (seeded once, on Fern, whose chat no other scene runs a task in: each pass, each theme,
+        NET["told"] = task_agents(win, "Plan the Q1 roadmap")  # shows its two reports once)
+    bot, _rid, chats = NET["told"]
+    server = NET["lab"][0]
+
+    def told():
+        with server.lock:
+            got = server.senders(server.sessions[bot]) or {}
+        return sum(v.get("kind") == "subagent" and v.get("session") in chats for v in got.values()) == 2
+    T.wait_for(told, "the Bot told", 30)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Fern open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  " run · " in x.get_text())) >= 2, "the two told bubbles", 20)
+    T.pump(2)
+    return win
+
+
+@scene("57e-task-run-back", "A run opened from a chat's from line, then Back: the run's own task, Deploy site, with "
+                            "its runs", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, rid, chats = task_agents(win)
+    T.wait_for(lambda: session_row(win, chats[0]) is not None, "the agent's row")
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, chats[0]))
+    T.wait_for(lambda: win.session_id == chats[0], "the agent's chat open")
+
+    def links():
+        return T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and x.get_mapped())
+    T.wait_for(lambda: links(), "the line it's from", 20)
+    links()[0].emit("activate-link", "sender")
+    tasks = win.panel.tasks
+    T.wait_for(lambda: win.session_id == bot and tasks.run and tasks.run["id"] == rid and tasks.chats_drawn,
+               "the run, open")
+    tasks.run_box.back.emit("clicked")
+    T.wait_for(lambda: tasks.stack.get_visible_child_name() == "task" and (tasks.task or {}).get("name") ==
+               "Deploy site" and tasks.runs, "its task, back")
+    T.pump(1.5)
+    return win
+
+
+TASK_ASKS = '''import sys
+import baudetask as task
+task.say("deploying", "site")
+got = task.ask("Which bucket does site go to?", form=[{"name": "bucket", "type": "choice",
+                                                       "choices": ["staging", "production"]}])
+task.say("bucket", got["bucket"])
+print("the upload was refused: the bucket's key expired", file=sys.stderr)
+sys.exit(3)
+'''
+
+
+@scene("57f-task-asks-bot", "A Bot's chat (Juniper's) asked by its task's run (a form to fill, answered with its "
+                            "answer_task tool: an Answered card), then handed the run's "
+                            "failure: each message heads with what the task did and a table of its run (its task and "
+                            "run ids, times, version, the command it runs, exit code), then the script's words",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = "{}"
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_ASKS})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "failed" and
+               sum(x["kind"] == "answer" for x in st.read_log(rid)) == 2, "the run asked, failed, handed over", 30)
+
+    def gone(*_):
+        with server.lock:
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  x.get_mapped())) >= 2, "the two asks", 20)
+    T.pump(2)
+    return win
+
+
+TASK_REMINDED = '''import baudetask as task
+got = task.ask("Proceed with the deploy? SKIP THE TOOL", form=[{"name": "verdict", "type": "choice",
+                                                              "choices": ["proceed", "override", "fail"]}])
+task.say("verdict", got["verdict"])
+'''
+
+
+@scene("57g-task-reminded", "A Bot's chat (Juniper's) asked by its task's run, its turn ending without the answer_task "
+                            "tool: reminded once, in one sentence, then answered with the tool",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = "{}"
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_REMINDED})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] in ("done", "failed"), "the run, reminded and answered", 30)
+
+    def gone(*_):
+        with server.lock:
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  x.get_mapped())) >= 2, "the ask and its reminder", 20)
+    T.pump(2)
+    return win
+
+
+TASK_VARS = '''import baudetask as task
+model = task.vars.translation_model
+task.say("translating with", model.label, model.effort)
+worker = task.vars["Worker Agent Model"]
+if worker is None or worker.warning:  # (its own fallback: the translation model)
+    task.say("worker model:", worker.warning if worker is not None else "not bound", "- using", model.label)
+    worker = model
+said = task.agent("Translate the release notes into French.", model=worker, title="Translate the notes")
+task.say("done:", said["text"])
+'''
+
+
+def task_variables(win):
+    """Juniper's task Translate notes, its variables: Translation Model bound to Sonnet 5.5 (low), Worker Agent Model
+    to a model this host doesn't serve (warned of), Terminal Host to lab-mac, Browser Host not bound, Glossary to text;
+    run once, its script reading them and passing a model variable to agent(). (the Bot, the task, the run's id)."""
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = json.dumps({"Translate the release notes": "Traduit: notes de version 2.4."})
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({
+            "name": "Translate notes", "runtime": "python", "script": TASK_VARS, "variables": [
+                {"name": "Translation Model", "type": "model"}, {"name": "Worker Agent Model", "type": "model"},
+                {"name": "Terminal Host", "type": "terminal_host"}, {"name": "Browser Host", "type": "browser_host"},
+                {"name": "Glossary", "type": "text"}],
+            "bindings": {"Translation Model": {"value": "sonnet", "label": "Sonnet 5.5", "effort": "low"},
+                         "Worker Agent Model": {"value": "ollama/gpt-oss:20b", "label": "GPT OSS", "effort": "low",
+                                                "host": "mac-mini"},
+                         "Terminal Host": {"value": "lab-mac", "label": "lab-mac"}, "Glossary": "docs/glossary.md"}})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "done", "the run", 30)
+
+    def gone(*_):
+        with server.lock:
+            for c in st.runs[rid].get("chats") or ():
+                server.sessions[c].meta["archived"] = True
+                server.save(server.sessions[c])
+            server.changed()
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    return bot, task, rid
+
+
+def tasks_open(win, bot):
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.sid == bot, "Juniper open")
+    win.show_panel(True, "tasks")
+    tasks = win.panel.tasks
+    T.wait_for(lambda: any(t.get("warnings") for t in tasks.tasks), "the task, its warning")
+    return tasks
+
+
+@scene("57f-task-variables-list", "A Bot's tasks, one with a variable bound to a model its host doesn't serve: a warning "
+                                  "on its row, its tooltip the variable and why", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, _task, _rid = task_variables(win)
+    tasks_open(win, bot)
+    T.pump(1)
+    return win
+
+
+@scene("57g-task-variables", "A task's page, its Variables: each one's name and what it's bound to (a model and its "
+                             "effort, a host, text), one not bound, one warned of (its model not served here)",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, task, _rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_task(task["id"])
+    T.wait_for(lambda: tasks.runs and (tasks.task or {}).get("warnings"), "the task's page")
+    T.pump(1)
+    return win
+
+
+@scene("57h-task-bind", "Bind Translation Model: what's typed over the host's models (as ⌘K lists them), the effort "
+                        "beside it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, task, _rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_task(task["id"])
+    T.wait_for(lambda: tasks.runs, "the task's page")
+    dlg = tasks.bind(tasks.task, tasks.task["variables"][0])
+    T.wait_for(lambda: T.find(dlg, T.Adw.ActionRow, lambda r: hasattr(r, "choice")), "its choices")
+    T.pump(1)
+    return win
+
+
+@scene("57i-task-variables-run", "The run of that task: the warning noted first in its log, then the script's own "
+                                 "fallback to the translation model, and the agent it started with it",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, _task, rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_run({"id": rid, "name": "Translate notes", "status": "done"})
+    T.wait_for(lambda: tasks.log, "the run's log")
+    T.pump(2)
     return win

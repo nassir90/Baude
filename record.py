@@ -65,6 +65,7 @@ import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's n
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 import baudelib.serverstate  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
+from baudelib import notifier  # noqa: E402  (Record's notifications on macOS, posted by an app of its own)
 from baudelib import bins  # noqa: E402  (the commands in ~/.local/bin, kept up to date as it starts)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, socket_path  # noqa: E402,F401
@@ -158,6 +159,8 @@ def launcher_logo():
     thread, where they aren't already (applist.redraw_logos)."""
     accent = widgets.load_settings().get("accent")
     theming.off_main("launcher", lambda: applist.redraw_logos(accent))
+    if sys.platform == "darwin":  # (Record's notifier, built again with it: notifier.build)
+        theming.off_main("notifier", lambda: notifier.build("Record", applist.app_logo("Record", accent)))
     return False
 
 
@@ -274,6 +277,7 @@ class App(Adw.Application):
                 macos_dock_icon()
             except Exception as e:
                 print("record: no Dock icon:", e, file=sys.stderr)
+            widgets.notify_as(app="Record")
         else:
             widgets.notify_as(themed_icon())
         theming.follow_accent(redraw_logo)  # (Settings → Accent Colour: the logo in it)
@@ -331,6 +335,7 @@ def main():
         os.environ["BAUDE_NO_THEME"] = "1"
     if args.install:
         install()
+        notifier.build_all(widgets.load_settings().get("accent"))  # (macOS, once it can be signed)
         print("\n".join(wording.say("install.installed", path=p)
                         for p in [*map(bins.path, bins.NAMES), *applist.all_paths()]))
         return 0

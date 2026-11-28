@@ -73,6 +73,25 @@
       ]
     },
     {
+      "name": "Access page",
+      "shows": "The dialog's fifth page, after Telemetry: who in the mesh may use each of the picked host's capabilities. Described in Access.dialog.json. The dialog is 820 wide, so its five pages' names fit the switcher (the phone's bar scrolls the page shown into view).",
+      "copy": [
+        "access.title"
+      ],
+      "decisions": [
+        {
+          "said": "Mesh ACLs are configured in Settings (paraphrased)",
+          "rule": "Every app's Settings has an Access page after Telemetry",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "title",
       "shows": "\"Settings\"",
       "copy": [

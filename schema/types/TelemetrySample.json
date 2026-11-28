@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's machine and its processes, sampled every few seconds while telemetry is on.",
+  "description": "A host's machine sampled while telemetry is on: every 5 seconds with someone at it (every 30 with nobody), its processes with it every 30 seconds (every 2 minutes with nobody); older ones rolled up, a row a minute after a day and a row an hour after a week.",
   "properties": {
     "at": {
       "type": "number",
@@ -29,19 +29,67 @@
         "integer",
         "null"
       ],
-      "description": "Its memory in use, in bytes."
+      "description": "Its memory in use, in bytes (macOS: Activity Monitor's Memory Used, app memory, wired and compressed; Linux and a phone: the total less what's available to start new work without swapping)."
+    },
+    "swap_total": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its swap, in bytes (macOS grows it as it's needed; a phone's is zram); 0 or null where it has none."
+    },
+    "swap_used": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its swap in use, in bytes."
+    },
+    "memory_pressure": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "How pressed for memory the system says it is: \"normal\", \"warning\" or \"critical\" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux)."
+    },
+    "memory_stall": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none."
     },
     "procs": {
       "type": "array",
       "items": {
         "$ref": "TelemetryProc.json"
       },
-      "description": "The host process and each app on its machine that told it telemetry."
+      "description": "The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). Left out of a sample its processes weren't taken in."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the host runs (its first 12 characters), as it started."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the host speaks."
+    },
+    "span": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "A rolled-up row's: the seconds it stands for (60, 3600), from at on, its numbers their mean, its pressure the worst (null: one sample)."
     }
   },
   "required": [
-    "at",
-    "procs"
+    "at"
   ],
   "additionalProperties": false
 }

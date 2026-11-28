@@ -201,9 +201,12 @@ class Lightbox(Gtk.Box):
         return btn
 
     def open(self, widget):
-        """Show `widget`'s image; the others where it is (win.image_source: a chat, the Feedback tab) become the ←/→
-        sequence."""
-        self.items = [w for w in walk(self.win.image_source())
+        """Show `widget`'s image; the others where it is (what it's in that has an image_group of its own: an ask; else
+        win.image_source: a chat, the Feedback tab) become the ←/→ sequence."""
+        source = widget.get_parent()
+        while source is not None and not getattr(source, "image_group", False):
+            source = source.get_parent()
+        self.items = [w for w in walk(source or self.win.image_source())
                       if getattr(w, "image_actions", None) is not None and not isinstance(w, Gtk.Overlay)]
         if widget not in self.items:
             self.items.append(widget)

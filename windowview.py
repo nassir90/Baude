@@ -12,6 +12,7 @@ import time
 from baudelib.transcripts import _first_text, _prompt_texts, ChunkFill, clean_prompt, HistoryIndex, ref_epoch
 from baudelib import tokens  # noqa: E402  (Baude's measures: schema/tokens, the Android app's too)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib.client import unseen  # noqa: E402  (a host's chat's last turn's end not seen on any head yet: done)
 
 import gi
 
@@ -22,6 +23,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 import chatparts  # noqa: E402
 import composerview  # noqa: E402
 import chatfind  # noqa: E402
+import widgets  # noqa: E402
 from chatparts import UserTurn  # noqa: E402
 from widgets import ZOOM_MAX, ZOOM_MIN, fmt_scale, pretty_path, save_settings  # noqa: E402,F401
 from markdownview import MarkdownView, link_markup, sel_label  # noqa: E402,F401
@@ -55,6 +57,8 @@ class WindowView:
         card = self.tool_cards[tool_id] = (MeshCard if name in MESH_CHAT_TOOLS else ToolCard)(name, tool_id)
         if isinstance(card, MeshCard):
             self.mesh_cards.append(card)
+        elif self.offers_background():
+            card.offer_background(self.send_to_background)
         return card
 
     def open_mesh_chat(self, listed):
@@ -465,7 +469,7 @@ class WindowView:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
             if getattr(self, "panel", None) is not None and self.panel.memory_page.get_visible():
                 self.panel.memory.refresh()  # (a Bot's turn over: what it kept in its memory, shown)
-                self.panel.routines.refresh()  # (its routines' last and next, as they are now)
+                self.panel.tasks.refresh()  # (its tasks' runs, as they are now)
             if getattr(self, "queue_upto", None) is not None:  # (queued messages to send now it's over)
                 GLib.idle_add(self.flush_queue)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:
@@ -483,13 +487,16 @@ class WindowView:
         if self.resume_pending and self.remote is not None:  # (a network session viewed: as its server says)
             listed = self.remote.sessions.get(self.session_id) or {}
             return "inactive" if self.remote.state == "dead" else \
-                {"working": "working", "waiting": "waiting"}.get(listed.get("state"), "inactive")
+                {"working": "working", "waiting": "waiting"}.get(listed.get("state"),
+                                                                 "done" if unseen(listed) else "inactive")
         if self.resume_pending:  # only viewing: what the program writing it is doing
             return self.tail.state()
         if self.waiting_cards:
             return "waiting"
         if self.busy or self.running_tasks():
             return "working"
+        if self.remote is not None:  # (a host's chat between turns: done till its turn's end is seen on a head)
+            return "done" if unseen(self.remote.sessions.get(self.session_id)) else "inactive"
         if getattr(self, "turn_finished", False) and self.proc is not None:
             return "done"
         return "inactive"
@@ -787,6 +794,65 @@ class WindowView:
         top = self.history_box.get_first_child() if self.history else None
         # (not once the chat's start is drawn, out of turn: nothing's earlier than that)
         self.earlier_btn.set_visible(bool(self.history and self.history.more) and not getattr(top, "filled", False))
+        # (while the start of a long chat is indexed, its place is the spinner's: place_earlier_spin)
+        indexing = bool(self.history and self.history.todo)
+        self.earlier_btn.set_opacity(0 if indexing else 1)
+        self.earlier_btn.set_can_target(not indexing)
+        self.earlier_btn.set_focusable(not indexing)
+        self.earlier_btn.set_sensitive(not indexing)
+        self.earlier_btn.update_state([Gtk.AccessibleState.HIDDEN], [indexing])  # (nor read out)
+
+    SPIN_PAD = 16  # px between the spinner and the top of a chunk's place not drawn yet that's in view
+
+    def place_earlier_spin(self, *_):
+        """After each layout pass: where the spinner goes over the chat while what's above the view is still to come
+        (earlier_spin_at), hidden when none of that's in view. The overlay puts it there (earlier_spin_position): moved,
+        it's only placed again, not measured."""
+        spin, y = self.earlier_spin, self.earlier_spin_at()
+        if y == self.earlier_spin_y:
+            return
+        self.earlier_spin_y = y
+        if (y is not None) != spin.get_visible():
+            spin.set_visible(y is not None)
+        elif y is not None:
+            spin.get_parent().queue_allocate()
+
+    def earlier_spin_position(self, over, child, rect):
+        """The overlay's place for the spinner: centred, earlier_spin_y down from the top of the view."""
+        if child is not self.earlier_spin or self.earlier_spin_y is None:
+            return False
+        size = widgets.scales["icon_px"]
+        rect.x, rect.y, rect.width, rect.height = (over.get_width() - size) // 2, self.earlier_spin_y, size, size
+        return True
+
+    def earlier_spin_at(self):
+        """Where the spinner goes, in px from the top of the view: in the Show earlier button's place while the start
+        of a long chat is indexed, else at the top of the part in view of the topmost earlier chunk's place not drawn
+        yet (its spacer: drawn into from its bottom up, a little a frame); None for neither in view. Only the places
+        not drawn yet are looked at, from the lowest up, till one's above the view."""
+        hist = getattr(self, "history_box", None)
+        if self.history is None or hist is None or hist.get_parent() is not self.transcript:
+            return None
+        page, size = self.scroller.get_height(), widgets.scales["icon_px"]
+        if page <= 0:
+            return None
+        if self.history.todo:
+            ok, b = self.earlier_btn.compute_bounds(self.scroller)
+            if ok and self.earlier_btn.get_visible() and b.get_y() < page and b.get_y() + b.get_height() > 0:
+                return round(b.get_y() + (b.get_height() - size) / 2)
+            return None
+        best = None
+        for group in ([job.slot for job in self.fill_jobs], self.chunk_slots or ()):  # (each lowest first)
+            for slot in group:
+                ok, b = slot.spacer.compute_bounds(self.scroller) if slot.spacer is not None else (False, None)
+                if not ok or b.get_y() >= page:
+                    continue
+                if b.get_y() + b.get_height() <= 0:
+                    break
+                lo, hi = max(b.get_y(), 0), min(b.get_y() + b.get_height(), page)
+                if hi - lo >= size + 2 * self.SPIN_PAD and (best is None or lo < best):
+                    best = lo
+        return None if best is None else round(best + self.SPIN_PAD)
 
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't
@@ -1282,6 +1348,9 @@ class WindowView:
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
                 fold.add_css_class("sysnote")
                 self.add(fold)
+            elif kind == "assistant" and (card := self.login_standing_in(content)) is not None:
+                self.move_login_card(card)  # (its host says the chat needs signing in: the card in its place)
+                card.stands_for = _first_text(content)
             elif kind == "assistant" and rest and rest[0]:
                 self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":

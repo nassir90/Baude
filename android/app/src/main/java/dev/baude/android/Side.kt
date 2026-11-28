@@ -40,7 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -48,11 +50,12 @@ import java.util.Base64
 
 // ------------------------------------------------------------------------------------------------- boxed lists --
 
-/** A side panel page's list (a boxed list: rounded 12, its edge, rows ruled apart), 10 in from the page's edges. */
+/** A side panel page's list (a boxed list: rounded 12, its edge, rows ruled apart), 10 in from the page's edges (or
+ * inset: a dialog's, flush with its sides). */
 @Composable
-fun <T> BoxedList(rows: List<T>, empty: String, row: @Composable (T) -> Unit) {
+fun <T> BoxedList(rows: List<T>, empty: String, inset: Dp = 10.dp, row: @Composable (T) -> Unit) {
     val c = LocalBaude.current
-    Column(Modifier.fillMaxWidth().padding(10.dp).clip(RoundedCornerShape(12.dp)).background(c.card)
+    Column(Modifier.fillMaxWidth().padding(inset).clip(RoundedCornerShape(12.dp)).background(c.card)
         .border(1.dp, c.rule, RoundedCornerShape(12.dp))) {
         if (rows.isEmpty()) Empty(empty)
         rows.forEachIndexed { i, r ->
@@ -62,17 +65,23 @@ fun <T> BoxedList(rows: List<T>, empty: String, row: @Composable (T) -> Unit) {
     }
 }
 
-/** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. */
+/** A dense list's row: the Fixes list's, and a task's inputs, triggers and runs (as Baude's navigation lists). */
+val DENSE_ROW = 38.dp
+
+/** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. compact: a dense
+ * list's row, as high as the Fixes list's (DENSE_ROW), its text a little in from its edges. */
 @Composable
 fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, prefix: (@Composable () -> Unit)? = null,
-              suffix: (@Composable () -> Unit)? = null) {
+              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false, bold: Boolean = false) {
     val c = LocalBaude.current
-    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-        .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+    Row(Modifier.fillMaxWidth().heightIn(min = if (compact) DENSE_ROW else 50.dp)
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick.tapping(title)) else Modifier)
+        .padding(horizontal = 12.dp, vertical = if (compact) 0.dp else 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         prefix?.invoke()
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f).padding(vertical = if (compact) 4.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = if (bold) Type.body.copy(fontWeight = FontWeight.Bold) else Type.body, color = c.fg, maxLines = titleLines,
+                overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 2,
                 overflow = TextOverflow.Ellipsis)
         }
@@ -101,7 +110,10 @@ fun AgentStatus(status: String) {
 }
 
 /** A count of tokens as chatparts.fmt_tokens says it: 950, 12.3k, 1M. */
-fun fmtTokens(n: Int): String {
+fun fmtTokens(n: Int): String = fmtTokens(n.toLong())
+
+/** A count of tokens as chatparts.fmt_tokens says it, past an Int's (a year's). */
+fun fmtTokens(n: Long): String {
     fun one(x: Double) = String.format(java.util.Locale.ROOT, "%.1f", x).removeSuffix(".0")
     return if (n >= 1_000_000) Wording.Tokens.millions(n = one(n / 1_000_000.0))
         else if (n >= 1000) Wording.Tokens.thousands(n = one(n / 1000.0)) else "$n"

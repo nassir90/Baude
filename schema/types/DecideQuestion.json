@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a decision's questions, as System One has them: noul (yes or no: the probability it's true), choice (one of criteria's options, by name) or score (an ordered rubric, criteria's levels from low to high).",
+  "properties": {
+    "type": {
+      "enum": [
+        "choice",
+        "noul",
+        "score"
+      ],
+      "description": "What kind of question it is."
+    },
+    "instructions": {
+      "type": [
+        "string",
+        "object",
+        "array"
+      ],
+      "description": "Text, or structured data the decider renders as it does text."
+    },
+    "criteria": {
+      "type": [
+        "object",
+        "array",
+        "null"
+      ],
+      "description": "choice: each option's name and what it means (null for a bare name); score: its levels, lowest first; noul: what true and false mean, or nothing."
+    }
+  },
+  "required": [
+    "type",
+    "instructions"
+  ],
+  "additionalProperties": false
+}

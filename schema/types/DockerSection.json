@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A category of the Docker view's sidebar.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Its icon's name, or empty."
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "$ref": "DockerPage.json"
+      },
+      "description": "Its pages (one with the category's own name: the category is that page)."
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "additionalProperties": false
+}

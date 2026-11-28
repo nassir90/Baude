@@ -79,6 +79,8 @@ abstract class Screens(private val theme: String) {
     @After fun down() {
         PhoneHost.id = ""
         dev.baude.android.HomePrefs.host.value = ""
+        dev.baude.android.HomePrefs.groups.clear()
+        dev.baude.android.HomePrefs.noGroups.value = false
         dev.baude.android.Meta.load(org.json.JSONObject())
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -88,9 +90,25 @@ abstract class Screens(private val theme: String) {
         Mesh.key.value = null
         Mesh.pictures.clear()
         Pictures.authors(emptyMap())
+        dev.baude.android.Inbox.clear()
     }
 
     @Test fun home() = render("01-home") { HomeScreen() }
+
+    /** A Bot's turn ended and a chat's too, not seen on any head of the mesh yet (their hosts list ended, not seen):
+     * each row's dot done (blue); then seen on another head: no dot. */
+    @Test fun homeTurnUnseen() = render("01-home-turn-unseen") { turnsEnded(seen = false); HomeScreen() }
+
+    @Test fun homeTurnSeen() = render("01-home-turn-seen") { turnsEnded(seen = true); HomeScreen() }
+
+    private fun turnsEnded(seen: Boolean) {
+        workshopBot()
+        val end = Msg.TurnEnd(uuid = "0e0e0e0e-0000-4000-8000-000000000001", size = 4096)
+        Mesh.sessions["h1"] = Mesh.sessions.getValue("h1").map { s ->
+            if (s.id != "a" && s.id != "c") s
+            else Msg.Session.from(s.json().put("ended", end.json()).apply { if (seen) put("seen", end.json()) })
+        }
+    }
 
     @Test fun homeUpdate() {
         Update.state.value = "ready"
@@ -125,8 +143,8 @@ abstract class Screens(private val theme: String) {
     }
 
     // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
-    // in to with claude auth login, Work the default; Codex's Personal; then its usage, an account's ⋮, Add account
-    // (the sign-in, its page's link and the code box) and Remove…)
+    // in to with claude auth login, each card's usage read as the page is shown; Codex's Personal;
+    // then an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
     @Test fun subscriptions() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -134,47 +152,253 @@ abstract class Screens(private val theme: String) {
         screen("05a-subscriptions")
     }
 
-    @Test fun subscriptionsUsage() {
+    // (the same page scrolled to Codex: its CLI default's and Personal's usage, each limit with its bar)
+    @Test fun subscriptionsCodexUsage() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Subscription usage")
+        scrollUnder("Personal")
         laidOut()
-        screen("05f-subscriptions-usage")
+        screen("05k-subscriptions-codex-usage")
+    }
+
+    // (Settings → Subscriptions opened while each card's usage read is still out: what workshop last read of each, greyed)
+    @Test fun subscriptionsLastRead() {
+        accountsFixture(reading = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05j-subscriptions-last-read")
+    }
+
+    // (the home screen's ⋮ with its usage row: Work's, the account a new chat on workshop takes; then, the host not
+    // answering yet, its placeholder; each the menu's width written beside its picture)
+    @Test fun menuUsage() = menuUsageScene("05m-menu-usage", listing = true)
+
+    @Test fun menuUsageLoading() = menuUsageScene("05n-menu-usage-loading", listing = false)
+
+    // (the same at a 24-hour clock, and at text sizes 1.25 and 1.5, each loading and answered)
+    @Test fun menuUsage24h() = menuUsageScene("05o-menu-usage-24h", listing = true, h24 = true)
+
+    @Test fun menuUsageLoading24h() = menuUsageScene("05p-menu-usage-loading-24h", listing = false, h24 = true)
+
+    @Test fun menuUsageText125() = menuUsageScene("05q-menu-usage-text125", listing = true, text = 1.25f)
+
+    @Test fun menuUsageText150() = menuUsageScene("05r-menu-usage-text150", listing = true, text = 1.5f)
+
+    @Test fun menuUsageLoadingText150() = menuUsageScene("05s-menu-usage-loading-text150", listing = false, text = 1.5f)
+
+    private fun menuUsageScene(name: String, listing: Boolean, h24: Boolean = false, text: Float = 1f) {
+        android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24,
+            if (h24) "24" else "12")
+        dev.baude.android.Settings.textScale.value = text
+        (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
+            .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
+        dev.baude.android.MenuUsageHosts.readAt.clear()
+        dev.baude.android.MenuUsageHosts.listedAt.clear()
+        accountsFixture(listing = listing)
+        show { dev.baude.android.HomeMenu({}, {}, {}, {}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.ChatHeader.menu)
+        laidOut()
+        withMenus(name)
+        dev.baude.android.Settings.textScale.value = 1f
+    }
+
+    // (Settings → Subscriptions with Work disabled and Home disabling itself as it's exhausted: Work's card says
+    // Disabled; then Work's ⋮ (Enable) and Home's (Auto Disable on Exhaustion ticked))
+    @Test fun subscriptionsDisabled() {
+        accountsFixture(disabled = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05u-subscriptions-disabled")
+        tap("Change this account", nth = 2)
+        laidOut()
+        withMenus("05v-subscriptions-disabled-menu")
+    }
+
+    // (Home's ⋮ with Auto Resume on Reset ticked)
+    @Test fun subscriptionsResumeMenu() {
+        accountsFixture(resume = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account", nth = 1)
+        laidOut()
+        withMenus("05x-subscriptions-resume-menu")
+    }
+
+    @Test fun subscriptionsAutoMenu() {
+        accountsFixture(disabled = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account", nth = 1)
+        laidOut()
+        withMenus("05w-subscriptions-auto-menu")
     }
 
     @Test fun subscriptionsMenu() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Change this account")
+        tap("Change this account", nth = 1)
         laidOut()
         withMenus("05b-subscriptions-menu")
     }
 
+    // (Add account (Claude) on workshop, each step: Login, Token (empty, then typed), Folder, starting, the page's link with the code
+    // box, a code typed, what claude said of it, failed)
     @Test fun subscriptionsSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
-        val login = dev.baude.android.ClaudeLogin(host, null).apply {
-            name.value = "Work"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
-            busy.value = true
-        }
+        val login = dev.baude.android.ClaudeLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.ClaudeSignIn(host, null, {}, login)
         }
         laidOut()
+        screen("05c-subscriptions-claude-new-login")
+        login.keyed.value = true
+        laidOut()
+        screen("05c-subscriptions-claude-token-empty")
+        login.token.value = "sk-ant-oat01-fixture"
+        laidOut()
+        screen("05c-subscriptions-claude-token")
+        login.keyed.value = false
+        login.existing.value = true
+        login.folder.value = "/srv/claude-work"
+        laidOut()
+        screen("05c-subscriptions-claude-existing")
+        login.existing.value = false
+        login.active.value = true
+        laidOut()
+        screen("05d-subscriptions-sign-in-starting")
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
+        laidOut()
         screen("05d-subscriptions-sign-in")
+        login.code.value = "fixture-code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-code")
+        login.code.value = ""
+        login.note.value = "Invalid code, try again"
+        laidOut()
+        screen("05d-subscriptions-sign-in-invalid")
+        login.active.value = false
+        login.url.value = null
+        login.note.value = null
+        login.failed.value = "Login failed: Invalid code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed")
+        tap("Folder") // (the dialog's own button back in place of Try Again)
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed-then-folder")
+    }
+
+    // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
+    // and then its page's link with the box for the address the browser ended on; that address not taken; the device
+    // code's, waiting and then with its code; signed in; failed)
+    @Test fun subscriptionsCodexSignIn() {
+        accountsFixture()
+        val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
+        val login = dev.baude.android.CodexLogin(host, null).apply { name.value = "Work" }
+        show {
+            SettingsScreen({}, {}, page = 1)
+            dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
+        }
+        laidOut()
+        screen("05k-codex-new-login")
+        login.keyed.value = true
+        login.token.value = "sk-proj-fixture-not-a-real-key"
+        laidOut()
+        screen("05k-codex-token")
+        login.keyed.value = false
+        login.existing.value = true
+        login.home.value = "/srv/codex-work"
+        laidOut()
+        screen("05k-codex-existing")
+        login.existing.value = false
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
+        laidOut()
+        screen("05k-codex-browser-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser", port = 1455,
+            url = "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=st4te")
+        laidOut()
+        screen("05l-codex-browser-paste")
+        login.address.value = "https://chatgpt.com/"
+        login.note.value = "That isn't the address the browser ended on after signing in"
+        laidOut()
+        screen("05m-codex-browser-wrong-address")
+        login.address.value = ""
+        login.note.value = null
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device")
+        laidOut()
+        screen("05n-codex-device-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device", url = "https://auth.openai.com/codex/device", code = "KQ7M-3XWPD")
+        laidOut()
+        screen("05o-codex-device-code")
+        login.login.value = Msg.ChatLogin(state = "signed_in", method = "browser", who = "personal@example.com")
+        laidOut()
+        screen("05p-codex-signed-in")
+        login.login.value = Msg.ChatLogin(state = "failed", method = "browser",
+            reason = "Error logging in: OAuth callback error: access_denied")
+        laidOut()
+        screen("05q-codex-failed")
+    }
+
+    // (Claude's chat Sign in card, to compare with Codex's: the page's link and the code box)
+    @Test fun chatLoginCard() {
+        accountsFixture()
+        val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
+            stage.value = "starting"
+        }
+        render("05r-chat-login-card-starting") {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
+                dev.baude.android.LoginCard(login)
+            }
+        }
+        login.stage.value = "page"
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/05r-chat-login-card.png")
     }
 
     @Test fun subscriptionsRemove() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Change this account")
+        tap("Change this account", nth = 1)
         tap("Remove…")
         screen("05e-subscriptions-remove")
+    }
+
+    // (Settings → Subscriptions on a host without codex: Codex's section scrolled to, its Dependencies row in Add account's place)
+    @Test fun subscriptionsNoCodex() {
+        noCodexFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        scrollUnder("Personal")
+        laidOut()
+        screen("05i-subscriptions-no-codex")
+    }
+
+    // (setup-token accounts: Personal's usage as its chats' turns last said it, with when; Spare's before its first turn)
+    @Test fun subscriptionsTokenUsage() {
+        tokenAccountsFixture(usage = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05t-subscriptions-token-usage")
+    }
+
+    // (the home screen's ⋮ with a setup-token account's usage row: its limits, then when its chats' turns last said them)
+    @Test fun menuUsageToken() {
+        (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
+            .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
+        dev.baude.android.MenuUsageHosts.readAt.clear()
+        dev.baude.android.MenuUsageHosts.listedAt.clear()
+        tokenAccountsFixture(usage = true)
+        show { dev.baude.android.HomeMenu({}, {}, {}, {}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.ChatHeader.menu)
+        laidOut()
+        withMenus("05u-menu-usage-token")
     }
 
     @Test fun subscriptionsToken() {
@@ -203,6 +427,44 @@ abstract class Screens(private val theme: String) {
         screen("40b-missing-docker")
     }
 
+    // (☰ → Docker on workshop: colima's running containers (a Compose project, shop, and a redis), a row inspected as
+    // YAML, the categories, and Remove… asked first)
+    @Test fun docker() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        screen("41a-docker")
+    }
+
+    @Test fun dockerInspect() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap("shop-api-1")
+        laidOut()
+        screen("41b-docker-inspect")
+    }
+
+    @Test fun dockerCategories() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Browser.back)
+        laidOut()
+        screen("41c-docker-categories")
+    }
+
+    @Test fun dockerRemove() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Common.removeEllipsis)
+        laidOut()
+        tap(dev.baude.android.Wording.Common.removeEllipsis, nth = 4)
+        laidOut()
+        screen("41d-docker-remove")
+    }
+
     @Test fun dependencies() {
         missingFixture()
         show { SettingsScreen({}, {}, page = 2) }
@@ -213,8 +475,8 @@ abstract class Screens(private val theme: String) {
         screen("40c2-dependencies-end")
     }
 
-    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine now, its chats'
-    // latest activity and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
+    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine and its
+    // processes now and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
     @Test fun telemetry() {
         telemetryFixture()
         show { SettingsScreen({}, {}, page = 3) }
@@ -222,7 +484,18 @@ abstract class Screens(private val theme: String) {
         screen("40d-telemetry")
     }
 
-    // (the same page's foot: its machine now, its chats' latest activity, line profiling and its top lines)
+    // (the same page's models, the first opened: its tokens, a row each kind)
+    @Test fun telemetryModels() {
+        telemetryFixture()
+        show { SettingsScreen({}, {}, page = 3) }
+        laidOut()
+        scrollUnder("Opus 4.7", 900f) // (to Models)
+        tap(dev.baude.android.modelName("claude-opus-4-7", emptyList()).orEmpty())
+        laidOut()
+        screen("40d2-telemetry-models")
+    }
+
+    // (the same page's foot: its machine and its processes now, line profiling and its top lines)
     @Test fun telemetryFoot() {
         telemetryFixture()
         show {
@@ -233,6 +506,34 @@ abstract class Screens(private val theme: String) {
         }
         laidOut()
         screen("40e-telemetry-foot")
+    }
+
+    // (the same page's Most Used and Slowest: what the user used most, what took longest each time)
+    @Test fun telemetryCounts() {
+        telemetryFixture()
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(2400.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        screen("40h-telemetry-counts")
+    }
+
+    // (the same page's Errors, the latest opened: what was on screen, the screens before it, the code it ran)
+    @Test fun telemetryErrors() {
+        telemetryFixture()
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1380.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        tap("input: the server isn't there")
+        laidOut()
+        screen("40g-telemetry-errors")
     }
 
     // (the foot on a host without line_profiler: what's missing and how it's installed, in Line Profiling's place)
@@ -248,6 +549,181 @@ abstract class Screens(private val theme: String) {
         screen("40f-telemetry-no-profiler")
     }
 
+    // (Settings → Access on a host: each capability's rule, Chosen Members with a switch for each member it knows of)
+    @Test fun access() {
+        accessFixture()
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        screen("40g-access")
+    }
+
+    // (a chat's Access…: its own rules for managing it, Read its own, Write the host's)
+    @Test fun chatAccess() {
+        accessFixture()
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        screen("40h-chat-access")
+    }
+
+    // (a capability's field tapped, nothing typed: who may be added listed under it, Everybody first)
+    @Test fun accessOpen() {
+        accessFixture()
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tap(dev.baude.android.PhoneAccess.named("model_files"))
+        layOut()
+        screen("40g-access-open")
+    }
+
+    // (the page with 25 members: each field's pills on two lines at most, "<n> more" for the rest)
+    @Test fun accessMany() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        screen("40g-access-many")
+    }
+
+    // (the page's foot with 25 members: Kubernetes, Docker, Databases, Subscriptions, Access Rules)
+    @Test fun accessFoot() {
+        accessFixture(many = true)
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1380.dp)) {
+                dev.baude.android.AccessPage()
+            }
+        }
+        laidOut()
+        screen("40g-access-foot")
+    }
+
+    // (25 members, Shell's field typed into: the members matching listed under it)
+    @Test fun accessTyping() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tap(dev.baude.android.PhoneAccess.named("shell"))
+        layOut()
+        typeIn("c")
+        laidOut()
+        layOut()
+        screen("40g-access-typing")
+    }
+
+    // (25 members, a field's "<n> more" tapped: every pill, wrapped)
+    @Test fun accessMore() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tapEnding(" more")
+        laidOut()
+        screen("40g-access-more")
+    }
+
+    // (a chat's own Read (pixel-9), its Write the host's, the host's Write widened to everybody: Write opened, as
+    // it's checked, pixel-9 only)
+    @Test fun chatAccessWriteWidened() {
+        accessFixture(write = "everybody")
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        tap(dev.baude.android.Wording.Access.sameAsHost)
+        layOut()
+        screen("40m-chat-access-write-widened")
+    }
+
+    // (a chat's Read opened: Same as Host over its members)
+    @Test fun chatAccessOpen() {
+        accessFixture()
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        tap("pixel-9")
+        layOut()
+        screen("40h-chat-access-open")
+    }
+
+    // (Meta's row for a capability of the host it runs on, as show setting:access_providers draws it under a reply)
+    @Test fun metaAccess() {
+        accessFixture()
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        show { dev.baude.android.MetaBoxed(listOf(Unit)) { dev.baude.android.MetaSet.ALL.getValue("access_providers").row(null, null) } }
+        laidOut()
+        screen("40i-meta-access")
+    }
+
+    // (Meta's row for one side of a split capability, as show setting:access_kube_write draws it: Read and Write both)
+    @Test fun metaAccessSplit() {
+        accessFixture()
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        show { dev.baude.android.MetaBoxed(listOf(Unit)) { dev.baude.android.MetaSet.ALL.getValue("access_kube_write").row(null, null) } }
+        laidOut()
+        screen("40l-meta-access-split")
+    }
+
+    // (Meta's set_setting narrowing one host's rule, of two: that host's row alone under the reply)
+    @Test fun metaAccessSet() {
+        accessFixture(spawn = "nobody")
+        val studio = Host(id = "7d3f2a90-1c4e-4b6a-9e8d-5f0a2b3c4d5e", name = "studio", user = "dev", address = "studio.example")
+        Mesh.hosts.add(studio)
+        accessFixture(studio, "studio")
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        val spec = org.json.JSONObject().put("setting", "access_spawn")
+            .put("hosts", org.json.JSONArray(listOf(Mesh.hosts.first().id)))
+        show { dev.baude.android.MetaSettingBox(dev.baude.android.MetaSet.ALL.getValue("access_spawn"), emptyList(), spec) }
+        laidOut()
+        screen("40j-meta-access-set")
+    }
+
+    // (Meta's value naming a host whose rule isn't known yet, "studio: unknown": that host's row, not an empty box)
+    @Test fun metaAccessUnknown() {
+        val studio = Host(id = "7d3f2a90-1c4e-4b6a-9e8d-5f0a2b3c4d5e", name = "studio", user = "dev", address = "studio.example")
+        Mesh.hosts.add(studio)
+        accessFixture(studio, "studio")
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        val s = dev.baude.android.MetaSet.ALL.getValue("access_spawn")
+        val spec = org.json.JSONObject().put("setting", "access_spawn")
+            .put("hosts", org.json.JSONArray(s.changed?.invoke("studio: unknown").orEmpty()))
+        show { dev.baude.android.MetaSettingBox(s, emptyList(), spec) }
+        laidOut()
+        screen("40k-meta-access-unknown")
+    }
+
+    /** A host answering access and access_set as one with members studio and pixel-9 would. */
+    private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody",
+                              write: String = "nobody", many: Boolean = false) {
+        val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
+        val pixel = "9c0e7a11-4f2d-4b8e-a3c5-2d7e9f1b6a40"
+        fun rule(who: String, vararg m: String) = org.json.JSONObject().put("who", who)
+            .apply { if (who == "chosen") put("members", org.json.JSONArray(m.toList())) }
+        val more = if (!many) emptyList() else listOf("nas", "laptop", "anna-mbp", "ben-thinkpad", "ci-runner-1", "ci-runner-2",
+            "ci-runner-3", "ci-runner-4", "build-mac", "cara-desktop", "dev-vm", "dina-phone", "eli-mbp", "gpu-box", "hall-tv",
+            "ivan-laptop", "kiosk", "lab-pi", "media-server", "nora-ipad", "office-mini", "test-phone", "zoe-air")
+        val ids = more.associateWith { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() }
+        fun ms(vararg n: String) = n.map { ids.getValue(it) }.toTypedArray()
+        val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser_read", rule("chosen", studio))
+            .put("browser_write", rule("nobody")).put("providers", rule("everybody"))
+            .put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
+            .put("manage_read", rule(if (write == "everybody") "everybody" else "chosen", studio)).put("manage_write", rule(write)).put("kube_read", rule("everybody"))
+            .put("kube_write", rule("nobody")).put("databases", rule("everybody")).put("subscriptions_read", rule("everybody"))
+            .put("subscriptions_write", rule("everybody")).put("access_read", rule("everybody")).put("access_write", rule("nobody"))
+        rules.put("docker_read", rule("everybody")).put("docker_write", rule("nobody"))
+        if (many) rules.put("shell", rule("chosen", studio, *ms("laptop", "build-mac")))
+            .put("browser_write", rule("chosen", studio, pixel, *ms("nas", "laptop", "hall-tv", "media-server")))
+            .put("manage_read", rule("chosen", studio, pixel, *ms("nas", "laptop", "hall-tv", "media-server", "anna-mbp",
+                "ben-thinkpad", "cara-desktop", "dina-phone", "eli-mbp", "ivan-laptop", "nora-ipad", "zoe-air")))
+            .put("manage_write", rule("chosen", studio, pixel, *ms("nas", "laptop")))
+            .put("kube_write", rule("chosen", *ms("ci-runner-1", "dev-vm")))
+            .put("databases", rule("chosen", *ms("anna-mbp", "ben-thinkpad", "cara-desktop", "dina-phone", "eli-mbp")))
+        val state = org.json.JSONObject().put("host", name).put("rules", rules).put("editable", true)
+            .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
+                org.json.JSONObject().put("id", studio).put("name", "studio")) +
+                more.map { org.json.JSONObject().put("id", ids.getValue(it)).put("name", it) }))
+        FixtureConnection.up(activity, host) { m ->
+            if (m.optString("op") != "access") return@up null
+            org.json.JSONObject().put("op", "access").put("req", m.opt("req")).put("state", state)
+                .apply { if (m.has("session")) put("session", m.get("session"))
+                    .put("chat", org.json.JSONObject().put("manage_read", rule("chosen", pixel))) }
+        }
+    }
+
     private fun telemetryFixture(profiler: Boolean = true) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") == "deps") return@up org.json.JSONObject().put("op", "deps").put("req", m.opt("req"))
@@ -256,43 +732,123 @@ abstract class Screens(private val theme: String) {
             if (m.optString("op") != "telemetry_read") return@up null
             val now = System.currentTimeMillis() / 1000.0
             val rng = java.util.Random(7)
-            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("profiling", org.json.JSONArray(listOf(
-                org.json.JSONObject().put("app", "host").put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
+            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("line_profiling", true)
+                .put("profiling", org.json.JSONArray(listOf(org.json.JSONObject().put("app", "host").put("default", true)
+                    .put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
             val out = org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req")).put("host", Mesh.hosts.first().id)
                 .put("state", state)
             when (m.optJSONArray("what")?.optString(0)) {
                 "usage" -> {
                     val today = java.time.LocalDate.now()
+                    // (a turn's tokens each kind apart: input, cache writes, cache reads, output, and older turns'
+                    // input with their cache in it; tokens all of them)
+                    fun counts(o: org.json.JSONObject, vararg n: Long) = o.apply {
+                        listOf("input", "cache_write", "cache_read", "output", "input_with_cache").forEachIndexed { i, k -> put(k, n[i]) }
+                        put("tokens", n.sum())
+                    }
                     val days = (0 until 370).filter { rng.nextDouble() < if (it > 120) 0.35 else 0.75 }.reversed().map {
-                        org.json.JSONObject().put("day", today.minusDays(it.toLong()).toString())
-                            .put("tokens", 50_000L + rng.nextInt(4_000_000)).put("turns", 1 + rng.nextInt(9)) }
-                    fun model(name: String, effort: String?, turns: Int, tokens: Long) = org.json.JSONObject().put("model", name)
-                        .put("effort", effort ?: org.json.JSONObject.NULL).put("turns", turns).put("tokens", tokens)
+                        val o = org.json.JSONObject().put("day", today.minusDays(it.toLong()).toString()).put("turns", 1 + rng.nextInt(9))
+                        val out = 500L + rng.nextInt(30_000)
+                        if (it > 30) counts(o, 0, 0, 0, out, 50_000L + rng.nextInt(4_000_000))
+                        else counts(o, 200L + rng.nextInt(20_000), 5_000L + rng.nextInt(80_000), 50_000L + rng.nextInt(4_000_000), out, 0)
+                    }
+                    fun model(name: String, effort: String?, turns: Int, vararg n: Long) = counts(org.json.JSONObject().put("model", name)
+                        .put("effort", effort ?: org.json.JSONObject.NULL).put("turns", turns), *n)
                     out.put("usage", org.json.JSONObject().put("days", org.json.JSONArray(days))
-                        .put("models", org.json.JSONArray(listOf(model("claude-opus-4-7", null, 600, 280_800_000),
-                            model("claude-sonnet-4-6", null, 222, 99_100_000), model("gpt-5.4-codex", null, 70, 33_500_000))))
-                        .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 210_000_000)))))
+                        .put("models", org.json.JSONArray(listOf(model("claude-opus-4-7", null, 600, 734_700, 3_300_000, 140_300_000, 8_600_000, 221_900_000),
+                            model("claude-sonnet-4-6", null, 222, 210_000, 1_100_000, 48_000_000, 3_100_000, 81_000_000),
+                            model("gpt-5.4-codex", null, 70, 120_000, 0, 9_800_000, 1_500_000, 22_000_000))))
+                        .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 550_000, 2_400_000, 100_000_000, 6_400_000, 160_000_000)))))
                 }
+                "counted" -> out.put("counted", org.json.JSONArray(listOf(
+                    listOf("phone", "screen", "Composer.region", 41, 9340.0), listOf("baude", "part", "Composer.region/send button", 212, 3.4),
+                    listOf("baude", "screen", "Telemetry.dialog", 9, 410.0), listOf("phone", "part", "Settings.dialog|copy:telemetry.collect", 3, 0.02),
+                    listOf("record", "menu", "RecordMenu.menu/Settings…", 12, 0.9), listOf("host", "op", "input", 233, 1.2),
+                    listOf("baude", "part", "Sidebar.region/New session button", 17, 6.1), listOf("host", "op", "transcript", 88, 10.4),
+                    listOf("baude", "callback", "windowview.WindowView.load_history", 30, 8.7),
+                    listOf("baude", "callback", "windowview.WindowView.load_history_and_scroll_to_the_message_the_user_was_reading", 4, 2.1)).map { (app, kind, name, n, sec) ->
+                    org.json.JSONObject().put("app", app).put("kind", kind).put("name", name).put("count", n).put("seconds", sec) }))
+                "errors" -> out.put("errors", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("app", "phone").put("kind", "send").put("fingerprint", "send:input:#")
+                        .put("type", "input").put("message", "the server isn't there").put("count", 3)
+                        .put("first", now - 7200).put("last", now - 240).put("commit", "1cb8c6ad0f3e").put("wire", 43)
+                        .put("wire_op", "input").put("screen", "Composer.region").put("stack", org.json.JSONArray())
+                        .put("crumbs", org.json.JSONArray(listOf(
+                            org.json.JSONObject().put("at", now - 420).put("action", "open").put("screen", "Sidebar.region"),
+                            org.json.JSONObject().put("at", now - 300).put("action", "open").put("screen", "Composer.region"),
+                            org.json.JSONObject().put("at", now - 262).put("action", "click").put("screen", "Composer.region").put("part", "send button")))),
+                    org.json.JSONObject().put("app", "baude").put("kind", "callback")
+                        .put("fingerprint", "callback:KeyError@windowdrafts.py:done").put("type", "KeyError")
+                        .put("message", "'rev'").put("count", 1).put("first", now - 5400).put("last", now - 5400)
+                        .put("file", "windowdrafts.py").put("line", 331).put("function", "done").put("commit", "1cb8c6ad0f3e")
+                        .put("wire", 43).put("screen", "Composer.region").put("part", "send button")
+                        .put("stack", org.json.JSONArray()).put("crumbs", org.json.JSONArray()))))
                 "events" -> out.put("events", org.json.JSONArray(listOf("chat_opened", "chat_front", "turn_sent", "turn_ended",
                     "chat_left").mapIndexed { i, k -> org.json.JSONObject().put("at", now - 900 + i * 60).put("app", "baude")
                         .put("kind", k).put("host", Mesh.hosts.first().id).put("session", "c1a7e4f0-0000-4000-8000-000000000001")
                         .apply { if (k == "turn_ended") put("seconds", 131.4) } }))
                 "metrics" -> out.put("metrics", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now)
                     .put("load", org.json.JSONArray(listOf(2.41, 2.10, 1.98))).put("memory_total", 17_179_869_184L)
-                    .put("memory_used", 11_811_160_064L).put("procs", org.json.JSONArray(listOf(
+                    .put("memory_used", 11_811_160_064L)
+                    .put("swap_total", 3_221_225_472L).put("swap_used", 1_288_490_188L).put("memory_pressure", "normal")
+                    .put("memory_stall", org.json.JSONObject.NULL).put("procs", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),
                         org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
-                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L)))))))
+                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 104).put("cpu", 3.8).put("rss", 412_090_368L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 106).put("cpu", 1.1).put("rss", 389_021_696L),
+                        org.json.JSONObject().put("app", "multiplex").put("pid", 105).put("cpu", 0.6).put("rss", 98_566_144L)))))))
                 "profiles" -> out.put("profiles", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now - 30)
                     .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 271).put("function", "sample")
                             .put("code", "stats = proc_stats(sorted(pids))").put("hits", 120).put("seconds", 0.912),
-                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "memory")
-                            .put("code", "text = subprocess.run([\"vm_stat\"], capture_output=True, text=True,")
-                            .put("hits", 120).put("seconds", 0.402)))))))
+                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "_mac_memory")
+                            .put("code", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:")
+                            .put("hits", 120).put("seconds", 0.402)))),
+                    org.json.JSONObject().put("at", now - 30).put("from", now - 60).put("app", "record").put("lines", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("file", "recordstore.py").put("line", 498).put("function", "take")
+                            .put("code", "self.merged_page(mine, theirs, was)").put("hits", 41).put("seconds", 0.164)))))))
             }
             out
         }
+    }
+
+    private fun dockerFixture() {
+        fun j(vararg kv: Pair<String, Any?>) = org.json.JSONObject().apply { for ((k, v) in kv) put(k, v ?: org.json.JSONObject.NULL) }
+        fun a(vararg v: Any?) = org.json.JSONArray(v.toList())
+        val shell = a("docker", "--context", "colima", "exec", "-it", "x", "sh")
+        fun ctr(name: String, image: String, status: String, tone: String, ports: String, project: String, age: String, secs: Int,
+                running: Boolean = true) = j("id" to name, "name" to name, "cells" to a(name, image, status, ports, project, age),
+            "keys" to a(name, image, status, ports, project, secs), "tones" to a("", "", tone, "", "", ""), "tips" to a("", "", "", "", "", ""),
+            "actions" to (if (running) a("stop", "restart", "remove") else a("start", "remove")), "logs" to true,
+            "shell" to if (running) shell else a(), "running" to running)
+        val rows = a(ctr("shop-api-1", "shop/api:1.4", "Up 2 hours", "ok", "0.0.0.0:8080->80/tcp", "shop", "2h05m", 7500),
+            ctr("shop-db-1", "postgres:16", "Up 2 hours (healthy)", "ok", "5432/tcp", "shop", "2h06m", 7560),
+            ctr("shop-worker-1", "shop/worker:1.4", "Restarting (1) 4 seconds ago", "warn", "", "shop", "2h05m", 7500),
+            ctr("cache", "redis:7", "Up 3 days", "ok", "6379/tcp", "", "3d", 264000))
+        fun page(t: String, k: String, w: String) = j("title" to t, "key" to k, "what" to w)
+        val sections = a(j("title" to "Containers", "icon" to "baude-kube-workloads-symbolic",
+                "pages" to a(page("Running", "running", "running containers"), page("All", "containers", "containers"))),
+            j("title" to "Images", "icon" to "package-x-generic-symbolic", "pages" to a(page("Images", "images", "images"))),
+            j("title" to "Volumes", "icon" to "baude-kube-storage-symbolic", "pages" to a(page("Volumes", "volumes", "volumes"))),
+            j("title" to "Networks", "icon" to "baude-kube-network-symbolic", "pages" to a(page("Networks", "networks", "networks"))),
+            j("title" to "Compose Projects", "icon" to "view-grid-symbolic", "pages" to a(page("Compose Projects", "compose", "Compose projects"))))
+        val cols = a(j("title" to "Name", "kind" to "name"), j("title" to "Image"), j("title" to "Status", "kind" to "status"),
+            j("title" to "Ports"), j("title" to "Project"), j("title" to "Age", "kind" to "age"))
+        val yaml = "- Id: 3f9c2a1b7d4e8f60\n  Name: /shop-api-1\n  State:\n    Status: running\n    Running: true\n" +
+            "  Config:\n    Image: shop/api:1.4\n    Env:\n      - \"PORT=80\"\n    Labels:\n      com.docker.compose.project: shop\n"
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "docker") null
+            else org.json.JSONObject().put("op", "docker").put("req", m.opt("req")).put("what", m.optString("what")).apply {
+                when (m.optString("what")) {
+                    "contexts" -> put("contexts", a(j("name" to "colima", "current" to true), j("name" to "default", "current" to false)))
+                        .put("sections", sections)
+                    "list" -> put("columns", cols).put("rows", rows)
+                    "inspect" -> put("text", yaml).put("file", "inspect.yaml")
+                }
+            }
+        }
+        Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit().putString("docker_inspect", "yaml").apply()
     }
 
     private fun missingFixture() {
@@ -323,31 +879,80 @@ abstract class Screens(private val theme: String) {
                     dep("xvfb", "Xvfb", true, "sudo apt install xvfb", "deps.multiplex"),
                     dep("webkit", "WebKitGTK", true, "sudo apt install gir1.2-webkit-6.0", "mesh_versions.emission").put("where", "app"),
                     dep("node", "Node.js", true, "sudo apt install nodejs npm", "side_panel.signal").put("where", "app"))))
+                "deciders" -> r.put("what", "list").put("deciders", org.json.JSONArray(listOf( // (one answering, one not)
+                    org.json.JSONObject().put("value", "triage").put("id", "triage").put("name", "Triage")
+                        .put("url", "http://127.0.0.1:8000").put("reachable", true).put("model", "strands-decider-E2B-gemma4-v2-2611"),
+                    org.json.JSONObject().put("value", "review").put("id", "review").put("name", "Review")
+                        .put("url", "http://127.0.0.1:8009").put("reachable", false).put("error", "isn't running at http://127.0.0.1:8009"))))
                 else -> null
             }
         }
     }
 
-    private fun accountsFixture() {
+    /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
+    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true, disabled: Boolean = false,
+                                resume: Boolean = false) {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage") ||
+                (!listing && m.optString("what") == "list")) null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
+                    org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true).put("codex_usage", true)
+                .apply {
+                    if (disabled) put("disabled", org.json.JSONArray(listOf("w1"))).put("auto_disable", org.json.JSONArray(listOf("h2")))
+                    if (resume) put("auto_resume", org.json.JSONArray(listOf("h2")))
+                    fun limits(id: String): org.json.JSONArray {
+                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18), "codex" to (37 to 61),
+                            "p1" to (8 to 3))[id] ?: (5 to 12)
+                        return org.json.JSONArray(listOf(
+                            org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five)
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600 + 720),
+                            org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", seven)
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600)))
+                    }
+                    if (m.optString("what") == "usage") put("usage", limits(m.optString("id")
+                        .ifEmpty { if (m.optString("provider") == "codex") "codex" else "" }))
+                    if (reading) put("last_usage", org.json.JSONObject().apply {
+                        for (id in listOf("", "w1", "h2")) put(id, org.json.JSONObject().put("usage", limits(id))
+                            .put("read", System.currentTimeMillis() / 1000 - 600))
+                    })
+                }
+        }
+    }
+
+    private fun noCodexFixture() {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts") null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
                 .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
-                .apply { if (m.optString("what") == "usage") put("usage", org.json.JSONArray(listOf(
-                    org.json.JSONObject().put("name", "Five hour").put("percent", 25),
-                    org.json.JSONObject().put("name", "Seven day").put("percent", 40)))) }
+                .put("missing", org.json.JSONObject().put("codex", org.json.JSONObject().put("dep", "codex").put("name", "Codex CLI")
+                    .put("where", "host").put("present", false).put("fix", "npm install -g @openai/codex").put("group", "deps.providers")
+                    .put("link", "https://github.com/openai/codex").put("check", false).put("ready", org.json.JSONObject.NULL)))
         }
     }
 
-    private fun tokenAccountsFixture() {
+    /** usage: a second token account (Spare) too, and each one's usage answered as its host says a setup token's: Personal's
+     * as its chats' turns last said it, 4 minutes ago; Spare's, with no turn yet, nothing. */
+    private fun tokenAccountsFixture(usage: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts") null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(
-                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
+                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token")) +
+                    (if (usage) listOf(org.json.JSONObject().put("id", "t2").put("provider", "claude").put("name", "Spare")
+                        .put("kind", "token")) else emptyList())))
                 .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
+                .apply {
+                    val now = System.currentTimeMillis() / 1000
+                    if (usage && m.optString("what") == "usage" && m.optString("id") == "t1") put("usage", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", 42).put("resets", now + 3 * 3600),
+                        org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", 17).put("resets", now + 4 * 86400))))
+                        .put("as_of", now - 240)
+                    else if (usage && m.optString("what") == "usage") put("usage", org.json.JSONObject.NULL).put("after_turn", true)
+                }
         }
     }
 
@@ -393,6 +998,22 @@ abstract class Screens(private val theme: String) {
         screen("94b-open-folder-typed")
         tap("garden")
         screen("94c-open-folder-browsed")
+        tap("Open")
+    }
+
+    /** Open folder…'s keys, a keyboard's: a path's last part beginning one folder, Tab: it; Down twice: the second
+     * folder picked; a folder tapped, then Back: out of it again. */
+    @Test fun openFolderKeys() = newChat("95b-open-folder-keys-opened") {
+        tap("Open folder…")
+        typeIn("/home/dev/ga")
+        press(android.view.KeyEvent.KEYCODE_TAB)
+        screen("94d-open-folder-tab")
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        screen("94e-open-folder-picked")
+        tap("docs")
+        press(android.view.KeyEvent.KEYCODE_BACK)
+        screen("94f-open-folder-back")
         tap("Open")
     }
 
@@ -483,6 +1104,279 @@ abstract class Screens(private val theme: String) {
     }
 
     // (This phone's Name and Key Material, Add Host, and a host's key to trust)
+    // ---- the Inbox (Inbox.page.json, InboxAsk.page.json): five asks of workshop's tasks, from Juniper's and Fern's
+
+    @Test fun inboxRow() = render("inbox-1-row") { inboxFixture(); HomeScreen() }
+
+    @Test @Config(qualifiers = "+h3300dp") fun inboxList() {
+        inboxFixture()
+        show { dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> }) }
+        laidOut()
+        screen("inbox-2-list")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAsk() {
+        inboxFixture()
+        show { dev.baude.android.AskScreen("h1", "deploy", {}) }
+        laidOut()
+        screen("inbox-3-ask")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAskRoute() {
+        inboxFixture()
+        show { dev.baude.android.AskScreen("h1", "deploy", {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Inbox.routeTo)
+        layOut()
+        withMenus("inbox-4-route")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAskProposal() {
+        inboxFixture(proposal = true)
+        show { dev.baude.android.AskScreen("h1", "limit", {}) }
+        laidOut()
+        screen("inbox-5-proposal")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAskHistory() {
+        inboxFixture()
+        show { dev.baude.android.AskScreen("h1", "review", {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Inbox.more)
+        layOut()
+        withMenus("inbox-6-history")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxAskPictureButtons() {
+        inboxFixture()
+        show { dev.baude.android.AskScreen("h1", "logo", {}) }
+        laidOut()
+        screen("inbox-10-picture-buttons")
+    }
+
+    /** The logo ask's first picture button's picture tapped: the large view, its pictures in the ask's order; then a
+     * swipe to the next. */
+    @Test fun inboxAskPictureViewer() {
+        inboxFixture()
+        dev.baude.android.Viewer.flyMs = 0
+        show { dev.baude.android.AskScreen("h1", "logo", {}) }
+        laidOut()
+        val shot = windows().flatMap(::composeRoots).flatMap { semanticsUnder(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Role) && n.config[androidx.compose.ui.semantics.SemanticsProperties.Role] == androidx.compose.ui.semantics.Role.Image &&
+                n.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        } ?: error("no picture to tap")
+        shot.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+        laidOut()
+        screen("inbox-11-picture-viewer")
+        swipe(0.8f, 0.2f)()
+        laidOut()
+        screen("inbox-12-picture-viewer-next")
+        dev.baude.android.Viewer.state.value = null
+    }
+
+    private fun composeRoots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+        is androidx.compose.ui.node.RootForTest -> listOf(v)
+        is android.view.ViewGroup -> (0 until v.childCount).flatMap { composeRoots(v.getChildAt(it)) }
+        else -> emptyList()
+    }
+
+    private fun semanticsUnder(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+        listOf(n) + n.children.flatMap { semanticsUnder(it) }
+
+    @Test @Config(qualifiers = "+h3300dp") fun inboxStoppedList() {
+        inboxFixture(stopped = true)
+        show { dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> }) }
+        laidOut()
+        screen("inbox-7-stopped-list")
+    }
+
+    @Test @Config(qualifiers = "+h1300dp") fun inboxStoppedAsk() {
+        inboxFixture(stopped = true)
+        show { dev.baude.android.AskScreen("h1", "deploy", {}) }
+        laidOut()
+        screen("inbox-8-stopped-ask")
+    }
+
+    @Test @Config(qualifiers = "+h1500dp") fun inboxChatAsk() {
+        inboxFixture(chat = true)
+        show { dev.baude.android.AskScreen("h1", "chat", {}) }
+        laidOut()
+        screen("inbox-13-chat-ask")
+    }
+
+    @Test @Config(qualifiers = "+h3300dp") fun inboxChatList() {
+        inboxFixture(chat = true)
+        show { dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> }) }
+        laidOut()
+        screen("inbox-14-chat-list")
+    }
+
+    @Test @Config(qualifiers = "+h1500dp") fun inboxChatStopped() {
+        inboxFixture(chat = true, stopped = true)
+        show { dev.baude.android.AskScreen("h1", "chat", {}) }
+        laidOut()
+        screen("inbox-15-chat-stopped")
+    }
+
+    @Test fun inboxEmpty() = render("inbox-9-empty") {
+        Mesh.sessions["h1"] = Mesh.sessions.getValue("h1").map { Msg.Session.from(it.json().put("state", "idle")) }
+        dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> })
+    }
+
+    @Test fun inboxAskedAgainAfterReconnect() {
+        val asked = ArrayList<String>()
+        val c = FixtureConnection(activity, Mesh.hosts.first()) { m -> asked.add(m.optString("op")); null }
+        dev.baude.android.Inbox.clear()
+        dev.baude.android.Inbox.listed(c)
+        dev.baude.android.Inbox.listed(c)
+        check(asked == listOf("inbox")) { "$asked" }
+        dev.baude.android.Inbox.down(c)
+        dev.baude.android.Inbox.listed(c)
+        check(asked == listOf("inbox", "inbox")) { "$asked" }
+    }
+
+    /** workshop's Bots Juniper and Fern (Fern at a turn), "Fix the flaky upload" asking to run Bash, and five asks of
+     * their tasks (the desktop's example asks: a deploy with its home page, a review with a note to write, three logos to
+     * pick, a morning digest and a limit's six coloured buttons and its form); stopped: the deploy one's task gone;
+     * proposal: Opus's answer to the limit one, ready. Their pictures are scratch-BI-289's fixtures where build/inbox-fix
+     * has them (copied there by hand: never kept), else a flat colour of their size. */
+    private fun inboxFixture(stopped: Boolean = false, proposal: Boolean = false, chat: Boolean = false) {
+        val now = System.currentTimeMillis() / 1000.0
+        val dir = java.io.File("build/inbox-fix")
+        val sizes = mapOf("tea-after.png" to (1920 to 1200), "dash-after.png" to (1920 to 1200), "week.png" to (2200 to 600),
+            "logo-a.png" to (720 to 720), "logo-b.png" to (720 to 720), "logo-c.png" to (720 to 720),
+            "meter-work.png" to (600 to 80), "meter-home.png" to (600 to 80), "meter-team.png" to (600 to 80),
+            "use-work.png" to (600 to 168), "use-home.png" to (600 to 168), "use-team.png" to (600 to 168),
+            "timings.png" to (2400 to 660))
+        fun bytes(name: String): ByteArray {
+            java.io.File(dir, name).takeIf { it.exists() }?.let { return it.readBytes() }
+            val (w, h) = sizes.getValue(name)
+            val b = android.graphics.Bitmap.createBitmap(w / 4, h / 4, android.graphics.Bitmap.Config.ARGB_8888)
+            b.eraseColor(0xFF8FA8C0.toInt())
+            return java.io.ByteArrayOutputStream().also { b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        FixtureConnection.down()
+        val workshop = Mesh.hosts.first { it.id == "h1" }
+        FixtureConnection.up(activity, workshop) { msg ->
+            if (msg.optString("op") != dev.baude.android.Op.INBOX_PICTURE) null
+            else org.json.JSONObject().put("op", dev.baude.android.Op.INBOX_PICTURE_DATA).put("req", msg.opt("req"))
+                .put("mime", "image/png").put("data", java.util.Base64.getEncoder().encodeToString(bytes(msg.optString("name"))))
+        }
+        fun bot(id: String, name: String, state: String, ago: Double) = Msg.Session(id = id, title = name, cwd = "/home/dev/$id",
+            updated = now - ago, said = now - ago, created = now - 90_000, state = state, model = "opus", effort = "high",
+            mode = "default", bot = Msg.BotListing(name = name))
+        val rest = Mesh.sessions.getValue("h1").map {
+            if (it.id == "d") Msg.Session.from(it.json().put("asks", org.json.JSONArray().put(org.json.JSONObject()
+                .put("request_id", "r1").put("tool", "Bash").put("input", org.json.JSONObject())))) else it
+        }
+        Mesh.sessions["h1"] = listOf(bot("j", "Juniper", "idle", 30.0), bot("f", "Fern", "working", 90.0)) + rest +
+            (if (chat) listOf(Msg.Session(id = "t", title = "Speed up the tokenizer's hot loop", cwd = "/home/dev/parser",
+                updated = now - 20, said = now - 20, created = now - 9_000, state = "idle", model = "opus", effort = "high",
+                mode = "default")) else emptyList())
+        Mesh.pictures["h1/j/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
+        fun pic(name: String) = Msg.InboxPicture(name = name, mime = "image/png", size = 1000,
+            width = sizes.getValue(name).first, height = sizes.getValue(name).second)
+        fun field(name: String, type: String, label: String, default: Any? = null) =
+            Msg.TaskField(name = name, label = label, type = type, default = default)
+        fun button(label: String, style: String? = null, picture: String? = null) = Msg.InboxButton(label = label, style = style, picture = picture)
+        fun ask(id: String, bot: String, task: String, title: String, ago: Double, body: String, buttons: List<Msg.InboxButton>,
+                pictures: List<String> = emptyList(), form: List<Msg.TaskField> = emptyList(), versions: Int = 1,
+                status: String = "waiting", proposal: Msg.InboxProposal? = null) = Msg.InboxAsk(id = id,
+            session = if (bot == "Juniper") "j" else "f", bot = bot, task = "t-$id", taskName = task, run = "r-$id", at = now - ago,
+            status = status, proposal = proposal, versions = (1..versions).map { n ->
+                Msg.InboxVersion(at = now - ago - (versions - n) * 3_600.0, title = title, body = body,
+                    pictures = pictures.map(::pic), buttons = buttons, form = form)
+            })
+        val deploy = ask("deploy", "Juniper", "Deploy site", "Deploy site: deploy 2.5 to production?", 4_000.0, """### Deploy site to prod?
+
+Staging has run **2.5** since 08:10 with no errors. This is its home page:
+
+![home, staging](tea-after.png)
+
+Approve to put it on production; deny to keep 2.4 there. Changed routes:
+- `/` new hero and product cards
+- `/subscriptions` new page
+- `/about` moved to `/journal/about`
+- `/cart` free delivery over £30
+""", listOf(button("Approve", "primary"), button("Deny", "red")), listOf("tea-after.png"), status = if (stopped) "stopped" else "waiting")
+        val review = ask("review", "Fern", "Review pull requests", "Review #128: Add an orders chart", 1_200.0, """### #128 Add an orders chart to the dashboard
+
+Replaces the Recent orders list on Overview with a bar chart of orders per day, and moves the list to Orders. **v2** fixes the empty-week case from v1. +214 −61 in 7 files.
+
+![overview, after](dash-after.png)
+
+One test still fails:
+
+| Test | Result |
+|---|---|
+| chart renders 7 days | ✓ passed |
+| chart with no orders | ✓ passed |
+| **chart in a time zone east of UTC** | **✗ failed**: Sunday counted twice |
+""", listOf(button("Merge", "green"), button("Ask Bot to fix"), button("Close", "red")), listOf("dash-after.png"),
+            listOf(field("note", "text", "Note for the Bot")), versions = 2)
+        val logo = ask("logo", "Fern", "Kestrel logo", "Kestrel logo: which direction?", 600.0, """### Which logo?
+
+Three directions for Kestrel Coffee's new sign and cups. Pick one and I'll make the full set (cup, sign, favicon).
+""", listOf(button("A · Badge with the bird", picture = "logo-a.png"), button("B · Bean and wordmark", picture = "logo-b.png"),
+            button("C · App-style monogram", picture = "logo-c.png"), button("None, try again")),
+            listOf("logo-a.png", "logo-b.png", "logo-c.png"))
+        val digest = ask("digest", "Juniper", "Morning digest", "Morning digest, Thursday", 6_000.0, """### Morning digest, Thursday
+
+Work ran out this morning; Home and Team have plenty left.
+
+![used this week](week.png)
+
+| Subscription | Used this week | Resets | Last 7 days |
+|---|---|---|---|
+| Work | **100%** | Fri 06:00 | ![Work, last 7 days](use-work.png) |
+| Home | 41% | Mon 06:00 | ![Home, last 7 days](use-home.png) |
+| Team | 17% | Mon 06:00 | ![Team, last 7 days](use-team.png) |
+""", listOf(button("Rerun failed", "primary"), button("Snooze to 13:00", "yellow"), button("Dismiss")),
+            listOf("week.png", "use-work.png", "use-home.png", "use-team.png"), versions = 5)
+        val limit = ask("limit", "Juniper", "Budget guard", "Work is at 100%: bill extra usage?", 2_400.0, """### Work is at 100% and would bill extra usage
+
+Work's weekly limit ran out at 09:12. Three chats are running on it; they stop at their next message unless you choose.
+
+| Subscription | Used this week | | Resets |
+|---|---|---|---|
+| Work | **100%** | ![Work, 100%](meter-work.png) | Fri 06:00 (in 21 h) |
+| Home | 41% | ![Home, 41%](meter-home.png) | Mon 06:00 |
+| Team | 17% | ![Team, 17%](meter-team.png) | Mon 06:00 |
+""", listOf(button("Continue on overage", "orange"), button("Switch these chats to Home", "primary"),
+            button("Switch these chats to Team", "blue"), button("Pause until Work resets on Friday", "slate"),
+            button("Keep the tokenizer chat on overage, pause the rest", "purple"), button("Stop all three chats", "red")),
+            listOf("meter-work.png", "meter-home.png", "meter-team.png"),
+            listOf(field("cap", "number", "Spend cap (£)", 20), field("notify", "bool", "Notify me", true)),
+            proposal = if (proposal) Msg.InboxProposal(model = "opus", name = "Opus 5.5", status = "ready", button = 1,
+                values = org.json.JSONObject().put("cap", 0).put("notify", true),
+                text = "Home has 59% left this week and resets Monday; nothing needs Work's overage today.") else null)
+        // (a chat's own ask: its model's, raised with its chat's tools, no task)
+        val tokenizer = Msg.InboxAsk(id = "chat", session = "t", chat = "Speed up the tokenizer's hot loop", at = now - 20,
+            status = if (stopped) "stopped" else "waiting", versions = listOf(Msg.InboxVersion(at = now - 20,
+                title = "Tokenizer: keep the merge rewrite?", body = """### The hot loop is 2.4× faster
+
+I rewrote byte-pair merging to work on one flat array instead of a list of strings, and split on whitespace with a lookup table. Every test passes; this is 1 GB of the docs corpus, before and after:
+
+![seconds per stage](timings.png)
+
+| Stage | Before | After |
+|---|---|---|
+| split on whitespace | 3.6 s | **1.1 s** |
+| merge byte pairs | 6.8 s | **2.4 s** |
+| map to ids | 1.7 s | **0.6 s** |
+""", pictures = listOf(pic("timings.png")),
+                buttons = listOf(button("Keep it and open a pull request", "green"), button("Try a SIMD split too", "blue"),
+                    button("Revert", "red")),
+                form = listOf(field("branch", "text", "Branch", "tokenizer-flat-merge"),
+                    field("bench", "bool", "Run the full benchmark first", true)))))
+        dev.baude.android.Inbox.clear()
+        dev.baude.android.Inbox.asks["h1"] = listOf(deploy, review, logo, digest, Msg.InboxAsk.from(limit.json().apply { remove("proposal") })) +
+            (if (chat) listOf(tokenizer) else emptyList())
+        if (proposal) dev.baude.android.Inbox.changed("h1", Msg.InboxChanged(ask = limit))
+    }
+
     @Test fun addHost() {
         show { dev.baude.android.AddHost(done = {}) }
         screen("45-add-host")
@@ -783,6 +1677,24 @@ abstract class Screens(private val theme: String) {
         screen("01e-home-desktop-groups")
     }
 
+    @Test fun homeGroupsClicked() {
+        desktopChats()
+        show { HomeScreen() }
+        tap(dev.baude.android.Wording.Sidebar.groupByTip)
+        layOut()
+        screen("01f-home-groups-all")
+        tap(dev.baude.android.Wording.Sidebar.desktopGroup, nth = 1) // (a group's check, every one listed; the first is
+        // the list's Desktop heading)
+        layOut()
+        screen("01f-home-groups-one-clicked")
+        tap(dev.baude.android.Wording.Sidebar.groups)
+        layOut()
+        screen("01f-home-groups-groups-clicked")
+        tap(dev.baude.android.Wording.Sidebar.groups) // (again, every one listed)
+        layOut()
+        screen("01f-home-groups-groups-again")
+    }
+
     @Test fun chatDesktopElsewhere() {
         Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
             if (it.id == "a") Msg.Session.from(it.json().put("desktop", true).put("elsewhere", true).put("state", "stopped")) else it
@@ -796,6 +1708,52 @@ abstract class Screens(private val theme: String) {
         tap("Why the build is slow", long = true)
         layOut()
         screen("09c-home-session-menu")
+    }
+
+    @Test fun homeCodexSessionMenu() { // (a Codex chat's long-press menu: Make Bot… too)
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.title == "Why the build is slow") Msg.Session.from(it.json().put("model", "codex/default")) else it
+        }
+        show { HomeScreen() }
+        tap("Why the build is slow", long = true)
+        layOut()
+        screen("09c-home-codex-session-menu")
+    }
+
+    // (a Bot's long-press menu: Rotate after Bot Settings…; then, rotated, its new chat empty, and a search finding its past
+    // thread under Archived)
+    @Test fun homeBotMenu() {
+        workshopBot()
+        show { HomeScreen() }
+        tap("Juniper", long = true)
+        layOut()
+        screen("09d-home-bot-menu")
+    }
+
+    @Test fun homeBotThreadSearch() {
+        rotatedBot()
+        show { HomeScreen() }
+        typeIn("Juniper")
+        screen("09e-home-bot-thread-search")
+    }
+
+    @Test fun chatBotRotated() {
+        val bot = rotatedBot()
+        Mesh.openChat("h1", bot.id.orEmpty())
+        render("10f-chat-bot-rotated") { ChatShell("h1", bot.id.orEmpty(), back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    /** workshop's Juniper rotated: a new, empty chat, its past one archived as "Juniper / <its title>". */
+    private fun rotatedBot(): Msg.Session {
+        val bot = workshopBot()
+        val now = System.currentTimeMillis() / 1000.0
+        val thread = Msg.Session(id = "a0", title = "Juniper / ${bot.title}", cwd = bot.cwd, updated = now - 120, said = now - 120,
+            created = bot.created, state = "stopped", model = bot.model, effort = bot.effort, mode = bot.mode, archived = true)
+        val fresh = bot.json().put("rotated", now).put("said", now).put("prompts", 0).put("size", 0)
+        fresh.remove("title")
+        val rotated = Msg.Session.from(fresh)
+        Mesh.sessions["h1"] = listOf(rotated) + Mesh.sessions.getValue("h1").drop(1) + thread
+        return rotated
     }
 
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
@@ -822,6 +1780,44 @@ abstract class Screens(private val theme: String) {
         tap("Menu")
         layOut()
         screen("10d-chat-archived")
+    }
+    /** A chat its host lets this phone only read, a permission asked in it, its ☰ open: no text box, the ask's buttons
+     * greyed, Read-only session checked and greyed. */
+    @Test fun chatReadOnlyMember() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        chat.chrome.writes.value = false
+        chat.asks.add(dev.baude.android.Ask("perm-ro", "Bash", org.json.JSONObject().put("command", "make release"), null))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        laidOut()
+        screen("10e-chat-read-only-member")
+        tap("Menu")
+        layOut()
+        screen("10f-chat-read-only-member-menu")
+    }
+    /** MCP tools named: a ToolSearch loading the mesh's tools (its input open), a mesh tool's card, and a Slack
+     * connector's tool asking to run, the host's info saying how its tools are named. */
+    @Test fun chatMcpNames() {
+        Mesh.infos["h1"] = Msg.Info.from(org.json.JSONObject().put("id", "h1").put("name", "workshop").put("tool_names",
+            org.json.JSONObject().put("servers", org.json.JSONObject().put("mesh", "Mesh").put("claude_ai_Slack", "Slack"))))
+        val chat = Mesh.openChat("h1", "a")
+        settle()
+        chat.lines.clear()
+        fun call(id: String, name: String, input: org.json.JSONObject) = dev.baude.android.took(chat.calls, chat.lines,
+            Line("call", org.json.JSONObject().put("id", id).put("name", name).put("input", input).toString()))
+        chat.lines.add(Line("you", "Which of my tasks ran today? Post it to the team channel."))
+        call("ts", "ToolSearch", org.json.JSONObject().put("query", "select:mcp__mesh__tasks,mcp__mesh__task_run").put("max_results", 2))
+        call("mt", "mcp__mesh__tasks", org.json.JSONObject().put("bot", "a1b2c3"))
+        val post = org.json.JSONObject().put("channel_id", "C024BE91L").put("message", "Two tasks ran today: nightly tests and the weekly report.")
+        call("sl", "mcp__claude_ai_Slack__slack_send_message", post)
+        chat.calls.byId.getValue("ts").result("Loaded 2 tools", false, emptyList())
+        chat.calls.byId.getValue("mt").result("[]", false, emptyList())
+        chat.calls.byId.getValue("ts").inputOpen = true
+        chat.calls.opened["ts"] = true
+        chat.asks.add(dev.baude.android.Ask("perm-sl", "mcp__claude_ai_Slack__slack_send_message", post, "sl"))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        laidOut()
+        screen("10g-chat-mcp-names")
     }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
@@ -970,6 +1966,66 @@ abstract class Screens(private val theme: String) {
         withMenus("21-chat-model-picker-end")
     }
 
+    // (a chat on Claude's model whose host keeps two Claude subscriptions, Personal (the chat's) and Work: the provider
+    // picker beside the model lists them by name, pressed)
+    @Test fun chatSubscriptions() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20s-chat-subscriptions")
+        tap("CLI default")
+        laidOut()
+        withMenus("20t-chat-subscriptions-open")
+    }
+
+    // (a chat on Work Account, disabled on its host: the banner says so, its send button off)
+    @Test fun chatSubscriptionDisabled() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json()).put("account_disabled", true).put("state", "idle")) else it }
+        chat.busy.value = false
+        chat.thinking.value = false
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20v-chat-subscription-disabled")
+    }
+
+    // (a chat whose turn the five-hour limit stopped, on a subscription that resumes it: when, and Cancel, at its end)
+    @Test fun chatLimitResume() {
+        val chat = Mesh.openChat("h1", "a")
+        chat.lines.addAll(listOf(Line("you", "Refactor the parser into a tokenizer and a parser"),
+            Line("bot", "You've hit your 5-hour limit · resets 4:08pm (Europe/Dublin)")))
+        val at = java.time.LocalDate.now().atTime(16, 9).atZone(java.time.ZoneId.systemDefault()).toEpochSecond()
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("resume_at", at).put("state", "idle")) else it }
+        chat.busy.value = false
+        chat.thinking.value = false
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20w-chat-limit-resume")
+    }
+
+    // (the same chat on the added account: CLI default still listed, to go back to)
+    @Test fun chatSubscriptionsOnAccount() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json())) else it }
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        tap("Work Account")
+        laidOut()
+        withMenus("20u-chat-subscriptions-on-account")
+    }
+
     // (Settings → Meta's Intelligence, and the New session dialog's model, pressed: the menu under the button or, with
     // less room there than the list takes, over it; then Meta's Intelligence card as the page's last row, the list above it)
     @Test fun metaModelPicker() {
@@ -1010,7 +2066,7 @@ abstract class Screens(private val theme: String) {
     }
 
     /** What scrolls around text (a list with it in) scrolled to its end. */
-    private fun scrollUnder(text: String) {
+    private fun scrollUnder(text: String, by: Float = 100_000f) {
         fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
             is androidx.compose.ui.node.RootForTest -> listOf(v)
             is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
@@ -1023,7 +2079,7 @@ abstract class Screens(private val theme: String) {
                 it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { t -> t.text == text }
             }
         }
-        list.config[androidx.compose.ui.semantics.SemanticsActions.ScrollBy].action!!.invoke(0f, 100_000f)
+        list.config[androidx.compose.ui.semantics.SemanticsActions.ScrollBy].action!!.invoke(0f, by)
         settle()
     }
 
@@ -1227,6 +2283,32 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/50b-chat-queue-sent-elsewhere.png")
     }
 
+    /** A chat at a turn with two messages another head queued (its host's queue, given as it's attached): drawn under
+     * it as queued here; then one taken out on the phone (its ✕), dropped from its host's queue too. */
+    @Test fun chatQueueFromHost() {
+        val ops = ArrayList<org.json.JSONObject>()
+        fun turn(id: String, text: String) = org.json.JSONObject().put("id", id).put("text", text).put("content", text)
+        val queue = org.json.JSONObject().put("rev", 2).put("upto", org.json.JSONObject.NULL).put("turns", org.json.JSONArray(listOf(
+            turn("6b0e3a4c-1d2f-4a5b-8c9d-0e1f2a3b4c5d", "Then tag the release as v0.9.0."),
+            turn("7c1f4b5d-2e3a-4b6c-9d0e-1f2a3b4c5d6e", "And push the tag to origin."))))
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            ops.add(m)
+            when (m.optString("op")) {
+                "attach" -> org.json.JSONObject().put("op", "attached").put("writes", true).put("queue", queue)
+                    .put("session", Mesh.sessions["h1"]!!.first { it.id == "a" }.json().put("state", "working"))
+                else -> null
+            }
+        }
+        Mesh.drafts.clear()
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        chatSoFar(Mesh.open!!)
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50c-chat-queue-from-host.png")
+        Mesh.open!!.queued.firstOrNull()?.let { dev.baude.android.Queue.drop(Mesh.open!!, it) }
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50d-chat-queue-from-host-dropped.png")
+    }
+
     /** Chat a's conversation as its host has it: a long turn begun. */
     private fun chatSoFar(chat: Chat) {
         chat.lines.addAll(listOf(Line("you", "Tidy the release notes for 0.9.", uuid = "u1"),
@@ -1309,6 +2391,55 @@ abstract class Screens(private val theme: String) {
         chat.streaming.value = (1..12).joinToString("\n\n") { "Streamed paragraph $it of the reply, which keeps on growing below." }
         repeat(60) { frame() }
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/46-chat-follow-after-interrupt.png")
+    }
+
+    /** The long chat scrolled up to its first lines with more of its transcript before them, the host slow to send
+     * it: what's before them asked for and not come yet, the host failing it (asked again a little later, the spinner
+     * still up), then come and put above, what was in view left there. */
+    @Test fun chatEarlier() {
+        Mesh.close()
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val asked = ArrayList<Pair<org.json.JSONObject, (org.json.JSONObject) -> Unit>>()
+        val earlier = (1..12).joinToString("") { i ->
+            org.json.JSONObject().put("type", "user").put("uuid", "e$i").put("message", org.json.JSONObject().put("role", "user")
+                .put("content", "Earlier question $i about the build cache.")).toString() + "\n" +
+            org.json.JSONObject().put("type", "assistant").put("uuid", "r$i").put("message", org.json.JSONObject().put("role", "assistant")
+                .put("content", org.json.JSONArray().put(org.json.JSONObject().put("type", "text")
+                    .put("text", "Earlier answer $i: the cache key changes whenever a plugin's version does.")))).toString() + "\n"
+        }.toByteArray()
+        val c = FixtureConnection.up(activity, Mesh.hosts.first()) { null }
+        val slow = object : dev.baude.android.Connection(activity, dev.baude.android.Place.Direct(Mesh.hosts.first()), identify = { _, _ -> },
+            route = { null }, heard = { _, _ -> }, changed = {}) {
+            init { state = "up"; info = c.info }
+            override fun start() {}
+            override fun stop() {}
+            override fun send(msg: org.json.JSONObject) = true
+            override fun request(msg: org.json.JSONObject, then: (org.json.JSONObject) -> Unit) { asked.add(msg to then) }
+        }
+        @Suppress("UNCHECKED_CAST")
+        (Mesh::class.java.getDeclaredField("conns").apply { isAccessible = true }.get(Mesh) as HashMap<String, dev.baude.android.Connection>)["h1"] = slow
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.start = earlier.size.toLong()
+        chat.earlier.value = true
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(60) { frame() }
+        repeat(14) { drag(from = 0.25f, to = 0.85f) }
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47b-chat-earlier-reading.png")
+        fun earlierAsks() = asked.filter { it.first.optString("op") == "transcript" && it.first.has("limit") }
+        val first = earlierAsks().size
+        earlierAsks().last().second(org.json.JSONObject().put("op", "error").put("error", "not connected"))
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47c-chat-earlier-failed.png")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        check(earlierAsks().size == first + 1) { "asked again after a failure: ${earlierAsks().size - first}" }
+        val (msg, then) = earlierAsks().last()
+        then(org.json.JSONObject().put("op", "transcript").put("offset", msg.optLong("offset"))
+            .put("data", java.util.Base64.getEncoder().encodeToString(earlier)).put("next", earlier.size).put("size", earlier.size + 1000))
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47d-chat-earlier-read.png")
     }
 
     /** A code block scrolled by a finger, then what you send: the end comes into view. */
@@ -1547,6 +2678,24 @@ abstract class Screens(private val theme: String) {
         settle()
     }
 
+    /** The first thing on screen whose words end with ending tapped (a count's in them: "<n> more"). */
+    private fun tapEnding(ending: String) {
+        val act = androidx.compose.ui.semantics.SemanticsActions.OnClick
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }.first { n ->
+            n.config.contains(act) && n.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }
+                .any { it.text.endsWith(ending) }
+        }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
     /** What on screen has a long-press labelled label (its OnLongClick's), long-pressed. */
     private fun longPress(label: String) {
         fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
@@ -1559,6 +2708,15 @@ abstract class Screens(private val theme: String) {
         val act = androidx.compose.ui.semantics.SemanticsActions.OnLongClick
         windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }
             .first { it.config.contains(act) && it.config[act].label == label }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A key pressed and let go in the window on top (a dialog's, if one's up), as a keyboard would. */
+    private fun press(code: Int) {
+        val top = windows().last()
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

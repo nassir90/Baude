@@ -21,11 +21,11 @@ import widgets  # noqa: E402
 import refkinds  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
-from baudelib import wording  # noqa: E402
+from baudelib import toolnames, wording  # noqa: E402
 from baudelib.client import chat_name  # noqa: E402
 from meta import (  # noqa: E402
     CODE_LINES, COMMAND_TOOLS, EDIT_TOOLS, NAME, READ_TOOLS, REF_COLOR, REF_RE, api_doc, auto_mode_note, available,
-    code_mode, earlier_said, effort, label, model, model_name, runs_commands, said_value, trimmed,
+    code_mode, earlier_said, effort, label, model, model_name, runs_commands, said_value, subscription_off, trimmed,
 )
 from metaagent import (  # noqa: E402
     Agent, CODE_SYSTEM, COMMANDS_SYSTEM, CONFIRM_WAIT, RUN_PYTHON, SETUP_NAMES, SETUP_TOOLS, SHARED_TOOLS, SYSTEM,
@@ -161,9 +161,11 @@ class MetaCards:
 
     # ---- a tool call, as Baude's chat shows one
     def tool_title(self, name):
-        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own and the mesh's in words (Move
-        pages, Start subagent)."""
-        name = name.removeprefix("mcp__meta__").removeprefix("mcp__mesh__")
+        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own in words (Move pages), another
+        MCP server's as every chat's cards say it (Mesh / Start subagent)."""
+        name = name.removeprefix("mcp__meta__")
+        if name.startswith("mcp__"):
+            return toolnames.label(name, wording.say("tool_calls.mcp"))
         return name if name in READ_TOOLS + COMMAND_TOOLS else name.replace("_", " ").capitalize() if name else \
             wording.say("meta.tool_changes")
 
@@ -298,8 +300,10 @@ class MetaCards:
             s = self.settings[spec["name"]]
             group = Adw.PreferencesGroup()
             group.add_css_class("meta-ui")
-            group.row = s.row()  # (Settings' own, in Meta's look: CSS's .meta-ui)
-            group.add(group.row)
+            rows = s.host_row(spec["where"]) if spec.get("where") and hasattr(s, "host_row") else \
+                s.row()  # (Settings' own, in Meta's look: CSS's .meta-ui; one a host, for some, or the one changed)
+            for row in rows if isinstance(rows, list) else [rows]:
+                group.add(row)
             return group
         if kind == "chats":
             return rows_group(self.chats_rows(spec.get("items") or []), limit=12)
@@ -386,8 +390,8 @@ class MetaCards:
     def submit(self):
         buf = self.composer.get_buffer()
         text = self.writing.text().strip()
-        if not self.ask and not available():
-            self.model_changed()  # (gone since it was picked: said so)
+        if not self.ask and (not available() or subscription_off() is not None):
+            self.model_changed()  # (gone since it was picked, or its subscription disabled: said so)
         if self.exhausted.on and not self.ask and text.lower() in self.CLEAR:  # (a way out of it, typed in its box)
             buf.set_text("")
             return self._clear()

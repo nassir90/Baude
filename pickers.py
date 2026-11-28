@@ -1,5 +1,5 @@
 """pickers — what's picked from: a code view's line numbers (LineGutter), dropdowns (ChoiceDropDown,
-press_opens_dropdowns), the model and host pickers, tree lists (TreeList, TreeListView), a sidebar's action, a
+press_opens_dropdowns), the model, host and kubeconfig context pickers, tree lists (TreeList, TreeListView), a sidebar's action, a
 label that fades where it's cut (FadeLabel), and ⌘K's palette (RefPalette).
 """
 import math
@@ -16,8 +16,9 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import icons  # noqa: E402  (schema/icons: every app's icons, the Android app's too)
+from baudelib import providers  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402
-from widgets import RefIcon, WorkingDots, find_label, time_tip, walk  # noqa: E402
+from widgets import RefIcon, WorkingDots, find_label, insert_actions, time_tip, walk  # noqa: E402
 
 
 class LineGutter(Gtk.Widget):
@@ -65,17 +66,17 @@ class LineGutter(Gtk.Widget):
 
 class CheckList(Gtk.Box):
     """A check for each of a list of things, and one over them all, as the Kubernetes page's Namespaces and the
-    sidebar's ⋮ → Groups have them: those checked are shown, in the order checked; none checked is every one ([]), the
-    one over them checked. Checking that one shows every one again, and it can't be unchecked: something is always
-    shown. changed(the keys shown, [] for every one) as they're picked; menu(key, check, x, y), x and y in the check's,
-    on a right-click on one. heading: the one over them all reads as a section heading (the popover's "Group by"), its
+    sidebar's ⋮ → Groups have them: those checked are shown, in the order checked. Every one shown is every one checked
+    (None), the one over them checked too; checking that one checks every one, unchecking it unchecks every one ([]).
+    changed(the keys shown, None for every one) as they're picked; menu(key, check, x, y), x and y in the check's, on a
+    right-click on one. heading: the one over them all reads as a section heading (the popover's "Group by"), its
     check kept."""
 
     def __init__(self, all_label, changed, menu=None, max_height=420, heading=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.changed, self.menu, self.items, self.shown, self.checks, self.syncing = changed, menu, None, [], {}, False
+        self.changed, self.menu, self.items, self.shown, self.checks, self.syncing = changed, menu, None, None, {}, False
         self.all = Gtk.CheckButton(label=all_label)
-        self.all.connect("toggled", lambda b: self.syncing or self.pick([]))
+        self.all.connect("toggled", lambda b: self.syncing or self.pick(None if b.get_active() else []))
         if heading and isinstance(label := self.all.get_last_child(), Gtk.Label):
             label.add_css_class("heading")
             label.add_css_class("dim-label")
@@ -86,9 +87,9 @@ class CheckList(Gtk.Box):
                                        propagate_natural_height=True, propagate_natural_width=True,
                                        max_content_height=max_height))
 
-    def fill(self, items, shown):
-        """items: [(key, label)], in order; shown: the keys checked ([]: every one). Built again only when the items
-        change."""
+    def fill(self, items, shown, dimmed=()):
+        """items: [(key, label)], in order; shown: the keys checked (None: every one); dimmed: the keys whose labels are
+        greyed (a column filter's values no row has), still there to check. Built again only when the items change."""
         if items != self.items:
             child = self.list.get_first_child()
             while child is not None:
@@ -99,26 +100,36 @@ class CheckList(Gtk.Box):
                 check = self.checks[key] = Gtk.CheckButton(label=label)
                 check.key = key
                 check.connect("toggled", lambda b: self.syncing or self.pick(
-                    [k for k in self.shown if k != b.key] + [b.key] * b.get_active()))
+                    [k for k in self.keys() if k != b.key] + [b.key] * b.get_active()))
                 if self.menu is not None:
                     right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
                     right.connect("pressed", lambda _g, _n, x, y, c=check: self.menu(c.key, c, x, y))
                     check.add_controller(right)
                 self.list.append(check)
+        for key, check in self.checks.items():
+            if isinstance(label := check.get_last_child(), Gtk.Label):
+                (label.add_css_class if key in dimmed else label.remove_css_class)("dim-label")
         self.sync(shown)
 
+    def keys(self):
+        """The keys checked: every one's, in order, while every one is."""
+        return [key for key, _label in self.items or ()] if self.shown is None else self.shown
+
     def sync(self, shown):
-        """The checks as shown says (the keys checked, [] for every one), changed not told."""
+        """The checks as shown says (the keys checked, None for every one), changed not told."""
         was, self.syncing = self.syncing, True
-        self.shown = list(shown)
-        self.all.set_active(not self.shown)
+        self.shown = None if shown is None else list(shown)
+        self.all.set_active(self.shown is None)
         for key, check in self.checks.items():
-            check.set_active(key in self.shown)
+            check.set_active(self.shown is None or key in self.shown)
         self.syncing = was
 
     def pick(self, keys):
-        """Checked or unchecked by hand: these keys shown ([]: every one), and changed told."""
-        keys = list(dict.fromkeys(keys))
+        """Checked or unchecked by hand: these keys shown (None: every one), and changed told."""
+        if keys is not None:
+            keys = list(dict.fromkeys(keys))
+            if keys and set(keys) >= {key for key, _label in self.items or ()}:
+                keys = None
         self.sync(keys)
         self.changed(keys)
 
@@ -140,6 +151,19 @@ class ChoiceDropDown(Gtk.DropDown):
 
     def _changed(self, *_):
         if not self.quiet and self.value() is not None:
+            self.repicked = True  # (this row's activation told already: not again by _activated)
+            GLib.idle_add(lambda: setattr(self, "repicked", False))
+            self.on_pick(self.value())
+
+    def pick_again(self):
+        """on_pick fired too as the row already picked is picked again in its list (☰'s carets: it opened there)."""
+        listed = next((w for w in walk(self) if isinstance(w, Gtk.ListView)), None)
+        if listed is not None:
+            self.repicked = False
+            listed.connect("activate", self._activated)
+
+    def _activated(self, _list, at):
+        if not getattr(self, "repicked", False) and at == self.get_selected() and self.value() is not None:
             self.on_pick(self.value())
 
     def _quietly(self, fn):
@@ -245,6 +269,7 @@ class ModelPicker(Gtk.MenuButton):
     def __init__(self, choices, tooltip, on_pick, chars=30):
         super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice", "model-picker"])
         self.on_pick, self.values, self.labels, self.quiet, self.picked = on_pick, [], {}, False, None
+        self.slugs = {}
         face = Gtk.Box(spacing=6)
         self.face_icon = Gtk.Image(pixel_size=16, visible=False)
         self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=chars)
@@ -276,10 +301,12 @@ class ModelPicker(Gtk.MenuButton):
         self.set_popover(pop)
         self.set_choices(choices)
 
-    def set_choices(self, choices):
-        """Replace the entries ((value, label)), keeping the picked one picked if it's still there."""
+    def set_choices(self, choices, slugs=None):
+        """Replace the entries ((value, label)), keeping the picked one picked if it's still there. slugs: each
+        value's slug (providers.model_slug), shown on hover over its name only."""
         keep = self.value()
         self.values, self.labels = [v for v, _ in choices], dict(choices)
+        self.slugs = dict(slugs or {})
         order = {}  # (each family's place: where its first model was)
         for v, lbl in choices:
             order.setdefault(model_family(v, lbl)[1], len(order))
@@ -294,7 +321,7 @@ class ModelPicker(Gtk.MenuButton):
             icon = model_icon(value, lbl)
             line.append(Gtk.Image(icon_name=icon, pixel_size=16) if icon else Gtk.Box(width_request=16))
             line.append(Gtk.Label(label=lbl, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                                  max_width_chars=40, tooltip_text=lbl if len(lbl) > 40 else None))
+                                  max_width_chars=40, tooltip_text=self.tip(value, lbl)))
             row.check = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16, opacity=0)
             line.append(row.check)
             row.set_child(line)
@@ -304,9 +331,10 @@ class ModelPicker(Gtk.MenuButton):
     def select(self, value):
         """Show value as picked (appended if unknown; None: nothing), without on_pick."""
         if value is not None and value not in self.labels:
-            self.set_choices([*self.labels.items(), (value, value)])
+            self.set_choices([*self.labels.items(), (value, providers.model_name(value))], self.slugs)
         self.picked = value
         self.shown.set_label(self.labels.get(value, ""))
+        self.shown.set_tooltip_text(self.tip(value, self.labels.get(value, "")) if value is not None else None)
         icon = model_icon(value, self.labels.get(value, "")) if value is not None else None
         self.face_icon.set_from_icon_name(icon)
         self.face_icon.set_visible(icon is not None)
@@ -318,6 +346,11 @@ class ModelPicker(Gtk.MenuButton):
 
     def label(self):
         return self.labels.get(self.picked, "")
+
+    def tip(self, value, lbl):
+        """What hovering a model's name shows: its slug (the name in full where it's cut and its slug is its name)."""
+        slug = self.slugs.get(value, value)
+        return slug if slug != lbl else lbl if len(lbl) > 40 else None
 
     def _rows(self):
         i = 0
@@ -377,6 +410,165 @@ class ModelPicker(Gtk.MenuButton):
                 self.on_pick(row.value)
 
 
+CONTEXTS_SEARCHED = 15  # a context picker with more than this many has a search, and its contexts grouped by prefix
+
+
+def context_order(name):
+    """A context's place in a picker: by name, any case, numbers by their value (slice-2 before slice-10)."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in re.split(r"(\d+)", name) if t]
+
+
+def context_groups(names):
+    """Each context's group, by the start of its name up to its first - _ . : / or @, where two or more share it
+    ("slice" for slice-a and slice-b); "" for one alone."""
+    starts = {n: re.split(r"[-_.:/@]", n, 1)[0] if re.search(r"[-_.:/@]", n) else "" for n in names}
+    count = {}
+    for start in starts.values():
+        count[start] = count.get(start, 0) + 1
+    return {n: start if start and count[start] > 1 else "" for n, start in starts.items()}
+
+
+class ContextPicker(Gtk.MenuButton):
+    """A kubeconfig context picker: its face the context picked (or "Choose a context", dim, when none is); a list of
+    the contexts by name, the picked one ticked. Past CONTEXTS_SEARCHED of them, a search over them (every word typed
+    in the name) and their groups' names over them (context_groups). set_contexts() puts in and takes out only the rows
+    that changed, so a list open as tools add and delete clusters doesn't flicker or lose its place. on_pick(name)
+    for the user's picks only."""
+
+    def __init__(self, tooltip, on_pick, chars=32):
+        super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice", "model-picker"])
+        self.on_pick, self.picked, self.rows, self.groups = on_pick, None, {}, {}
+        self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=chars)
+        self.set_child(self.shown)
+        pop = Gtk.Popover(css_classes=["model-palette"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.search = Gtk.SearchEntry(placeholder_text=wording.say("kube.find_context"), visible=False)
+        self.search.connect("search-changed", lambda *_: self._filter())
+        self.search.connect("activate", lambda *_: self._activate(self.list.get_selected_row()))
+        self.search.connect("stop-search", lambda *_: self.popdown())
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._key)
+        self.search.add_controller(keys)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE, css_classes=["model-list"])
+        self.list.set_sort_func(lambda a, b: (context_order(a.value) > context_order(b.value)) -
+                                (context_order(a.value) < context_order(b.value)))
+        self.list.set_filter_func(self._shown)
+        self.list.set_header_func(self._header)
+        self.list.connect("row-activated", lambda _l, row: self._activate(row))
+        self.list.set_placeholder(Gtk.Label(label=wording.say("kube.no_context_match"), css_classes=["dim-label"],
+                                            margin_top=12, margin_bottom=12))
+        self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                         propagate_natural_height=True, propagate_natural_width=True,
+                                         max_content_height=420, min_content_width=200)
+        box.append(self.search)
+        box.append(self.scroll)
+        pop.set_child(box)
+        pop.connect("show", lambda *_: self._opened())
+        self.set_popover(pop)
+        self.select(None)
+
+    def set_contexts(self, names):
+        """The contexts listed now: rows for new ones put in, those gone taken out, the rest left as they are."""
+        names = list(dict.fromkeys(names))
+        for name in [n for n in self.rows if n not in names]:
+            self.list.remove(self.rows.pop(name))
+        for name in names:
+            if name in self.rows:
+                continue
+            row = Gtk.ListBoxRow(css_classes=["model-row"])
+            row.value = name
+            line = Gtk.Box(spacing=8)
+            line.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE,
+                                  max_width_chars=44, tooltip_text=name if len(name) > 44 else None))
+            row.check = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16,
+                                  opacity=1 if name == self.picked else 0)
+            line.append(row.check)
+            row.set_child(line)
+            self.rows[name] = row
+            self.list.append(row)
+        many = len(names) > CONTEXTS_SEARCHED
+        self.groups = context_groups(names) if many else {}
+        self.search.set_visible(many)
+        if not many and self.search.get_text():
+            self.search.set_text("")
+        self.list.invalidate_headers()
+        self.list.invalidate_filter()
+
+    def select(self, name):
+        """Show name as picked (None: none is, the face asks for one), without on_pick."""
+        self.picked = name
+        self.shown.set_label(name or wording.say("kube.pick_context"))
+        (self.shown.remove_css_class if name else self.shown.add_css_class)("dim-label")
+        self.shown.set_tooltip_text(name if name and len(name) > 32 else None)
+        for value, row in self.rows.items():
+            row.check.set_opacity(1 if value == name else 0)
+
+    def value(self):
+        return self.picked
+
+    def names(self):
+        """The contexts listed, in the list's order."""
+        return sorted(self.rows, key=context_order)
+
+    def _shown(self, row):
+        return all(w in row.value.lower() for w in self.search.get_text().lower().split())
+
+    def _header(self, row, before):
+        group = self.groups.get(row.value, "")
+        if group and (before is None or self.groups.get(before.value, "") != group):
+            row.set_header(Gtk.Label(label=group, xalign=0, css_classes=["model-family", "dim-label"]))
+        elif not group and before is not None and self.groups.get(before.value, ""):
+            row.set_header(Gtk.Separator(margin_top=4, margin_bottom=4))  # (past a group: one on its own)
+        else:
+            row.set_header(None)
+
+    def _filter(self):
+        self.list.invalidate_filter()
+        self.list.invalidate_headers()
+        first = next((r for r in self._rows() if self._shown(r)), None)
+        self.list.select_row(first)
+
+    def _rows(self):
+        return [self.rows[n] for n in self.names()]
+
+    def _opened(self):
+        self.search.set_text("")
+        self._filter()
+        now = self.rows.get(self.picked)
+        if now is not None:
+            self.list.select_row(now)
+            GLib.idle_add(lambda: (now.get_parent() is not None and now.grab_focus(), False)[1])
+        if self.search.get_visible():
+            self.search.grab_focus()
+
+    def _key(self, _c, keyval, _code, _state):
+        if keyval not in (Gdk.KEY_Down, Gdk.KEY_Up):
+            return False
+        shown = [r for r in self._rows() if self._shown(r)]
+        if not shown:
+            return True
+        now = self.list.get_selected_row()
+        i = shown.index(now) if now in shown else -1
+        row = shown[max(0, min(len(shown) - 1, i + (1 if keyval == Gdk.KEY_Down else -1)))]
+        self.list.select_row(row)
+        adj, (ok, rect) = self.scroll.get_vadjustment(), row.compute_bounds(self.list)
+        if ok:  # (kept in view)
+            y, h = rect.get_y(), rect.get_height()
+            if y < adj.get_value():
+                adj.set_value(y)
+            elif y + h > adj.get_value() + adj.get_page_size():
+                adj.set_value(y + h - adj.get_page_size())
+        return True
+
+    def _activate(self, row):
+        if row is None or not self._shown(row):
+            return
+        self.popdown()
+        if row.value != self.picked:
+            self.select(row.value)
+            self.on_pick(row.value)
+
+
 def ellipsize_dropdown(dd, chars=30):
     """dd's button shows its choice shortened with … (a long server or database name would widen the bar past the
     window); its list shows every choice whole."""
@@ -407,7 +599,7 @@ class HostPicker(Gtk.MenuButton):
         self.action.connect("change-state", self._changed)
         group = Gio.SimpleActionGroup()
         group.add_action(self.action)
-        self.insert_action_group("hostpicker", group)
+        insert_actions(self, "hostpicker", group)
 
     def _changed(self, action, value):
         action.set_state(value)
@@ -416,7 +608,8 @@ class HostPicker(Gtk.MenuButton):
             self.on_pick(value.get_string())
 
     def set_choices(self, hosts):
-        """hosts: [(host name, [(key, label)])], in order. The key picked stays picked if it's still there."""
+        """hosts: [(host name, [(key, label)])], in order; a host named None: its choices with no heading, each
+        shown as its label alone. The key picked stays picked if it's still there."""
         menu, self.labels = Gio.Menu(), {}
         for host, choices in hosts:
             section = Gio.Menu()
@@ -424,7 +617,7 @@ class HostPicker(Gtk.MenuButton):
                 item = Gio.MenuItem.new(label, None)
                 item.set_action_and_target_value("hostpicker.pick", GLib.Variant.new_string(key))
                 section.append_item(item)
-                self.labels[key] = f"{host} / {label}"
+                self.labels[key] = label if host is None else f"{host} / {label}"
             menu.append_section(host, section)
         self.set_menu_model(menu)
         self.select(self.value())
@@ -447,14 +640,17 @@ class HostPicker(Gtk.MenuButton):
 
 def press_opens_dropdowns():
     """As an app starts, once: every dropdown (a Gtk.DropDown, an Adw.ComboRow, a HostPicker) opens its list as the
-    mouse button goes down on it, not as it comes up (BaudeInternal#74). Held down and let go over a choice: that one's
-    picked, and the list closes. Let go outside the list: it closes. Let go on the dropdown itself, a plain click: the
-    list stays open, to pick from with a click. Each taken as it's realized (the hook on GtkWidget's realize), so none
-    is missed."""
+    mouse button goes down on it, not as it comes up (BaudeInternal#74), as a right-click's menu opens as the button
+    goes down on what's clicked. Whatever a press opens, held down and let go over a choice (a menu's item, a list's
+    row, a popover's button) a quarter second or more after the press: that one's picked, and it closes
+    (BaudeInternal#273); sooner, it's a click, as a native menu takes it, and picks nothing. Let go on what was
+    pressed, or between its choices: it stays open, to pick from with a click. Let go outside it: it closes. Each
+    taken as it's realized (the hooks on GtkWidget's realize and map), so none is missed."""
     if getattr(press_opens_dropdowns, "started", False):
         return
     press_opens_dropdowns.started = True
     GObject.add_emission_hook(Gtk.Widget, "realize", _dropdown_realized)
+    GObject.add_emission_hook(Gtk.Widget, "map", _held_mapped)
 
 
 def _dropdown_realized(widget):
@@ -462,17 +658,13 @@ def _dropdown_realized(widget):
         # (before the dropdown's own button: that one opens it on the release)
         widget.press_opens = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
         widget.press_opens.connect("pressed", _dropdown_pressed)
-        widget.press_opens.connect("released", _dropdown_released)
         widget.add_controller(widget.press_opens)
+    if isinstance(widget, Gtk.Native) and not getattr(widget, "held_watch", None):
+        # (each window's and popover's presses, moves and releases, whichever widget in it they're for)
+        widget.held_watch = Gtk.EventControllerLegacy(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        widget.held_watch.connect("event", _held_event)
+        widget.add_controller(widget.held_watch)
     return True  # (a hook stays only while it says so)
-
-
-def _dropdown_released(gesture, _n, x, y):
-    """The release came back to the dropdown, not to its list (where the pointer isn't the popover's while held)."""
-    widget = gesture.get_widget()
-    ok, p = widget.compute_point(widget.get_native(), Graphene.Point().init(x, y))
-    if ok:
-        _dropdown_let_go(widget, p.x, p.y)
 
 
 def _dropdown_list(widget):
@@ -498,29 +690,129 @@ def _dropdown_pressed(gesture, n_press, _x, _y):
         button.set_active(True)
     else:
         widget.activate()
-    if not pop.get_visible():
+
+
+# (the press under way: what it's on and when; the popovers it opened, while it's held: _held_event, _held_mapped)
+HELD = {"on": None, "when": 0, "pops": []}
+HELD_CLICK_MS = 250  # (let go sooner than this after the press: a click, as a native menu takes it, picking nothing)
+
+
+def _held_event(ctl, _event):
+    """A window's or a popover's event (EventControllerLegacy's, the event got from it: PyGObject gives none)."""
+    event = ctl.get_current_event()
+    kind = event.get_event_type() if event is not None else None
+    if kind == Gdk.EventType.BUTTON_PRESS:
+        device = event.get_device()
+        touch = device is not None and device.get_source() == Gdk.InputSource.TOUCHSCREEN
+        ok, x, y = event.get_position()
+        native = ctl.get_widget()
+        tx, ty = native.get_surface_transform()
+        HELD.update(on=None if touch or not ok else native.pick(x - tx, y - ty, Gtk.PickFlags.DEFAULT),
+                    when=event.get_time(), pops=[])
+    elif kind == Gdk.EventType.MOTION_NOTIFY and (pop := _held_pop()) is not None:
+        choice = _held_choice(pop, *_held_point(pop, _window_point(event)))
+        _dropdown_light(pop, None if choice is pop else choice)
+    elif kind == Gdk.EventType.BUTTON_RELEASE:
+        pop, on, when, now = _held_pop(), HELD["on"], HELD["when"], _window_point(event)
+        HELD.update(on=None, pops=[])
+        if pop is not None and now is not None:
+            _dropdown_light(pop, None)
+            if (pressed := _window_bounds(on)) is not None and pressed.contains_point(Graphene.Point().init(*now)):
+                return False  # (on what was pressed: it stays open)
+            choice = _held_choice(pop, *_held_point(pop, now))
+            if choice is None:
+                pop.popdown()  # (let go outside it)
+            elif choice is not pop and event.get_time() - when >= HELD_CLICK_MS:  # (sooner: a click that slipped)
+                # (after GTK's own handling of it: what it's let go on hears it first, as it would)
+                GLib.idle_add(lambda: _held_pick(pop, choice) and False)
+    return False
+
+
+def _held_mapped(widget):
+    """A popover shown while a press is held, by what's pressed (its parent the pressed widget, or holding it): the
+    release picks in it (_held_event)."""
+    on = HELD["on"]
+    if isinstance(widget, Gtk.Popover) and on is not None and (parent := widget.get_parent()) is not None \
+            and (on is parent or on.is_ancestor(parent)):
+        HELD["pops"].append(widget)
+        if not getattr(widget, "unlit_closed", False):  # (closed while held, Escape: nothing left lit in it)
+            widget.unlit_closed = True
+            widget.connect("closed", lambda p: _dropdown_light(p, None))
+    return True
+
+
+def _held_pop():
+    """The last popover the press under way opened that's still open."""
+    return next((p for p in reversed(HELD["pops"]) if p.get_mapped()), None)
+
+
+def _surface_origin(native):
+    """Where native's surface is in its window's (a popover's: placed in the surface of what it's on, and so on)."""
+    x = y = 0
+    while isinstance(native, Gtk.Popover) and native.get_parent() is not None:
+        surface = native.get_surface()
+        x, y = x + surface.get_position_x(), y + surface.get_position_y()
+        native = native.get_parent().get_native()
+    return x, y
+
+
+def _window_point(event):
+    """event's point in its window's surface, whichever surface it's of; None if it has none."""
+    ok, x, y = event.get_position()
+    native = Gtk.Native.get_for_surface(event.get_surface())
+    if not ok or native is None:
+        return None
+    nx, ny = _surface_origin(native)
+    return x + nx, y + ny
+
+
+def _held_point(pop, at):
+    """at (a point of its window's surface: _window_point's) as a point of pop's."""
+    if at is None:
+        return None, None
+    px, py = _surface_origin(pop)
+    tx, ty = pop.get_surface_transform()
+    return at[0] - px - tx, at[1] - py - ty
+
+
+def _window_bounds(widget):
+    """widget's bounds in its window's surface (through the popovers it's in), or None."""
+    native = widget.get_native() if widget is not None else None
+    ok, b = widget.compute_bounds(native) if native is not None else (False, None)
+    if not ok:
+        return None
+    nx, ny = _surface_origin(native)
+    tx, ty = native.get_surface_transform()
+    return Graphene.Rect().init(b.get_x() + nx + tx, b.get_y() + ny + ty, b.get_width(), b.get_height())
+
+
+def _held_choice(pop, x, y):
+    """What's at (x, y) of pop: a choice (a row of a Gtk.DropDown's or an Adw.ComboRow's list, a menu's item, a
+    button of a popover's own); pop itself if it's in pop but on no choice (or a greyed one); None if it's outside."""
+    if x is None:
+        return None
+    under = pop.pick(x, y, Gtk.PickFlags.DEFAULT)
+    while under is not pop and under is not None:
+        if under.__gtype__.name in ("GtkListItemWidget", "GtkModelButton") or \
+                isinstance(under, (Gtk.Button, Gtk.CheckButton)):
+            return under if under.is_sensitive() else pop
+        under = under.get_parent()
+    return under
+
+
+def _held_pick(pop, choice):
+    """The held press let go over choice (a row of a Gtk.DropDown's or an Adw.ComboRow's list, a menu's item, a
+    button): picked as a click on it picks it. Over none: nothing, the popover left open."""
+    if choice is None or not pop.get_mapped() or not choice.get_mapped():
         return
-    _dropdown_held(pop, widget)
-    if not getattr(pop, "let_go", None):
-        # (the release, the press having been the dropdown's: the popover's, as it has the pointer now; or the dropdown's)
-        pop.let_go = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        pop.let_go.connect("unpaired-release", lambda g, x, y, _b, _s: _dropdown_let_go(
-            getattr(g.get_widget(), "held_from", None), *_popover_to_native(g.get_widget(), x, y)))
-        pop.let_go.connect("pressed", lambda g, *_: _dropdown_held(g.get_widget(), None))
-        pop.add_controller(pop.let_go)
-        # (what it's over while held, lit as under the pointer: GTK lights nothing, the press being another window's)
-        pop.held_over = Gtk.EventControllerMotion(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        pop.held_over.connect("motion", lambda c, x, y: getattr(c.get_widget(), "held_from", None) and _dropdown_light(
-            c.get_widget(), _dropdown_choice(c.get_widget(), x, y)))
-        pop.add_controller(pop.held_over)
-        pop.connect("closed", lambda p: _dropdown_held(p, None))
-
-
-def _dropdown_held(pop, widget):
-    """pop's list held open by a press on widget (None: no longer)."""
-    pop.held_from = widget
-    if widget is None:
-        _dropdown_light(pop, None)
+    if isinstance(choice, (Gtk.Button, Gtk.CheckButton)) or choice.__gtype__.name == "GtkModelButton":
+        choice.activate()
+        return
+    view = choice.get_ancestor(Gtk.ListView)  # (a row: as a click on it, by its position)
+    if view is not None and choice.activate_action("listitem.select", GLib.Variant("(bb)", (False, False))):
+        chosen = view.get_model().get_selection()
+        if not chosen.is_empty():
+            choice.activate_action("list.activate-item", GLib.Variant.new_uint32(chosen.get_minimum()))
 
 
 def _dropdown_light(pop, choice):
@@ -533,53 +825,6 @@ def _dropdown_light(pop, choice):
     if choice is not None:
         choice.set_state_flags(Gtk.StateFlags.PRELIGHT, False)
     pop.lit = choice
-
-
-def _dropdown_choice(pop, x, y):
-    """The choice at (x, y) of pop: a row of a Gtk.DropDown's or an Adw.ComboRow's list, an item of a HostPicker's menu;
-    pop itself if it's in pop but on none; None if it's not in pop."""
-    under = pop.pick(x, y, Gtk.PickFlags.DEFAULT)
-    if under is None:
-        return None
-    while under is not pop and under is not None:
-        if under.__gtype__.name in ("GtkListItemWidget", "GtkModelButton"):
-            return under
-        under = under.get_parent()
-    return pop
-
-
-def _popover_to_native(pop, x, y):
-    """(x, y) of pop, as a point of the window (or popover) it's over: that one's coordinates."""
-    surface, native = pop.get_surface(), pop.get_parent().get_native()
-    px, py = pop.get_surface_transform()
-    nx, ny = native.get_surface_transform()
-    return surface.get_position_x() + px + x - nx, surface.get_position_y() + py + y - ny
-
-
-def _dropdown_let_go(widget, x, y):
-    """The mouse button let go at (x, y) of widget's native, after a press on widget opened its list."""
-    pop = _dropdown_list(widget) if widget is not None else None
-    if pop is None or getattr(pop, "held_from", None) is not widget or not pop.get_visible():
-        return
-    _dropdown_held(pop, None)
-    native = widget.get_native()
-    ok, bounds = widget.compute_bounds(native)
-    if ok and bounds.contains_point(Graphene.Point().init(x, y)):
-        return  # (a plain click: the list stays open)
-    nx, ny = native.get_surface_transform()
-    px, py = pop.get_surface_transform()
-    surface = pop.get_surface()
-    choice = _dropdown_choice(pop, x + nx - surface.get_position_x() - px, y + ny - surface.get_position_y() - py)
-    if choice is None:
-        pop.popdown()
-    elif choice.__gtype__.name == "GtkModelButton":
-        choice.activate()
-    elif choice is not pop:  # (a row: as a click on it, by its position)
-        view = choice.get_ancestor(Gtk.ListView)
-        if view is not None and choice.activate_action("listitem.select", GLib.Variant("(bb)", (False, False))):
-            chosen = view.get_model().get_selection()
-            if not chosen.is_empty():
-                choice.activate_action("list.activate-item", GLib.Variant.new_uint32(chosen.get_minimum()))
 
 
 def tree_line(x, top, mid, end):

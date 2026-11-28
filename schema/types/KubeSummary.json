@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Home: the whole stack's CPU and memory, in the namespaces asked for: the pods that hold on to a node (not those that finished), added up, by namespace and by node, and how the totals went.",
+  "properties": {
+    "cpu": {
+      "$ref": "KubeUse.json",
+      "description": "CPU, in cores."
+    },
+    "memory": {
+      "$ref": "KubeUse.json",
+      "description": "Memory, in bytes."
+    },
+    "metrics": {
+      "type": "boolean",
+      "description": "Whether the cluster has a metrics API (else nothing is used)."
+    },
+    "pods": {
+      "type": "integer",
+      "description": "How many pods are added up."
+    },
+    "namespace_columns": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShareColumn.json"
+      },
+      "description": "The namespaces table's columns."
+    },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShare.json"
+      },
+      "description": "Each namespace's part, most CPU used first (then most requested)."
+    },
+    "node_columns": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShareColumn.json"
+      },
+      "description": "The nodes table's columns."
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShare.json"
+      },
+      "description": "Each node's part (against its own allocatable), most CPU used first (then most requested)."
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeSample.json"
+      },
+      "description": "The totals every `every` seconds from the first time Home was read for the context, oldest first, kept in the host's memory: those after the request's since (every one without)."
+    },
+    "every": {
+      "type": "integer",
+      "description": "How often the host samples them (and a head reads them), in seconds."
+    },
+    "minutes": {
+      "type": "integer",
+      "description": "How far back the history goes, in minutes."
+    },
+    "sorted_by": {
+      "type": "integer",
+      "description": "The column both tables come sorted by, most first: CPU used."
+    },
+    "shown": {
+      "type": "integer",
+      "description": "How many rows a table shows, most first by the column it's sorted by; the rest are added up in one \"Other (n)\" row."
+    },
+    "began": {
+      "type": "number",
+      "description": "When the host began this history (seconds since 1970): a context named for another cluster now (its cluster or server changed) begins anew, and a head drops the samples it holds from before."
+    }
+  },
+  "additionalProperties": false
+}

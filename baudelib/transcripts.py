@@ -234,18 +234,20 @@ def read_session_info(path):
 _CHAT_MODEL = re.compile(rb'"isSidechain":\s*false,\s*"message":\s*\{\s*"model":\s*"([^"<][^"]*)"')
 
 
-def transcript_model(path):
-    """The model a transcript's last reply came from (a subagent's, or a <synthetic> one, aside): its last 256 KB
-    first, all of it if they hold none. None if it has none."""
+def transcript_model(path, chunk=1 << 18):
+    """The model a transcript's last reply came from (a subagent's, or a <synthetic> one, aside): read back from its
+    end a chunk at a time (never all of it at once: a Bot's chat ends in screenshots, a few hundred KB each). None if it has none."""
     try:
         with open(path, "rb") as f:
-            size = f.seek(0, 2)
-            for back in (1 << 18, size):
-                f.seek(max(0, size - back))
-                if hits := _CHAT_MODEL.findall(f.read()):
+            end = f.seek(0, 2)
+            after = b""  # (the start of the chunk after: a record cut in two by the chunk's end is whole in this one)
+            while end > 0:
+                begin = max(0, end - chunk)
+                f.seek(begin)
+                data = f.read(end - begin)
+                if hits := _CHAT_MODEL.findall(data + after):
                     return hits[-1].decode()
-                if back >= size:
-                    break
+                after, end = (data + after)[:4096], begin
     except OSError:
         pass
     return None
@@ -595,6 +597,8 @@ class HistoryIndex:
     time (index_some, from the window's idle time): read whole first, a 177 MB one held the window a second."""
 
     AT_ONCE = 2 << 20  # (up to this much before the newest items is just indexed on opening)
+    DRAWN_AT_ONCE = 8 << 20  # (the newest items drawn on opening are this many bytes of lines at most;
+    # the rest are drawn as it's scrolled up)
 
     def __init__(self, path):
         self.path = path
@@ -655,6 +659,7 @@ class HistoryIndex:
             begin = max(0, size - span)
             starts, sums, replies = array.array("q"), array.array("q"), bytearray()
             newest, self.cuts = collections.deque(maxlen=keep), []
+            sizes, held, capped = collections.deque(maxlen=keep), 0, False  # (newest's lines' lengths, their total)
             try:
                 with open(self.path, "rb") as f:
                     f.seek(begin)
@@ -670,10 +675,19 @@ class HistoryIndex:
                             starts.append(at)
                             sums.append(_line_sum(raw))
                             replies.append(item[0] == "assistant" and not item[2] and _has_text(item[1]))
+                            if len(sizes) == keep:
+                                held -= sizes[0]
                             newest.append(item)
+                            sizes.append(len(raw))
+                            held += len(raw)
+                            while held > self.DRAWN_AT_ONCE and len(newest) > 1:
+                                newest.popleft()
+                                held -= sizes.popleft()
+                                capped = True
                         elif (gone := self._cut(line, at, starts, sums, replies)) is not None:
                             for _ in range(min(gone, len(newest))):
                                 newest.pop()
+                                held -= sizes.pop()
                         at += len(raw)
                     self.loaded_end = at
             except OSError:
@@ -681,8 +695,8 @@ class HistoryIndex:
             if len(starts) >= keep or not begin:  # (a revert's cut items: enough indexed, those it popped read below)
                 break
             span *= 4
-        if len(newest) < min(keep, len(starts)):  # (a cut popped the newest: the ones before them, from where they are)
-            newest = self._read_at(starts[-keep:], sums[-keep:]) or []
+        if not capped and len(newest) < min(keep, len(starts)):  # (a cut popped the newest: the ones before them,
+            newest = self._read_at(starts[-keep:], sums[-keep:]) or []                # from where they are)
         undrawn = len(starts) - len(newest)
         self.oldest = sums[undrawn] if newest else None
         del starts[undrawn:], sums[undrawn:], replies[undrawn:]

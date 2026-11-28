@@ -469,7 +469,10 @@ def wire_said(where):
     return wire.said_where(where)
 
 
-MONO_FONT = "Menlo 12" if sys.platform == "darwin" else "Monospace 11"
+# (the icons ls, prompts and editors draw from Nerd Fonts' private-use code points: from Symbols Nerd Font Mono where
+# the terminal's font has none, the one bundled in fonts/ or one installed)
+MONO_FONT = ("Menlo" if sys.platform == "darwin" else "Monospace") + ", Symbols Nerd Font Mono " + \
+    ("12" if sys.platform == "darwin" else "11")
 CSS = "vte-terminal { padding: 6px 10px; }"
 
 

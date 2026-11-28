@@ -7,11 +7,12 @@ fun kube(hostId: String, msg: Msg.Kube, then: (Msg.KubeReply) -> Unit) {
     Mesh.ask(hostId, msg.json()) { then(Msg.KubeReply.from(it)) }
 }
 
-/** A pod's log followed, or a kind's list watched, on a connection of its own to the host (as Browser's Watch is):
- * kube_follow sent as it comes up, what it sends handled on the main thread; stop() lets go of it, which stops the
- * kubectl the host runs for it. */
+/** The kubeconfig's contexts followed (sent again as tools add and delete clusters), a pod's log followed, or a kind's
+ * list watched, on a connection of its own to the host (as Browser's Watch is): kube_follow sent as it comes up, what
+ * it sends handled on the main thread; stop() lets go of it, which stops the kubectl the host runs for it. */
 class KubeFollow(private val hostId: String, private val msg: Msg.KubeFollow, private val onText: (String) -> Unit = {},
                  private val onRows: (Msg.KubeRows) -> Unit = {}, private val onEnd: (Msg.KubeEnd) -> Unit = {},
+                 private val onContexts: (Msg.KubeContexts) -> Unit = {},
                  private val onError: (String) -> Unit = {}, private val onUp: (Boolean) -> Unit = {}) {
     private var conn: Connection? = null
     @Volatile private var stopped = false
@@ -40,6 +41,7 @@ class KubeFollow(private val hostId: String, private val msg: Msg.KubeFollow, pr
         when (m.optString("op")) {
             Op.KUBE_TEXT -> Msg.KubeText.from(m).text?.let { t -> Mesh.post { if (!stopped) onText(t) } }
             Op.KUBE_ROWS -> Msg.KubeRows.from(m).let { r -> Mesh.post { if (!stopped) onRows(r) } }
+            Op.KUBE_CONTEXTS -> Msg.KubeContexts.from(m).let { r -> Mesh.post { if (!stopped) onContexts(r) } }
             Op.KUBE_END -> Msg.KubeEnd.from(m).let { e -> Mesh.post { if (!stopped) onEnd(e) } }
             Op.ERROR -> Msg.Error.from(m).said.orEmpty().let { e -> Mesh.post { if (!stopped) onError(e) } }
         }

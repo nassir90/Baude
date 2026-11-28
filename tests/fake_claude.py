@@ -5,9 +5,11 @@ Speaks just enough of the stream-json protocol: answers `initialize` with
 commands, models and the permission mode, and replays one scripted turn per user message (thinking,
 streamed markdown, a Bash tool call that needs permission, the tool result,
 a closing message and a `result`). Every line it receives is appended to
-$FAKE_CLAUDE_LOG, plus a START line with its cwd and argv.
+$FAKE_CLAUDE_LOG, plus a START line with its cwd and argv. Its stdin is read as it
+comes (INBOX), so a turn can take a message sent while it runs, as claude does (steps).
 """
 import json
+import queue
 import re
 import os
 import subprocess
@@ -148,6 +150,8 @@ def control_reply(req):
         return {"applied": {"model": state["model"], "effort": state["effort"]}}
     if sub == "get_context_usage":
         return context_usage()
+    if sub == "background_tasks":
+        return move_to_background(req.get("tool_use_id"))
     if sub == "rename_session" and (folder := kept_in()) is not None:  # (written in the transcript, then answered)
         with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
             f.write(json.dumps({"type": "custom-title", "customTitle": req.get("title"), "sessionId": SESSION}) + "\n")
@@ -176,8 +180,37 @@ def record(line):
 OUT_LOCK = threading.Lock()  # background tasks write from timer threads
 
 
+def limited():
+    """When the five-hour limit refusing every turn resets (FAKE_CLAUDE_RESETS_AT, seconds since 1970, with
+    FAKE_CLAUDE_FIVE_HOUR 1 or more), while it's still to come; else None."""
+    at = float(os.environ.get("FAKE_CLAUDE_RESETS_AT") or 0)
+    return int(at) if float(os.environ.get("FAKE_CLAUDE_FIVE_HOUR") or 0) >= 1 and time.time() < at else None
+
+
+def rate_limit_event():
+    """What claude says of its account's limits as a request's answer's headers say them (once per turn here, before
+    its result): utilization a fraction, resetsAt in seconds since 1970; FAKE_CLAUDE_FIVE_HOUR, the five-hour
+    window's (1 or more: used up, extra usage billed; with FAKE_CLAUDE_RESETS_AT, refused till then, and fresh after)."""
+    now = int(time.time())
+    used = float(os.environ.get("FAKE_CLAUDE_FIVE_HOUR") or 0.42)
+    if os.environ.get("FAKE_CLAUDE_RESETS_AT"):
+        refused = limited()
+        resets, used = (refused, used) if refused else (now + 5 * 3600, 0.01)
+        return {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "rejected" if refused else "allowed", "resetsAt": resets, "rateLimitType": "five_hour",
+            "utilization": used, "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled",
+            "isUsingOverage": False}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
+    return {"type": "rate_limit_event", "rate_limit_info": {
+        "status": "allowed", "resetsAt": now + 3 * 3600, "rateLimitType": "five_hour", "utilization": used,
+        "unifiedWindows": {"five_hour": {"utilization": used, "resetsAt": now + 3 * 3600, "status": "allowed"},
+                           "seven_day": {"utilization": 0.17, "resetsAt": now + 4 * 86400, "status": "allowed"}},
+        "overageStatus": "allowed" if used >= 1 else "rejected", "isUsingOverage": used >= 1}, "uuid": str(uuid.uuid4()), "session_id": SESSION}
+
+
 def out(obj, delay=0.005):
     with OUT_LOCK:
+        if obj.get("type") == "result":
+            print(json.dumps(rate_limit_event()), flush=True)
         print(json.dumps(obj), flush=True)
         kind, ev = obj.get("type"), obj.get("event") or {}
         if kind == "stream_event" and ev.get("type") == "content_block_delta":
@@ -216,7 +249,7 @@ def turn(n):
          "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "ls -la"},
                      "tool_use_id": tid}})
     while True:  # wait for the permission answer (ignore anything else)
-        line = sys.stdin.readline()
+        line = next_line()
         if not line:
             sys.exit(0)
         record(line)
@@ -232,6 +265,7 @@ def turn(n):
     stream({"type": "content_block_delta", "index": 0,
             "delta": {"type": "text_delta", "text": "Done, one file." if allowed else "OK, skipped it."}})
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": SESSION,
+         "result": "Done, one file." if allowed else "OK, skipped it.",
          "total_cost_usd": 0.0125, "num_turns": 2, "duration_ms": 1500,
          "usage": {"input_tokens": 1000, "output_tokens": 50}})
 
@@ -259,7 +293,7 @@ def ask_question(n):
         "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": {"questions": QUESTIONS},
         "tool_use_id": tid}})
     while True:
-        line = sys.stdin.readline()
+        line = next_line()
         if not line:
             sys.exit(0)
         record(line)
@@ -294,6 +328,55 @@ def result(text):
          "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10, "output_tokens": 5}})
 
 
+def task_answer(n, text):
+    """A task's script asking its Bot (baudelib/tasks.py), answered with mcp__mesh__answer_task: a form's fields
+    filled (the last of a choice's choices, 7, true, "filled"), or, with no form, a line saying it looked; an ask that
+    says SKIP THE TOOL answered in text only, till it's reminded (answered FAKE_REMINDED_S seconds after). A failure handed over by the host whose log says
+    HEAL ME, healed: the task's script set to one that asks the Bot once and ends well (mcp__mesh__set_task), and run
+    again (mcp__mesh__run_task, not waited for); any other a line saying it looked."""
+    healing = re.search(r"^\| task \| ([A-Za-z0-9_-]+) \|$", text, re.M) if "HEAL ME" in text else None
+    run = re.search(r"^\| run \| ([A-Za-z0-9_-]+) \|$", text, re.M) or re.search(r"answered run ([A-Za-z0-9_-]+)", text)
+    asked = os.path.join(tempfile.gettempdir(), f"fake-claude-ask-{run[1]}") if run else None
+    if run and "answer_task tool" in text and "You haven't answered" not in text:
+        with open(asked, "w") as f:
+            f.write(text)
+    if healing:
+        tid = healing[1]
+        mcp_tool("mesh", "set_task", {"id": tid, "script": 'import baudetask as task\n'
+                                                           'task.say("healed:", task.ask("Healed. Fine now?"))\n'})
+        mcp_tool("mesh", "run_task", {"id": tid})
+        answer = "Healed: fixed its script and ran it again."
+    elif "answer_task tool" in text and run and ("SKIP THE TOOL" not in text or "You haven't answered" in text):
+        if "You haven't answered" in text:  # (FAKE_REMINDED_S: a while before it answers a reminder, as a scene wants)
+            time.sleep(float(os.environ.get("FAKE_REMINDED_S") or 0))
+        if "You haven't answered" in text and os.path.exists(asked):  # (a reminder's fields: its ask's)
+            with open(asked) as f:
+                text = f.read()
+        values = {}
+        for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
+            kind = m[2]
+            values[m[1]] = json.loads(re.findall(r'"(?:[^"\\]|\\.)*"', kind)[-1]) if kind.startswith("one of") \
+                else 7 if kind.startswith("a number") else True if kind.startswith("true") else "filled"
+        args = {"run": run[1], **({"answer": values} if values else
+                                  {"text": "Looked into it: the script's fine, the input wasn't."})}
+        tid = f"toolu_answer{n}"
+        out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+            "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "mcp__mesh__answer_task", "input": args}]}})
+        said = mcp_tool("mesh", "answer_task", args)
+        out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "content": said}]}})
+        answer = "Answered it with the tool."
+    elif "answer_task tool" in text:
+        answer = "Here's my answer, in words only."
+    elif "task finished" in text:
+        answer = "Noted."
+    else:
+        answer = "Looked into it: the script's fine, the input wasn't."
+    say(answer, f"task{n}")
+    result(answer)
+
+
 def linger(n, slow):
     """"LINGER": a turn that takes a while (FAKE_LINGER_S seconds, 6 by default), and its session's plain messages
     after it each answered at once in a line."""
@@ -307,6 +390,19 @@ def linger(n, slow):
 
 EXPIRED = ("Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` "
            "to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs")
+
+
+def refused(n):
+    """A turn the five-hour limit refuses, as claude says it (limited): its rate_limit_event rejected, the message
+    it writes in place of a reply, and the turn's error."""
+    at = time.localtime(limited())
+    said = f"You've hit your 5-hour limit · resets {time.strftime('%I:%M', at).lstrip('0')}" \
+           f"{time.strftime('%p', at).lower()} (Europe/Dublin)"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "error": "rate_limit",
+         "message": {"id": f"limit{n}", "model": "<synthetic>", "role": "assistant",
+                     "content": [{"type": "text", "text": said}]}})
+    out({"type": "result", "subtype": "success", "is_error": True, "session_id": SESSION, "result": said,
+         "total_cost_usd": 0, "num_turns": 1, "duration_ms": 90, "usage": {"input_tokens": 0, "output_tokens": 0}})
 
 
 def expired(n):
@@ -371,6 +467,52 @@ def background_command(n, delay):
         TASKS[tid]["timer"].start()
 
 
+def long_command(n):
+    """"LONGRUN": a Bash call that runs (task_started, in the foreground) until it's moved to the background
+    (background_tasks) or the turn's interrupted."""
+    tid, tool = f"fg{n}", f"toolu_fg{n}"
+    out_file = os.path.join(tempfile.gettempdir(), f"fake-claude-{os.getpid()}-{tid}.output")
+    with open(out_file, "w") as f:
+        f.write("running the test suite…\n")
+    cmd = {"command": "pytest tests/ -x", "description": "Run the test suite"}
+    say("Running the whole test suite.", f"pre{tid}")
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"m{tid}", "model": "fake", "role": "assistant",
+        "content": [{"type": "tool_use", "id": tool, "name": "Bash", "input": cmd}]}})
+    TASKS[tid] = {"tool_use_id": tool, "type": "local_bash", "output_file": out_file, "foreground": True,
+                  "summary": 'Background command "Run the test suite" completed (exit code 0)',
+                  "followup": "The test suite finished: **412 passed**."}
+    system("task_started", task_id=tid, tool_use_id=tool, description=cmd["description"], task_type="local_bash",
+           is_backgrounded=False)
+    state["open_turn"] = n
+
+
+def move_to_background(tool_use_id):
+    """background_tasks, as claude 2.1 answers it: each foreground call (or the one tool_use_id names) moved to the
+    background, its result saying so, and the turn going on; {backgrounded} only when one was named."""
+    moved = [tid for tid, t in TASKS.items() if t.get("foreground") and tool_use_id in (None, t["tool_use_id"])]
+
+    def go():
+        for tid in moved:
+            t = TASKS[tid]
+            t["foreground"] = False
+            system("task_updated", task_id=tid, patch={"is_backgrounded": True})
+            out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": t["tool_use_id"], "content":
+                 f"Command was manually backgrounded by user with ID: {tid}. Output is being written to: "
+                 f"{t['output_file']}"}]}})
+            t["timer"] = threading.Timer(float(os.environ.get("FAKE_MOVED_S") or 1.5), finish_task, (tid,))
+            t["timer"].start()
+        if state.get("took"):  # (sent while it ran: taken in now the turn goes on)
+            say(f"Also doing what you sent: {state.pop('took')[-1]}", f"took{moved[0]}")
+        say("The suite's running in the background; I'll pick it up when it ends.", f"moved{moved[0]}")
+        state.pop("open_turn", None)
+        result("moved")
+    if moved:
+        threading.Timer(0.05, go).start()
+    return {} if tool_use_id is None else {"backgrounded": bool(moved) or tool_use_id in state.get("fg_calls", ())}
+
+
 def interrupted():
     """An interrupt, as claude 2.1's takes it: a turn still open ends, stopped (error_during_execution); and its
     background subagents are swept (killed, agents_killed) unless initialize declared perTaskStopAffordance."""
@@ -382,6 +524,7 @@ def interrupted():
             finish_task(tid, "killed", "Stopped by the interrupt")
         if swept:
             system("agents_killed")
+    state.pop("took", None)
     if state.pop("open_turn", None) is not None:
         out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
              "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10,
@@ -557,8 +700,13 @@ def mcp(method, params=None):
 def chat_tool(name, args):
     """A call to the chat's own tools (baudelib.chattools), through the server --mcp-config names (inline JSON, as the
     host gives it), started for the call, as Claude Code would."""
+    return mcp_tool("chat", name, args)
+
+
+def mcp_tool(which, name, args):
+    """A call to one of the servers --mcp-config names (which: chat, mesh, ...), started for the call."""
     cfg = arg("--mcp-config") or "{}"
-    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"]["chat"]
+    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"][which]
     p = subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
                          env={**os.environ, **(server.get("env") or {})})
     calls = [("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),
@@ -570,6 +718,73 @@ def chat_tool(name, args):
     p.stdin.close()
     p.wait(10)
     return got["result"]["content"][0]["text"]
+
+
+def chat_tool_interruptible(name, args, how=None):
+    """A call to the chat's own tools that an interrupt cuts short: its tools told the call's cancelled (as claude
+    tells an MCP server), or, how "kill", their process killed; None then. Else what it gave."""
+    cfg = arg("--mcp-config") or "{}"
+    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"]["chat"]
+    p = subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                         env={**os.environ, **(server.get("env") or {})})
+    got = []
+    for i, (method, params) in enumerate((("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),
+                                          ("tools/call", {"name": name, "arguments": args})), 1):
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n")
+        p.stdin.flush()
+        if i == 1:
+            p.stdout.readline()
+    reader = threading.Thread(target=lambda: got.append(p.stdout.readline()), daemon=True)
+    reader.start()
+    while reader.is_alive():
+        line = next_line(0.2)
+        if line == "":
+            sys.exit(0)
+        if not line:
+            continue
+        record(line)
+        msg = json.loads(line)
+        if msg.get("type") == "control_request":
+            control(msg)
+            if msg["request"].get("subtype") == "interrupt":
+                if how == "kill":
+                    p.kill()
+                else:
+                    p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                              "params": {"requestId": 2, "reason": "interrupted"}}) + "\n")
+                    p.stdin.flush()
+                    reader.join(2)  # (a call cancelled isn't answered: it's let go of)
+                    p.stdin.close()
+                record("CHAT TOOL cancelled" + (" and answered" if got and got[0] else ""))
+                return None
+        elif msg.get("type") == "user":
+            keep_queued(msg)
+    p.stdin.close()
+    p.wait(10)
+    return json.loads(got[0])["result"]["content"][0]["text"]
+
+
+def chat_tool_turn(n, text):
+    """"CHAT TOOL <name> <json>": one of the chat's own tools (baudelib.chattools) called with those arguments, as an
+    agent calls it (mcp__chat__<name>), what it gave said back."""
+    name, _, args = text.split("CHAT TOOL ", 1)[1].partition(" ")
+    args = json.loads(args or "{}")
+    tid = f"toolu_chat{n}"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+            {"type": "tool_use", "id": tid, "name": f"mcp__chat__{name}", "input": args}]}})
+    how = args.pop("_fake", None)  # ("kill": the tools' process killed by an interrupt, not told it's cancelled)
+    said = chat_tool_interruptible(name, args, how)
+    if said is None:  # (an interrupt took the turn: stopped, as claude 2.1's is)
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
+             "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300,
+             "usage": {"input_tokens": 10, "output_tokens": 5}})
+        return
+    record(f"CHAT TOOL {name} {' '.join(said.split())}")
+    out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": said}]}})
+    say(f"{name}: {said}", f"msg{n}b")
+    result(said)
 
 
 def autofix(n, text):
@@ -667,44 +882,248 @@ def reader(text):
          "total_cost_usd": 0.002 * k, "num_turns": 3, "duration_ms": 900, "usage": {"input_tokens": 50, "output_tokens": 40}})
 
 
+INBOX = queue.Queue()  # (stdin's lines as they come, "" once it's closed: read by a thread of its own, main)
+
+
+def next_line(timeout=None):
+    """stdin's next line ("" once it's closed); None if none came within timeout."""
+    try:
+        return INBOX.get(timeout=timeout)
+    except queue.Empty:
+        return None
+
+
+def control(msg):
+    """A control request answered, and done."""
+    sub = msg["request"].get("subtype")
+    if sub == "set_permission_mode" and msg["request"].get("mode") == "bypassPermissions" and not can_bypass():
+        out({"type": "control_response", "response": {
+            "subtype": "error", "request_id": msg["request_id"], "error": "Cannot set permission mode to "
+            "bypassPermissions because the session was not launched with --dangerously-skip-permissions"}})
+        return
+    resp = control_reply(msg["request"])
+    out({"type": "control_response",
+         "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})
+    if sub == "set_permission_mode":
+        out({"type": "system", "subtype": "status", "status": None,
+             "permissionMode": msg["request"]["mode"], "session_id": SESSION})
+    if sub == "stop_task" and msg["request"].get("task_id") in TASKS:
+        t = TASKS[msg["request"]["task_id"]]
+        if t.get("timer"):
+            t["timer"].cancel()
+        finish_task(msg["request"]["task_id"], "killed", "Stopped by the user")
+    if sub == "interrupt":
+        interrupted()
+    if sub == "initialize":
+        state["spares_tasks"] = msg["request"].get("perTaskStopAffordance") is True
+    if sub == "rename_session":
+        system("session_title_changed", title=msg["request"].get("title"))
+    if sub == "initialize":
+        out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
+             "model": "fake-model", "tools": ["Bash", "Read"]})
+
+
+def keep_queued(msg):
+    """A message sent while a turn runs, kept as claude 2.1 keeps one it takes into the turn: an attachment
+    (queued_command) by the message's uuid, not a user record."""
+    folder = kept_in()
+    if folder is None:
+        return
+    rec = {"parentUuid": None, "isSidechain": False, "type": "attachment", "uuid": str(uuid.uuid4()),
+           "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "sessionId": SESSION,
+           "cwd": os.getcwd(), "attachment": {"type": "queued_command", "prompt": msg["message"]["content"],
+                                              "commandMode": "prompt", "source_uuid": msg.get("uuid"),
+                                              "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}}
+    with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+def steps(n):
+    """"STEPS": a turn of FAKE_STEPS Bash calls (4), each FAKE_STEP_S seconds (2), that takes in a message sent while
+    it runs, as claude 2.1 does: between its steps, after a tool's result, said in its next message, and goes on; an
+    interrupt meanwhile stops it (error_during_execution)."""
+    took = []
+    count = int(os.environ.get("FAKE_STEPS") or 4)
+    for i in range(1, count + 1):
+        tid = f"step{n}_{i}"
+        say(f"Step {i} of {count}." + (f" Also doing what you sent: {took[-1]}" if took and i > 1 and
+                                        state.pop("fresh", False) else ""), f"steps{n}_{i}")
+        out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION,
+             "message": {"id": f"steps{n}_{i}t", "model": "fake", "role": "assistant", "content": [
+                 {"type": "tool_use", "id": tid, "name": "Bash",
+                  "input": {"command": f"./build.sh --part {i}", "description": f"Build part {i}"}}]}})
+        end = time.time() + float(os.environ.get("FAKE_STEP_S") or 2)
+        while (left := end - time.time()) > 0:
+            line = next_line(left)
+            if line is None:
+                break
+            if not line:
+                sys.exit(0)
+            record(line)
+            msg = json.loads(line)
+            if msg.get("type") == "user":  # (taken into the turn, after this step: kept as claude keeps it)
+                keep_queued(msg)
+                content = msg["message"]["content"]
+                took.append(content if isinstance(content, str) else " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)))
+                state["fresh"] = True
+            elif msg.get("type") == "control_request" and msg["request"].get("subtype") == "interrupt":
+                control(msg)
+                out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
+                     "total_cost_usd": 0.001, "num_turns": i, "duration_ms": 300,
+                     "usage": {"input_tokens": 10, "output_tokens": 5}})
+                return
+            elif msg.get("type") == "control_request":
+                control(msg)
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "is_error": False, "content": f"part {i} built"}]}})
+    done = f"All {count} steps done" + (f", and {len(took)} message(s) you sent taken in." if took else ".")
+    say(done, f"steps{n}_end")
+    result(done)
+
+
+def foreground_agent(n):
+    """"FOREGROUND": an Agent call run in the foreground, as claude 2.1 runs one: the turn waits on it while its
+    subagent works (FAKE_AGENT_STEPS steps, 4, each FAKE_AGENT_STEP_S seconds, 2), and a message sent meanwhile waits
+    too, taken in only once the call's returned. background_tasks moves it to the background: its call returns at
+    once (launched), the subagent goes on there and ends as a task does (task_notification), and the turn takes the
+    message in now and goes on. A background subagent runs its own Bash (pytest) meanwhile, which only a
+    background_tasks naming no call would move (as claude does, whoever's it is). An interrupt stops the turn and the subagent with it, as a foreground one is stopped."""
+    tid, tool = f"fg{n}", f"toolu_fg{n}"
+    inp = {"description": "Audit each module", "subagent_type": "general-purpose",
+           "prompt": "Read each module under `baudelib/` and list the functions nothing calls."}
+    count = int(os.environ.get("FAKE_AGENT_STEPS") or 4)
+    step_s = float(os.environ.get("FAKE_AGENT_STEP_S") or 2)
+    say("I'll have a subagent audit each module.", f"pre{tid}")
+    side, side_bash = f"toolu_bg{n}", f"toolu_bgsh{n}"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"mbg{n}", "model": "fake", "role": "assistant", "content": [{"type": "tool_use", "id": side, "name": "Agent",
+        "input": {"description": "Run the tests", "subagent_type": "general-purpose", "run_in_background": True,
+                  "prompt": "Run the test suite and report what fails."}}]}})
+    out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": side, "content": [{"type": "text", "text": launched(f"bg{n}")}]}]}})
+    out({"type": "assistant", "parent_tool_use_id": side, "session_id": SESSION, "message": {
+        "id": f"mbgsh{n}", "model": "fake", "role": "assistant", "content": [{"type": "tool_use", "id": side_bash,
+        "name": "Bash", "input": {"command": "pytest tests/ -q", "description": "Run the tests"}}]}})
+    state["fg_calls"] = {tool}
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"m{tid}", "model": "fake", "role": "assistant",
+        "content": [{"type": "tool_use", "id": tool, "name": "Agent", "input": inp}]}})
+    TASKS[tid] = {"tool_use_id": tool, "type": "local_agent", "output_file": "/dev/null",
+                  "summary": f"Audited {count} modules: **3** functions nothing calls.",
+                  "followup": "The audit's done: 3 functions nothing calls.",
+                  "usage": {"total_tokens": 30000, "tool_uses": count, "duration_ms": int(count * step_s * 1000)}}
+    keep_agent(tool, tid, "general-purpose", inp["prompt"])
+    system("task_started", task_id=tid, tool_use_id=tool, description=inp["description"],
+           subagent_type="general-purpose", task_type="local_agent", is_backgrounded=False, prompt=inp["prompt"])
+
+    def step(i):
+        part = f"{tool}_r{i}"
+        out({"type": "assistant", "parent_tool_use_id": tool, "session_id": SESSION, "message": {
+            "id": f"sub{tid}{i}", "model": "fake", "role": "assistant",
+            "content": [{"type": "tool_use", "id": part, "name": "Read", "input": {"file_path": f"baudelib/part{i}.py"}}]}})
+        out({"type": "user", "parent_tool_use_id": tool, "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": part, "content": f"def part{i}():\n    pass\n"}]}})
+        system("task_progress", task_id=tid, tool_use_id=tool, description=f"Reading part {i}",
+               subagent_type="general-purpose", last_tool_name="Read",
+               usage={"total_tokens": 7000 * i, "tool_uses": i, "duration_ms": int(i * step_s * 1000)})
+
+    took, moved, i = [], False, 0
+    while i < count and not moved:
+        i += 1
+        step(i)
+        end = time.time() + step_s
+        while not moved and (left := end - time.time()) > 0:
+            line = next_line(left)
+            if line is None:
+                break
+            if not line:
+                sys.exit(0)
+            record(line)
+            msg = json.loads(line)
+            if msg.get("type") == "user":  # (waits for the call to return: taken in at the turn's next step)
+                keep_queued(msg)
+                content = msg["message"]["content"]
+                took.append(content if isinstance(content, str) else " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)))
+            elif msg.get("type") == "control_request":
+                sub = msg["request"].get("subtype")
+                control(msg)
+                if sub == "interrupt":  # (the foreground subagent stopped with the turn)
+                    TASKS.pop(tid, None)
+                    system("task_notification", task_id=tid, tool_use_id=tool, status="killed",
+                           output_file="/dev/null", summary="Stopped by the interrupt")
+                    out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": tool, "is_error": True,
+                         "content": "[Request interrupted by user for tool use]"}]}})
+                    out({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                         "session_id": SESSION, "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300,
+                         "usage": {"input_tokens": 10, "output_tokens": 5}})
+                    return
+                if sub == "background_tasks" and msg["request"].get("tool_use_id") in (None, tool):
+                    moved = True
+                    if msg["request"].get("tool_use_id") is None:  # (moves the background subagent's Bash too)
+                        out({"type": "user", "parent_tool_use_id": side, "session_id": SESSION, "message": {
+                            "role": "user", "content": [{"type": "tool_result", "tool_use_id": side_bash, "content":
+                            "Command was manually backgrounded by user with ID: bgsh. Output is being written to: "
+                            "/dev/null"}]}})
+    state.pop("fg_calls", None)
+    if moved:
+        system("task_updated", task_id=tid, patch={"is_backgrounded": True})
+        system("background_tasks_changed", tasks=[{"task_id": tid, "task_type": "local_agent"}])
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": launched(tid)}]}]}})
+
+        stopped = threading.Event()  # (stop_task's: the timer cancelled)
+
+        def rest():
+            for j in range(i + 1, count + 1):
+                if stopped.wait(step_s):
+                    return
+                step(j)
+            if not stopped.wait(step_s):
+                finish_task(tid)
+        TASKS[tid]["timer"] = threading.Thread(target=rest, daemon=True)
+        TASKS[tid]["timer"].cancel = stopped.set
+        TASKS[tid]["timer"].start()
+    else:
+        t = TASKS.pop(tid)
+        system("task_notification", task_id=tid, tool_use_id=tool, status="completed", output_file="/dev/null",
+               summary=t["summary"], usage=t["usage"])
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": t["summary"]}]}]}})
+    if took:
+        say(f"Also doing what you sent: {took[-1]}", f"took{tid}")
+    done = ("The audit goes on in the background; I'll pick it up when it ends." if moved else
+            f"The audit's done: {TASKS.get(tid, {}).get('summary') or '3 functions nothing calls.'}")
+    say(done, f"end{tid}")
+    result(done)
+
+
 def main():
     record(f"START cwd={os.getcwd()} argv={json.dumps(sys.argv[1:])}")
     fork_transcript()
     state["model"] = arg("--model") or "opus"
     state["effort"] = arg("--effort") or ("medium" if state["model"] not in NO_EFFORT else None)
+
+    def read():
+        for got in sys.stdin:
+            INBOX.put(got)
+        INBOX.put("")
+    threading.Thread(target=read, daemon=True).start()
     turns = 0
-    for line in sys.stdin:
+    for line in iter(next_line, ""):
         record(line)
         msg = json.loads(line)
         if msg.get("type") == "control_request":
-            sub = msg["request"].get("subtype")
-            if sub == "set_permission_mode" and msg["request"].get("mode") == "bypassPermissions" and not can_bypass():
-                out({"type": "control_response", "response": {
-                    "subtype": "error", "request_id": msg["request_id"], "error": "Cannot set permission mode to "
-                    "bypassPermissions because the session was not launched with --dangerously-skip-permissions"}})
-                continue
-            resp = control_reply(msg["request"])
-            out({"type": "control_response",
-                 "response": {"subtype": "success", "request_id": msg["request_id"], "response": resp}})
-            if sub == "set_permission_mode":
-                out({"type": "system", "subtype": "status", "status": None,
-                     "permissionMode": msg["request"]["mode"], "session_id": SESSION})
-            if sub == "stop_task" and msg["request"].get("task_id") in TASKS:
-                t = TASKS[msg["request"]["task_id"]]
-                if t.get("timer"):
-                    t["timer"].cancel()
-                finish_task(msg["request"]["task_id"], "killed", "Stopped by the user")
-            if sub == "interrupt":
-                interrupted()
-            if sub == "initialize":
-                state["spares_tasks"] = msg["request"].get("perTaskStopAffordance") is True
-            if sub == "rename_session":
-                system("session_title_changed", title=msg["request"].get("title"))
-            if sub == "initialize":
-                out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
-                     "model": "fake-model", "tools": ["Bash", "Read"]})
+            control(msg)
+        elif msg.get("type") == "user" and state.get("open_turn") is not None:  # (a turn still open: the message
+            keep_queued(msg)  # waits for its next step, as claude keeps one it'll take into the turn)
+            content = msg["message"]["content"]
+            state.setdefault("took", []).append(content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content if isinstance(b, dict)))
         elif msg.get("type") == "user":
-            keep("user", msg["message"])
+            keep("user", msg["message"], **({"uuid": msg["uuid"]} if msg.get("uuid") else {}))  # (as claude: its uuid)
             turns += 1
             state["messages"] += 1
             text = msg["message"]["content"] if isinstance(msg["message"]["content"], str) else ""
@@ -721,10 +1140,25 @@ def main():
                     f" to: {question}", f"btw{turns}")
                 result("side answer")
                 continue
-            if "AUTOFIX" in text or "needs fixing" in text:
+            answer = next((a for k, a in json.loads(os.environ.get("FAKE_ANSWERS") or "{}").items() if k in text), None)
+            if limited() is not None:  # (the five-hour limit used up: every turn refused till it resets)
+                refused(turns)
+            elif answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
+                say(answer, f"answer{turns}")
+                result(answer)
+            elif re.search(r"An instance of the '.*' task (failed|finished|asks:)|You haven't answered run", text):
+                task_answer(turns, text)
+            elif "CHAT TOOL " in text:
+                chat_tool_turn(turns, text)
+            elif '<baude-sender name="Inbox"' in text:  # (an ask's answer, from the Inbox: taken up, no tools)
+                say("On it: going with that.", f"inbox{turns}")
+                result("inbox answer")
+            elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)
             elif "EXPIRED" in text:
                 expired(turns)
+            elif "LONGRUN" in text:
+                long_command(turns)
             elif "BACKGROUND" in text:
                 background_command(turns, delay)
             elif "QUESTION" in text or "QUESTION" in json.dumps(msg["message"]["content"]):
@@ -735,6 +1169,10 @@ def main():
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:
                 subagent(turns, delay, "OPEN" in text)
+            elif "STEPS" in text:
+                steps(turns)
+            elif "FOREGROUND" in text:
+                foreground_agent(turns)
             elif "LINGER" in text or state.get("linger"):
                 linger(turns, "LINGER" in text)
             else:

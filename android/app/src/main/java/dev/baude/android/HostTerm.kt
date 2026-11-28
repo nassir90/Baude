@@ -180,6 +180,13 @@ class HostTerm(val hostId: String, private val argv: List<String>? = null, priva
 object Terms {
     val live = mutableListOf<HostTerm>()
     private val plain = mutableMapOf<String, HostTerm>()
+    /** The terminal a host's Terminal page is to show next, by its id there (a pending restart's See Thread). */
+    val wanted = mutableMapOf<String, String>()
+
+    /** The host's terminal by its id there: this phone's, if it has it, else one attached to it. */
+    fun attached(hostId: String, tid: String): HostTerm =
+        live.firstOrNull { it.hostId == hostId && it.id == tid && it.ended == null }
+            ?: HostTerm(hostId, attachTo = tid).also { add(it) }
 
     /** The host's Terminal page's terminal: the one this phone had there, attached to again if it's still running
      * (kept in the settings: the app may have gone since), or a new one (the host's login shell). */

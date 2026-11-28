@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "rotate's answer.",
+  "properties": {
+    "op": {
+      "const": "rotated",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "$ref": "Session.json",
+      "description": "The Bot, as it's listed now: in its new conversation."
+    },
+    "thread": {
+      "anyOf": [
+        {
+          "$ref": "Session.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its past thread, as it's listed now: archived; null if it was only moved onto another model, nothing said yet."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

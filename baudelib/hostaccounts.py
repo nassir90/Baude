@@ -181,7 +181,11 @@ def _usage(server, profile, provider, done):
     if profile:
         provider = (accounts.account(profile) or {}).get("provider", provider)
     if provider == "antigravity":
-        return done(tracked=accounts.antigravity_usage(profile))
+        try:
+            limits = accounts.plan_usage(profile, provider=provider)
+        except (OSError, ValueError):
+            limits = None
+        return done(usage=_limits(limits) if limits else None, tracked=accounts.antigravity_usage(profile))
     if profile:
         if accounts.api_key(profile):
             return done(usage=None, api_key=True)

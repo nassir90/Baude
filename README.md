@@ -113,8 +113,9 @@ the account's available models from ACP and adds them to the picker after sign-i
 headless command also accepts `--model antigravity/default` or `antigravity/<model-id>`.
 Baude keeps display history and resumes the native Antigravity session by ID. Text,
 tool calls, permission requests, usage, cancellation, and image prompts are supported.
-Subscriptions shows the latest ACP context tokens and reported cost per account. The
-CLI does not expose subscription allowance limits through ACP, so no limit bars are shown.
+Subscriptions shows five-hour and weekly quota bars when a running Antigravity local
+server exposes them. It also shows the latest ACP context tokens and reported cost per
+account. Until a local quota server is available, the context and cost appear after a turn.
 Manual and Bypass Permissions work; Auto is available when the Antigravity agent reports
 its native Auto mode. The CLI remains responsible for its own authentication, downloads,
 files, terminal, and model availability. Baude does not install or update `agy`.
@@ -127,6 +128,8 @@ For Claude, paste a token from `claude setup-token`. For Codex, link an existing
 Select the account before creating a chat. Hosted sessions keep their account when resumed.
 Each mesh host uses its own profiles. Claude tokens are stored in an owner-only local database
 under Baude’s configuration directory. Codex manages its credentials inside each profile.
+Subscriptions reads Codex plan limits from the signed-in account's usage endpoint without
+sending a chat turn; if its access token expires, Codex refreshes the sign-in.
 
 Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model
 (`apple-claude`, once it's built), MLX (`pi-claude`'s own server, on the models in `pi-claude/models.json`, or

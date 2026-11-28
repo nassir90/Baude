@@ -560,7 +560,7 @@ ANTIGRAVITY_CLI = "antigravity"
 _usage_read = {}  # (usage key → (when, limits, when in seconds since 1970))
 _usage_locks = {}  # (usage key → the lock one read of it runs under)
 _usage_guard = threading.Lock()
-_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock()}
+_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock(), "antigravity": threading.Lock()}
 
 
 def usage_key(provider, profile):
@@ -595,9 +595,9 @@ def antigravity_usage(profile):
 
 
 def plan_usage(profile, exe=None, provider="claude"):
-    """The subscription's limits as _plan_usage (Claude's) or _codex_usage (Codex's) reads them, but one read per
+    """The subscription's limits as its provider reads them, but one read per
     subscription at a time and one per USAGE_CACHE_S: whoever asks while it runs, or just after, gets its answer. The
-    reads (each a claude or codex process) run one after another across one provider's subscriptions.
+    reads run one after another across one provider's subscriptions.
     provider: whose CLI's own sign-in profile "" is (an account's is its own)."""
     if profile:
         provider = (account(profile) or {}).get("provider", provider)
@@ -608,8 +608,9 @@ def plan_usage(profile, exe=None, provider="claude"):
         kept = _usage_read.get(key)
         if kept and time.monotonic() - kept[0] < USAGE_CACHE_S:
             return kept[1]
-        with _usage_one_at_a_time["codex" if provider == "codex" else "claude"]:
-            limits = _codex_usage(profile) if provider == "codex" else _plan_usage(profile, exe)
+        with _usage_one_at_a_time[provider]:
+            limits = _codex_usage(profile) if provider == "codex" else \
+                _antigravity_limits(profile) if provider == "antigravity" else _plan_usage(profile, exe)
         with _usage_guard:
             if _usage_locks.get(key) is lock:  # (not an account removed while this read ran)
                 _usage_read[key] = (time.monotonic(), limits, time.time())
@@ -779,15 +780,11 @@ def _codex_window_key(minutes, fallback):
 
 
 def _codex_usage(profile):
-    """A Codex subscription's limits, [(key, percent, resets)], as its App Server's rate limits say them (profile "":
-    the CLI's own sign-in, run with this machine's CODEX_HOME); None where it can't say: a sign-in that isn't a
-    ChatGPT plan's. Raises SignedOut for an account with no sign-in, else OSError where codex isn't here or couldn't be
-    asked."""
+    """A Codex subscription's limits from its ChatGPT usage endpoint, in [(key, percent, resets)] form.
+    None for an API-key sign-in; an expired login may fall back to Codex's App Server for refresh."""
     from baudelib import codex, models
 
     exe = models.codex_exe()
-    if not exe:
-        raise OSError("codex isn't on this machine")
     try:
         snapshot = codex.rate_limits(exe, profile=profile)
     except RuntimeError as e:
@@ -797,8 +794,14 @@ def _codex_usage(profile):
     return codex_limits(snapshot) or None
 
 
+def _antigravity_limits(profile):
+    """A running Antigravity app's five-hour and weekly quota pools, if its local server exposes them."""
+    from baudelib.antigravityquota import read
+    return read(antigravity_home(profile) if profile else "")
+
+
 def codex_limits(snapshot):
-    """A Codex rate-limit snapshot's windows (its App Server's: primary, secondary), [(key, percent, resets)]."""
+    """A Codex rate-limit snapshot's primary and secondary windows as [(key, percent, resets)]."""
     found = []
     for which in ("primary", "secondary"):
         window = snapshot.get(which)

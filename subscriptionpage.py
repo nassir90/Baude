@@ -427,7 +427,10 @@ def _read(reply):
     if reply.get("error"):
         return reply["error"], None
     if "tracked" in reply:
-        return reply["tracked"] or wording.say("subscriptions.after_turn"), None
+        limits = _limits(reply["usage"]) if reply.get("usage") else []
+        tracked = reply.get("tracked")
+        return ({"limits": limits, "tracked": tracked} if limits or tracked else
+                wording.say("subscriptions.after_turn")), None
     if reply.get("usage"):
         return _limits(reply["usage"]), reply.get("as_of")
     return wording.say("subscriptions.no_limits" if reply.get("api_key") else "subscriptions.after_turn"
@@ -445,14 +448,19 @@ def usage_lines(box, read, narrow=None, as_of=None):
     while (child := box.get_first_child()) is not None:
         box.remove(child)
     if isinstance(read, dict):
-        used, size = read.get("context_used"), read.get("context_size")
+        for key, name, percent, resets in read.get("limits") or []:
+            _bar(box, limit_label(key, name, resets), wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
+                 percent / 100, narrow)
+        tracked = read.get("tracked") if "tracked" in read else read
+        tracked = tracked if isinstance(tracked, dict) else {}
+        used, size = tracked.get("context_used"), tracked.get("context_size")
         if isinstance(used, int) and isinstance(size, int) and size > 0:
             _bar(box, wording.say("subscriptions.antigravity_context"),
                  wording.say("subscriptions.antigravity_tokens", used=f"{used:,}", size=f"{size:,}"), used / size,
                  narrow)
-        if isinstance(read.get("cost_usd"), (int, float)):
+        if isinstance(tracked.get("cost_usd"), (int, float)):
             box.append(Gtk.Label(label=wording.say("subscriptions.antigravity_cost",
-                                                    cost=f"{read['cost_usd']:.4f}"), xalign=0, wrap=True,
+                                                    cost=f"{tracked['cost_usd']:.4f}"), xalign=0, wrap=True,
                                  css_classes=["dim-label"]))
         return
     if not isinstance(read, list):
@@ -641,8 +649,11 @@ class MenuUsage(Gtk.Button):
         self.name.set_label(account["name"] if account else wording.say("subscriptions.cli_default"))
         key = CODEX_CLI if provider == "codex" and not profile else \
             ANTIGRAVITY_CLI if provider == "antigravity" and not profile else profile
-        last = (reply.get("antigravity_usage") or {}).get(key) if provider == "antigravity" else \
-            (reply.get("last_usage") or {}).get(key)
+        last = (reply.get("last_usage") or {}).get(key)
+        if provider == "antigravity":
+            tracked = (reply.get("antigravity_usage") or {}).get(key)
+            last = {"limits": _limits(last["usage"]) if last and last.get("usage") else [],
+                    "tracked": tracked} if last or tracked else None
         if was != profile:  # (the placeholder's, or another's reading: the host's last of this one, greyed, till it's read)
             self.show_read(last if provider == "antigravity" else
                            _limits(last["usage"]) if last and last.get("usage") else None, None, stale=True)

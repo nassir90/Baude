@@ -290,11 +290,8 @@ def list_models(exe, env=None, timeout=15, profile=None):
 SIGN_IN_ERRORS = ("codex account authentication required", "chatgpt authentication required")  # (what Codex says of a sign-in with no ChatGPT plan: an API key's, or none)
 
 
-def rate_limits(exe, env=None, timeout=20, profile=""):
-    """A Codex subscription's (profile's; "": the CLI's own sign-in, its CODEX_HOME) rate limits as its App Server reads
-    them, without starting a thread: the snapshot's primary and secondary windows ({usedPercent, windowDurationMins,
-    resetsAt}), None where Codex says its sign-in has none (an API key's, or none). Any other failure, a timeout
-    included, raises RuntimeError."""
+def _rate_limits_app_server(exe, env=None, timeout=20, profile=""):
+    """Let Codex refresh an expired login before retrying a direct usage read."""
     from queue import Empty, Queue
 
     outcome = Queue()
@@ -324,6 +321,76 @@ def rate_limits(exe, env=None, timeout=20, profile=""):
         except subprocess.TimeoutExpired:
             app.p.kill()
             app.p.wait()
+
+
+def rate_limits(exe, env=None, timeout=20, profile=""):
+    """Read a ChatGPT plan's Codex quota directly, without starting an agent or waiting for a turn.
+
+    Codex owns its rotating OAuth credentials. On an expired access token its App Server refreshes them and supplies
+    that reading. API-key accounts have no ChatGPT subscription quota.
+    """
+    import urllib.error
+    import urllib.request
+
+    home = accounts.codex_home(profile) if profile else (env or os.environ).get("CODEX_HOME") or \
+        os.path.expanduser("~/.codex")
+    path = os.path.join(home, "auth.json")
+
+    def credentials():
+        try:
+            with open(path, encoding="utf-8") as f:
+                auth = json.load(f)
+        except (OSError, ValueError) as exc:
+            if profile:
+                raise accounts.SignedOut(wording.say("subscriptions.codex_signed_out")) from exc
+            return None
+        if not isinstance(auth, dict):
+            return None
+        if auth.get("auth_mode") == "apikey" or auth.get("OPENAI_API_KEY") and not auth.get("tokens"):
+            return None
+        tokens = auth.get("tokens") or {}
+        if not tokens.get("access_token"):
+            return None
+        return tokens
+
+    def fetch(tokens):
+        headers = {
+            "Authorization": "Bearer " + tokens["access_token"],
+            "Accept": "application/json", "User-Agent": "codex-cli",
+            "Origin": "https://chatgpt.com", "Referer": "https://chatgpt.com/"}
+        if tokens.get("account_id"):
+            headers["ChatGPT-Account-Id"] = tokens["account_id"]
+        request = urllib.request.Request("https://chatgpt.com/backend-api/wham/usage", headers=headers)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.load(response)
+        if not isinstance(body, dict):
+            raise RuntimeError("Codex returned invalid usage data")
+        limit = body.get("rate_limit") or body.get("rate_limits") or {}
+        if not isinstance(limit, dict):
+            raise RuntimeError("Codex returned invalid usage data")
+        snapshot = {}
+        for source, target in (("primary_window", "primary"), ("secondary_window", "secondary")):
+            window = limit.get(source)
+            if isinstance(window, dict):
+                seconds = window.get("limit_window_seconds")
+                snapshot[target] = {"usedPercent": window.get("used_percent"),
+                                    "windowDurationMins": seconds // 60 if isinstance(seconds, int) else None,
+                                    "resetsAt": window.get("reset_at")}
+        if limit.get("limit_reached"):
+            snapshot["rateLimitReachedType"] = "quota"
+        return snapshot or None
+
+    tokens = credentials()
+    if tokens is None:
+        return _rate_limits_app_server(exe, env, timeout, profile) if exe and not os.path.isfile(path) else None
+    try:
+        return fetch(tokens)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 401 or not exe:
+            raise RuntimeError(f"Codex usage request failed ({exc.code})") from exc
+        return _rate_limits_app_server(exe, env, timeout, profile)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Codex usage request failed: {exc}") from exc
 
 
 class CodexProc(AppServer):

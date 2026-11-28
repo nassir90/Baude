@@ -131,7 +131,7 @@ def answer(server, conn, msg, reply):
                 done = _for_chat(server, conn, msg, done)
                 return _claude_sign_in(server, conn, msg, reply, done)
             if provider == "antigravity" or (accounts.account(profile) or {}).get("provider") == "antigravity":
-                return _antigravity_sign_in(conn, msg, reply, done)
+                return _antigravity_sign_in(server, conn, msg, reply, done)
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
@@ -318,7 +318,7 @@ def _claude_sign_in(server, conn, msg, reply, done):
     return None
 
 
-def _antigravity_sign_in(conn, msg, reply, done):
+def _antigravity_sign_in(server, conn, msg, reply, done):
     """Sign in through agy's official code flow, in a directory owned by this account."""
     if (running := getattr(conn, "accounts_login", None)) is not None and running.poll() is None:
         return done(error="this connection runs a sign-in already")
@@ -352,9 +352,10 @@ def _antigravity_sign_in(conn, msg, reply, done):
                     lines.append(line)
                     reply("accounts", what="sign_in", line=line)
         ok = proc.wait() == 0
+        who = profile
         if ok and fresh:
             try:
-                accounts.add("antigravity", name, directory, profile=profile or None)
+                who = accounts.add("antigravity", name, directory)
             except ValueError as exc:
                 shutil.rmtree(directory, ignore_errors=True)
                 return done(error=str(exc))
@@ -364,7 +365,8 @@ def _antigravity_sign_in(conn, msg, reply, done):
             reason = next((line for line in reversed(lines) if line.lower().startswith("error")), None) or \
                 wording.say("subscriptions.antigravity_failed")
             return done(error=reason)
-        done(signed_in=True, who=name or (accounts.account(profile) or {}).get("name"))
+        getattr(server, "antigravity_signed_in", lambda _profile: None)(who)
+        done(signed_in=True, who=name or (accounts.account(who) or {}).get("name"))
 
     threading.Thread(target=read, daemon=True, name="antigravity-login").start()
     return None

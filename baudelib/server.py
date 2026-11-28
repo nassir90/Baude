@@ -79,6 +79,7 @@ class Server(ServerRunning, ServerSessions):
         self.antigravity_catalogs = {}
         self.antigravity_refresh_at = {}
         self.antigravity_refreshing = set()
+        self.antigravity_again = set()
         me = os.path.join(self.state_dir, "server.json")
         try:
             with open(me, encoding="utf-8") as f:
@@ -231,6 +232,22 @@ class Server(ServerRunning, ServerSessions):
             if choices and choices != self.antigravity_catalogs.get(profile):
                 self.antigravity_catalogs[profile] = choices
                 self.changed()
+            again = profile in self.antigravity_again
+            if again:
+                self.antigravity_again.discard(profile)
+                self.antigravity_refresh_at.pop(profile, None)
+        if again:
+            self.antigravity_models(profile)
+
+    def antigravity_signed_in(self, profile=""):
+        """A sign-in of this profile was confirmed: look for its models now. A probe already running may have started
+        before the sign-in, so one more follows it."""
+        with self.lock:
+            self.antigravity_refresh_at.pop(profile, None)
+            if profile in self.antigravity_refreshing:
+                self.antigravity_again.add(profile)
+                return
+        self.antigravity_models(profile)
 
     def antigravity_model_update(self, choices, profile=""):
         with self.lock:

@@ -2077,7 +2077,8 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
         val conn = Mesh.conn("h1")!!
         val init = org.json.JSONObject(conn.info!!.init!!.toString())
         val listed = init.getJSONArray("models")
-        for ((value, name) in listOf("codex/gpt-5.4-codex" to "GPT 5.4 Codex", "codex/gpt-5.4" to "GPT 5.4",
+        for ((value, name) in listOf("default" to "Default (recommended)", "codex/default" to "Codex (default model)",
+                "codex/gpt-5.4-codex" to "GPT 5.4 Codex", "codex/gpt-5.4" to "GPT 5.4",
                 "antigravity/default" to "Antigravity (default model)", "antigravity/gemini-4-hydrogen" to "Gemini 4 Hydrogen",
                 "antigravity/gemini-3.8-flash" to "Gemini 3.8 Flash", "antigravity/gemini-pro-orchestrator" to "Gemini Pro Orchestrator",
                 "antigravity/claude-opus-5-5" to "Claude Opus 5.5"))

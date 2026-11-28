@@ -304,6 +304,14 @@ class MeshCard(ToolCard):
 class WindowRemote:
     """A window's sessions on the network, steered through their hosts."""
 
+    def cancel_agent_draft(self):
+        """Leave an unstarted Bot child draft without creating a remote session."""
+        self.agent_draft = None
+        self.agent_starting = False
+        self.agent_start_attempt = None
+        self.agent_send_pending = None
+        self.composer_box.gate("agent-starting", False)
+
     # ---- sessions on the network (baudelib.server): opened from their transcripts' mirrors here, steered through
     # their servers (start_remote_proc), started from the sidebar while a group on the network is shown
     def open_remote_soon(self, info):
@@ -321,6 +329,102 @@ class WindowRemote:
             if self.opening_remote == info["id"] and not getattr(self, "let_go_done", False):
                 self.switch_to(lambda: self.resume_session(info), show=False)
         self.sync_remote(r, info["id"], fetched)
+
+    def new_agent_session(self, parent):
+        """A Bot's sidebar → New session: an empty draft whose host and model are chosen in the normal header."""
+        r = parent.get("remote")
+        if r is None or r.state != "alive" or r.deactivated:
+            return
+        listed = r.sessions.get(parent["id"]) or {}
+        self.agent_draft = {"parent": parent["id"], "parent_remote": r, "host": r,
+                            "host_key": host_key(r), "host_name": remote_name(r), "cwd": listed.get("cwd"),
+                            "group": listed.get("group"), "account": None}
+        self.model = listed.get("model") or self.model
+        self.effort = listed.get("effort") or self.effort
+        self.draft_group = self.agent_draft["group"] or ""
+        self.new_session(group=self.draft_group, agent=True)
+
+    def new_agent_host_changed(self, key):
+        """In a Bot child draft the host picker changes the destination, without filtering the visible chat list."""
+        agent = getattr(self, "agent_draft", None)
+        if agent is None:
+            return
+        if getattr(self, "agent_starting", False):
+            self.sidebar.host_dd.select(agent["host_key"])
+            return
+        r = local_host() if key == HERE_HOST else next((r for r in network().remotes() if host_key(r) == key), None)
+        if key != HERE_HOST and (r is None or r.state != "alive" or r.deactivated):
+            self.note(wording.say("hosts.looking", host=dict(self.sidebar.new_hosts()).get(key, key)))
+            self.sidebar.host_dd.select(agent["host_key"])
+            return
+        target_cwd = ((r.sessions.get(agent["parent"]) or {}).get("cwd") if r is agent["parent_remote"] else None) or \
+            (self.run_cwd if key == HERE_HOST else None)
+        agent.update(host=r, host_key=key, host_name=dict(self.sidebar.new_hosts()).get(key, key),
+                     cwd=target_cwd, account=None)
+        models = (r.info or {}).get("models", []) if r is not None else self.claude_models or []
+        candidates = [m for m in models if isinstance(m, dict) and m.get("value") not in (None, "default", "codex/default")]
+        if candidates and not any(self.model in (m.get("value"), m.get("resolvedModel")) for m in candidates):
+            self.model = candidates[0]["value"]
+        self.sync_models(models)
+        self.sync_local()
+
+    def start_agent_draft(self, text, again=None):
+        """Create the nested remote draft only when its first composer message is sent, then deliver that message."""
+        agent = getattr(self, "agent_draft", None)
+        if agent is None or getattr(self, "agent_starting", False):
+            return False
+        self.agent_starting = True
+        attempt = self.agent_start_attempt = object()
+        self.composer_box.gate("agent-starting", True)
+
+        def start(r):
+            if self.agent_draft is not agent or not self.agent_starting or self.agent_start_attempt is not attempt:
+                return
+            effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
+                if self.effort_dd.get_sensitive() else None
+            params = {"op": "start", "prompt": "", "draft": True, "cwd": agent.get("cwd") or
+                      (load_settings().get("remote_folders") or {}).get(agent["host_key"]) or
+                      (r.info or {}).get("home") or "~", "model": self.model, "effort": effort,
+                      "mode": self.mode, "group": agent.get("group"), "spawned_by": agent["parent"],
+                      **({"env": claude_env()} if r.mine else {}),
+                      **({"account": agent["account"]} if agent.get("account") is not None else {})}
+
+            def started(reply):
+                if self.agent_draft is not agent or self.agent_start_attempt is not attempt:
+                    return
+                self.agent_starting = False
+                self.agent_start_attempt = None
+                self.composer_box.gate("agent-starting", False)
+                if reply.get("op") == "started":
+                    self.agent_send_pending = (reply["session"]["id"], text, again)
+                    self.agent_draft = None
+                else:
+                    self.input.get_buffer().set_text(text)
+                self.remote_started(r, reply)
+
+            r.request(params, started)
+
+        target = agent.get("host")
+        if target is not None:
+            start(target)
+        else:
+            waiting_host = local_host() is None
+            self.local_server(start)
+            if waiting_host:
+                waiting_for = agent
+
+                def give_up():
+                    if getattr(self, "agent_starting", False) and self.agent_draft is waiting_for:
+                        self.agent_starting = False
+                        self.agent_start_attempt = None
+                        self.composer_box.gate("agent-starting", False)
+                        if text:
+                            self.input.get_buffer().set_text(text)
+                    return False
+
+                GLib.timeout_add_seconds(22, give_up)
+        return True
+
 
     def open_remote(self, info):
         """A session on a server on the network: shown from its transcript's mirror here (Remote.mirror) as a chat
@@ -372,6 +476,11 @@ class WindowRemote:
         self.sidebar.fill()
         if (r.sessions.get(info["id"]) or {}).get("draft") and self.composer.get_mapped():
             self.input.grab_focus()
+        pending = getattr(self, "agent_send_pending", None)
+        if pending is not None and pending[0] == info["id"]:
+            self.agent_send_pending = None
+            _sid, text, again = pending
+            GLib.idle_add(lambda: (self.session_id == info["id"] and self.send_text(text, again), False)[1])
 
     def sync_remote(self, r, sid, then=None):
         """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after (its
@@ -524,7 +633,23 @@ class WindowRemote:
         dest.grab_focus()
         return dest
 
-    def ask_host_folder(self, r):
+    def pick_agent_folder(self):
+        """Set the local folder on an unstarted Bot child draft."""
+        if getattr(self, "agent_draft", None) is None:
+            return self.pick_folder()
+        dlg = self.cwd_dialog()
+
+        def done(d, result):
+            try:
+                folder = d.select_folder_finish(result).get_path()
+            except GLib.Error:
+                return
+            if getattr(self, "agent_draft", None) is not None:
+                self.agent_draft["cwd"] = folder
+                self.set_cwd(folder)
+        dlg.select_folder(self, None, done)
+
+    def ask_host_folder(self, r, agent_draft=False):
         """Open folder… with another host picked: "Open a folder on <host>", a folder there typed or browsed, from the
         one last used there (else its home). Under the path, the folders the host lists (list_dir) as it's typed: those
         in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
@@ -659,8 +784,20 @@ class WindowRemote:
         dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("open", wording.say("common.open"))
         dlg.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _d, res: res == "open" and
-                    self.new_session_on(r, os.path.normpath(full()) if full().startswith("/") else full()))
+        def opened(_d, response):
+            if response != "open":
+                return
+            folder = os.path.normpath(full()) if full().startswith("/") else full()
+            if agent_draft:
+                pending = getattr(self, "agent_draft", None)
+                if pending is None or pending.get("host") is not r:
+                    return
+                pending["cwd"] = folder
+                pending["host_key"] = host_key(r)
+                save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), r.key: folder})
+                return
+            self.new_session_on(r, folder)
+        dlg.connect("response", opened)
         self.dialog = self.folder_dialog = dlg
         self.folder_parts = (entry, rows)
         dlg.present(self)
@@ -911,6 +1048,7 @@ class WindowRemote:
         there: a blank chat there, opened to be written in, in folder (kept as the one last used there, unless not
         keep), else the folder last used there (else its home), on the top bar's model if it's Claude's (else the
         host's own); listed once it's written in, as a new chat here is."""
+        self.cancel_agent_draft()
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
         group = self.sidebar.new_group(host_key(r))
         model = self.model if self.model and model_program(self.model) == "claude" else None
@@ -1008,6 +1146,13 @@ class WindowRemote:
         self.sidebar.focus_search()
 
     def resume_session(self, info):
+        self.agent_draft = None
+        self.agent_starting = False
+        self.agent_start_attempt = None
+        self.composer_box.gate("agent-starting", False)
+        pending = getattr(self, "agent_send_pending", None)
+        if pending is not None and pending[0] != info.get("id"):
+            self.agent_send_pending = None
         if info.get("remote") is not None:
             return self.open_remote(info)
         self.draft_group = ""  # (a new chat's group: not another's)

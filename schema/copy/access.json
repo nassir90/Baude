@@ -19,7 +19,6 @@
     "setting": "{$host} / {$capability}",
     "bad_rule": "Not a rule: everybody, nobody, or chosen with members",
     "failed": "Couldn't change access: {$why}",
-    "not_passed_on": "Not passed on: a member's connection, or a chat a member started, reaches this host only",
     "desktop_listed": "A Claude Desktop chat only listed here goes by the host's rule till it's written in",
     "n_more": "{$n} more"
   }

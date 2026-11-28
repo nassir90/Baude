@@ -342,7 +342,9 @@ class WindowRemote:
         self.model = listed.get("model") or self.model
         self.effort = listed.get("effort") or self.effort
         self.draft_group = self.agent_draft["group"] or ""
-        self.new_session(group=self.draft_group, agent=True)
+        cwd = self.agent_draft["cwd"]
+        here = baudelib.client.is_here(r.info) and cwd and os.path.isdir(cwd)
+        self.new_session(group=self.draft_group, agent=True, run_in=cwd if here else None)
 
     def new_agent_host_changed(self, key):
         """In a Bot child draft the host picker changes the destination, without filtering the visible chat list."""
@@ -376,31 +378,29 @@ class WindowRemote:
         self.agent_starting = True
         attempt = self.agent_start_attempt = object()
         self.composer_box.gate("agent-starting", True)
+        self.input.get_buffer().set_text(text)  # (kept in the box, the composer off, till the new session's open)
 
         def start(r):
             if self.agent_draft is not agent or not self.agent_starting or self.agent_start_attempt is not attempt:
                 return
             effort = (self.local_effort if model_program(self.model) == "pi" else self.effort) \
                 if self.effort_dd.get_sensitive() else None
-            params = {"op": "start", "prompt": "", "draft": True, "cwd": agent.get("cwd") or
-                      (load_settings().get("remote_folders") or {}).get(agent["host_key"]) or
-                      (r.info or {}).get("home") or "~", "model": self.model, "effort": effort,
-                      "mode": self.mode, "group": agent.get("group"), "spawned_by": agent["parent"],
+            params = {"op": "start", "prompt": "", "draft": True, "cwd": self.agent_folder(), "model": self.model,
+                      "effort": effort, "mode": self.mode, "group": agent.get("group"), "spawned_by": agent["parent"],
                       **({"env": claude_env()} if r.mine else {}),
                       **({"account": agent["account"]} if agent.get("account") is not None else {})}
 
             def started(reply):
                 if self.agent_draft is not agent or self.agent_start_attempt is not attempt:
                     return
-                self.agent_starting = False
-                self.agent_start_attempt = None
-                self.composer_box.gate("agent-starting", False)
-                if reply.get("op") == "started":
-                    self.agent_send_pending = (reply["session"]["id"], text, again)
-                    self.agent_draft = None
-                else:
-                    self.input.get_buffer().set_text(text)
+                if reply.get("op") != "started":
+                    self.agent_starting = False
+                    self.agent_start_attempt = None
+                    self.composer_box.gate("agent-starting", False)
+                    return self.remote_started(r, reply)
+                self.agent_send_pending = (reply["session"]["id"], text, again)
                 self.remote_started(r, reply)
+                self.carry_box = (reply["session"]["id"], None)  # (the box goes on to it as it opens)
 
             r.request(params, started)
 
@@ -418,8 +418,6 @@ class WindowRemote:
                         self.agent_starting = False
                         self.agent_start_attempt = None
                         self.composer_box.gate("agent-starting", False)
-                        if text:
-                            self.input.get_buffer().set_text(text)
                     return False
 
                 GLib.timeout_add_seconds(22, give_up)
@@ -480,7 +478,13 @@ class WindowRemote:
         if pending is not None and pending[0] == info["id"]:
             self.agent_send_pending = None
             _sid, text, again = pending
-            GLib.idle_add(lambda: (self.session_id == info["id"] and self.send_text(text, again), False)[1])
+
+            def deliver():
+                if self.session_id == info["id"] and widgets.typed_text(self.input).strip() == text.strip():
+                    self.input.get_buffer().set_text("")  # (sent from the box, as it is if it's still what was written)
+                    self.send_text(text, again)
+                return False
+            GLib.idle_add(deliver)
 
     def sync_remote(self, r, sid, then=None):
         """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after (its

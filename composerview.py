@@ -732,7 +732,10 @@ class Composer(Gtk.Overlay):
         (_fit) just after this frame. (GTK lays the box out again neither for a new height of the text's own nor for
         one asked for in this layout: a smaller font left the box as tall as the larger one's.)"""
         fit = self._drawn()
-        height = self.input.measure(Gtk.Orientation.VERTICAL, max(self.input.get_width(), 1))[1]
+        width = self.input.get_width()
+        if width < self.input.measure(Gtk.Orientation.HORIZONTAL, -1)[0]:
+            return  # not allocated yet: measuring its height at width 1 floods GTK with warnings
+        height = self.input.measure(Gtk.Orientation.VERTICAL, width)[1]
         if self.text_height is None:
             self.text_height = height
         if (fit, height) != (self.fitted, self.text_height) and self.refit is None:

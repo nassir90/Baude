@@ -82,7 +82,7 @@ def answer(server, conn, msg, reply):
                 home = os.path.expanduser(msg["home"])
                 if not os.path.isdir(home):
                     raise ValueError(wording.say("subscriptions.not_antigravity_home"))
-                accounts.add("antigravity", msg.get("name"), os.path.abspath(home))
+                _antigravity_signed_in(server, accounts.add("antigravity", msg.get("name"), os.path.abspath(home)))
             elif msg.get("home"):
                 accounts.add("codex", msg.get("name"), _signed_in_home(msg["home"]))
             elif "token" in msg:
@@ -318,6 +318,14 @@ def _claude_sign_in(server, conn, msg, reply, done):
     return None
 
 
+def _antigravity_signed_in(server, profile):
+    """Tell the server an Antigravity account is signed in (its models are looked for now); never fails the request."""
+    try:
+        getattr(server, "antigravity_signed_in", lambda _profile: None)(profile)
+    except Exception as exc:
+        server.log(f"Antigravity sign-in follow-up: {exc}")
+
+
 def _antigravity_sign_in(server, conn, msg, reply, done):
     """Sign in through agy's official code flow, in a directory owned by this account."""
     if (running := getattr(conn, "accounts_login", None)) is not None and running.poll() is None:
@@ -365,7 +373,7 @@ def _antigravity_sign_in(server, conn, msg, reply, done):
             reason = next((line for line in reversed(lines) if line.lower().startswith("error")), None) or \
                 wording.say("subscriptions.antigravity_failed")
             return done(error=reason)
-        getattr(server, "antigravity_signed_in", lambda _profile: None)(who)
+        _antigravity_signed_in(server, who)
         done(signed_in=True, who=name or (accounts.account(who) or {}).get("name"))
 
     threading.Thread(target=read, daemon=True, name="antigravity-login").start()

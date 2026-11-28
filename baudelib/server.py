@@ -241,9 +241,16 @@ class Server(ServerRunning, ServerSessions):
 
     def antigravity_signed_in(self, profile=""):
         """A sign-in of this profile was confirmed: look for its models now. A probe already running may have started
-        before the sign-in, so one more follows it."""
+        before the sign-in, so one more follows it. A new chat's account becomes this one if the one selected can't
+        run (the CLI's own, with no models found, or one disabled or removed)."""
         with self.lock:
             self.antigravity_refresh_at.pop(profile, None)
+            chosen = accounts.selected("antigravity")
+            stuck = chosen != profile and (accounts.disabled(accounts.usage_key("antigravity", chosen)) or
+                                           (accounts.account(chosen) is None if chosen else
+                                            not self.antigravity_catalogs.get("")))
+            if stuck and profile:
+                self.account_kept("antigravity", profile)
             if profile in self.antigravity_refreshing:
                 self.antigravity_again.add(profile)
                 return

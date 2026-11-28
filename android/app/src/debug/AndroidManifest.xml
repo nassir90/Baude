@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the 3D cards prototype's demo (debug builds only): adb shell am start -n dev.baude.android/.Cards3DDemo -ei n 50 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".Cards3DDemo" android:exported="true" />
+    </application>
+</manifest>

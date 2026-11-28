@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -35,17 +36,17 @@ fun toast(text: String) {
 fun tidy(text: String): String = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
 
 /** A text entry that takes focus when it opens, and confirms on Done (Baude's Gtk.Entry with activates_default);
- * secret: what's typed shown as dots (Gtk.PasswordEntry). */
+ * secret: what's typed shown as dots (Gtk.PasswordEntry); enabled false: greyed and not typed in (insensitive). */
 @Composable
 fun NameField(value: String, set: (String) -> Unit, hint: String, onDone: () -> Unit, focus: Boolean = true,
-              secret: Boolean = false) {
+              secret: Boolean = false, enabled: Boolean = true) {
     val c = LocalBaude.current
     val focusing = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (focus) focusing.requestFocus() }
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+    Box(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
         .padding(horizontal = 10.dp, vertical = 9.dp)) {
         if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim)
-        BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+        BasicTextField(value, set, enabled = enabled, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }), modifier = Modifier.fillMaxWidth().focusRequester(focusing),
             visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()

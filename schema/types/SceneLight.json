@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A light.",
+  "properties": {
+    "type": {
+      "enum": [
+        "point",
+        "directional"
+      ],
+      "description": "point: from a place, fading with distance; directional: from far away, along direction."
+    },
+    "position": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Where a point light is (3 numbers)."
+    },
+    "direction": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Which way a directional light shines (3 numbers)."
+    },
+    "color": {
+      "type": "string",
+      "description": "Its colour (#rrggbb)."
+    },
+    "intensity": {
+      "type": "number",
+      "description": "How bright, 1 being its colour as it is."
+    },
+    "range": {
+      "type": "number",
+      "description": "A point light's reach, metres: it's gone by then."
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "additionalProperties": false
+}

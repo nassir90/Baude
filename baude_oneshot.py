@@ -17,7 +17,9 @@ message, or a control_response answering what it asks (a permission, as claude's
 what it asks is answered with a deny, unless --ask-timeout leaves it to the host process to answer after that long.
 Once nobody reads its stdout (| head -1), it says no more, and still sees the turn to its end. Exit: 0; 1 if the
 turn's result was an error, or claude ended before it; 2 if the host couldn't be reached, or the session started, or
-it refused what was sent; 3 if the host process went before the turn's end.
+it refused what was sent; 3 if the host process went before the turn's end. Run by a Bot's task, the session nests
+under that Bot, and on the Bot's own host it's kept with the run and its result is told the Bot (BAUDE_SPAWNED_BY,
+BAUDE_TASK_RUN: the run's environment).
 """
 import argparse
 import itertools
@@ -102,7 +104,7 @@ def main():
                  "add_dirs": [os.path.abspath(os.path.expanduser(d)) if not away else d for d in args.add_dir],
                  "allowed_tools": args.allow, "disallowed_tools": args.deny, "fork_from": args.fork_from,
                  "ask_timeout": args.ask_timeout, "ask_default": args.ask_default, "attach": True,
-                 "answers": answers, "req": 1}
+                 "answers": answers, "req": 1, **wire.from_task(here=not away)}  # (inside a task's run: its Bot's)
         ch.send({k: v for k, v in start.items() if v is not None})  # (what's not given left out)
         owed[0] += bool((prompt or "").strip())
         prompt = None  # (sent with it)

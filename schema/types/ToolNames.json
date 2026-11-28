@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "How a host's MCP tools are named, for its heads to show (mcp__<server>__<tool> as \"Server / Tool\"): what its MCP servers and their tools say they're called, and the names its claude says its servers are configured as.",
+  "properties": {
+    "servers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Each server's title, by its name as it's put in its tools' names (each character not a letter, digit, _ or - made _): mesh: Mesh, claude_ai_Slack: Slack."
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A tool's title, by its whole name, where its server gives one (mcp__emission__javascript_tool: Run JavaScript)."
+    }
+  },
+  "additionalProperties": false
+}

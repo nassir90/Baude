@@ -27,6 +27,7 @@ import time
 from macos import full_redraws, ns_string, objc_send
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
 import baudelib.bins  # (the commands in ~/.local/bin, kept up to date as it starts: see baudelib/bins.py)
+import baudelib.notifier  # (its notifications on macOS, posted by an app of its own: see baudelib/notifier.py)
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
@@ -70,6 +71,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: Record's too)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+import meshui  # noqa: E402  (a daemon's pending restart, toasted: Record's too)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
@@ -82,7 +84,7 @@ from startup import (  # noqa: E402
     APP_ID, LAUNCHER, TRACE, follow_accent, launch_command, logo_icon, macos_dock_icon, restart_state_path,
     take_restart_state, trace,
 )
-from sessionlist import THIS_MACHINE, _NETWORK, local_host, save_info_cache  # noqa: E402
+from sessionlist import THIS_MACHINE, _NETWORK, local_host, remote_name, save_info_cache  # noqa: E402
 from baudewindow import BaudeWindow  # noqa: E402
 
 
@@ -98,6 +100,8 @@ class BaudeApp(Adw.Application):
         self.updater = None  # (update.Updater: started with the first window)
 
     def do_shutdown(self):
+        if "browserpane" in sys.modules:  # (Bots' browser windows out: where each was, for next time)
+            sys.modules["browserpane"].keep_places()
         save_info_cache(force=True)
         if _NETWORK:
             _NETWORK[0].save()  # (the network's sessions as last seen: dead ones are shown from it next time)
@@ -112,6 +116,7 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
+            widgets.notify_as(app="Baude", opened=self.open_notified)
         else:
             widgets.notify_as(logo_icon())
         follow_accent()  # (the logo in the accent as it's picked: Settings → Accent Colour)
@@ -161,48 +166,76 @@ class BaudeApp(Adw.Application):
         """Baude's windows, the one you were in last first."""
         return [w for w in self.get_windows() if isinstance(w, BaudeWindow)]
 
+    def open_notified(self, args):
+        """A click on a notification this process didn't post (one from before a restart, or another Baude's): the
+        window you were in last brought up with its chat open, from the arguments it was posted with (--resume)."""
+        from baudelib.transcripts import find_session
+        if not (wins := self.windows()):
+            return
+        win = wins[0]
+        win.present()
+        sid = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
+        if sid is None or sid == win.session_id or (info := find_session(sid)) is None:
+            win.show_chat()
+            return
+        win.opening_remote = None  # (as a click on its row in the sidebar opens it: Sidebar.on_activate)
+        win.switch_to(lambda: win.resume_session(info))
+
     def idle(self):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
         return all(w.idle() for w in self.windows())
 
-    # ---- Update: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
-    # or This Mac's host process's (on its commands: info's update)
+    # ---- Update: the sidebars' foot while a new version's there, Baude's (offered, or waiting on its windows:
+    # restart_blockers) or This Mac's host process's (on its commands: info's update)
     def update_waiting(self, waiting):
         self.update_held = waiting
         self.show_update_bars()
 
-    def update_reasons(self):
-        """What the updates waiting wait for, said; None if none is waiting."""
-        why, waiting = [], False
-        if getattr(self, "update_held", False) and self.updater is not None and self.updater.ready:
-            waiting = True
-            why += [w for win in self.windows() for w in win.restart_blockers()]
+    def update_blockers(self):
+        """What restarting now would stop or wait on, said: each window's restart_blockers, if Baude has a new version,
+        and This Mac's host process's commands, if its update's waiting on them."""
+        why = [w for win in self.windows() for w in win.restart_blockers()] \
+            if self.updater is not None and self.updater.pending() else []
         host = local_host()
         held = (host.info.get("update") if host is not None else None) or None
         if held:
-            waiting = True
             why += [f"{THIS_MACHINE}'s host process: {c.get('what') or 'a command'}"
                     for c in held.get("waiting") or []] or [f"{THIS_MACHINE}'s host process"]
-        return list(dict.fromkeys(why)) if waiting else None
+        return list(dict.fromkeys(why))
 
-    def show_update_bars(self):
-        why = self.update_reasons()
-        for w in self.windows():
-            if (bar := getattr(w.sidebar, "update_bar", None)) is not None:
-                bar.say(why)
+    def update_reasons(self):
+        """What the updates waiting wait for, said ([] for a version only offered: auto restart off); None if no new
+        version's there."""
+        u, host = self.updater, local_host()
+        held = bool(host is not None and host.info.get("update"))
+        if not held and (u is None or not (u.pending() or u.why)):
+            return None
+        return self.update_blockers() if held or getattr(self, "update_held", False) else []
+
+    def show_update_bars(self, windows=None):
+        """Every window's Update bar (or windows': those new ones, built since) as things stand, and each host's
+        pending daemon restart toasted (meshui.RestartToasts): a new one in the window in front."""
+        why, u = self.update_reasons(), self.updater
+        net = _NETWORK[0] if _NETWORK else None
+        restart = meshui.restart_lines(net.alive() if net is not None else [], remote_name)
+        sidebars = [w for w in self.windows() if getattr(w, "sidebar", None) is not None]
+        front = next((w for w in sidebars if w.is_active()), sidebars[0] if sidebars else None)
+        for w in windows or self.windows():
+            if (bar := getattr(getattr(w, "sidebar", None), "update_bar", None)) is not None:
+                bar.say(why, u.why if u is not None and not u.pending() else None, u is not None and u.busy)
+                w.sidebar.restart_toasts.say(restart, new=w is front)
 
     def update_now(self, win):
         """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
         asked."""
-        why = [w for w in (self.update_reasons() or []) if w != wording.say("window.blocker_using")]
+        why = [w for w in self.update_blockers() if w != wording.say("window.blocker_using")]
 
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
-                host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
-            if self.updater is not None and self.updater.ready:
-                u = self.updater
-                self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})
+                win.restart_host(now=True)  # (it starts again on the new version, and comes back)
+            if self.updater is not None and self.updater.pending():
+                self.updater.apply(self.restart)
         if not why:
             return go()
         dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"), default_response="cancel",
@@ -232,6 +265,8 @@ class BaudeApp(Adw.Application):
                 w.proc.kill()
             for p in list(w.background.values()):  # (chats left mid-turn: their turns end here)
                 w.let_go_background(p)
+        if "browserpane" in sys.modules:
+            sys.modules["browserpane"].keep_places()
         save_info_cache(force=True)  # (as quitting does: exec skips do_shutdown)
         if _NETWORK:
             _NETWORK[0].save()
@@ -323,6 +358,7 @@ def main():
         os.environ["BAUDE_NO_THEME"] = "1"
     if opts.install:
         LAUNCHER.install()
+        baudelib.notifier.build_all(widgets.load_settings().get("accent"))  # (macOS, once it can be signed)
         print("\n".join(wording.say("install.installed", path=p)
                         for p in [*map(baudelib.bins.path, baudelib.bins.NAMES), *LAUNCHER.paths()]))
         return 0

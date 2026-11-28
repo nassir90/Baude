@@ -1,23 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete). Secrets' values are never read.",
+  "description": "A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), objects applied from YAML (apply), a pod's log as it is now (logs), a command run in a pod's container (exec: no terminal, its output when it ends), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.",
   "properties": {
     "op": {
       "const": "kube",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "what": {
-      "enum": ["contexts", "connect", "list", "yaml", "owner", "delete"],
+      "enum": [
+        "contexts",
+        "check",
+        "connect",
+        "list",
+        "yaml",
+        "owner",
+        "summary",
+        "delete",
+        "apply",
+        "logs",
+        "exec"
+      ],
       "description": "What to do."
     },
     "context": {
       "type": "string",
       "description": "The kubeconfig context."
+    },
+    "server": {
+      "type": "string",
+      "description": "The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed."
     },
     "page": {
       "type": "string",
@@ -27,13 +46,32 @@
       "type": "string",
       "description": "list, yaml: a custom resource's definition (plural.group) for a kind that isn't listed."
     },
+    "selector": {
+      "type": "string",
+      "description": "list: only the objects whose labels match this selector (kubectl's -l: app=web,tier!=cache); a Secret's or a Helm release's page lists every one."
+    },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "summary: the namespaces it's the totals of (every one when it's left out; none when it's empty)."
+    },
+    "since": {
+      "type": "number",
+      "description": "summary: the newest history sample the head has (its at): only later ones are sent (every one when it's left out)."
+    },
+    "fresh": {
+      "type": "boolean",
+      "description": "summary: read the cluster now (Refresh), not a read the host kept or the fault it holds while it waits to try a failing cluster again."
+    },
     "namespace": {
       "type": "string",
-      "description": "yaml, owner, delete: the object's namespace."
+      "description": "yaml, owner, delete, logs, exec: the object's namespace; apply: where objects that name none go."
     },
     "name": {
       "type": "string",
-      "description": "yaml, owner, delete: the object's name."
+      "description": "yaml, owner, delete, logs, exec: the object's name (logs, exec: the pod's)."
     },
     "kind": {
       "type": "string",
@@ -42,8 +80,37 @@
     "force": {
       "type": "boolean",
       "description": "delete: at once, not waiting for the pod to stop."
+    },
+    "manifest": {
+      "type": "string",
+      "description": "apply: the objects, as YAML or JSON (kubectl apply -f -)."
+    },
+    "container": {
+      "type": "string",
+      "description": "logs, exec: the container (the pod's default if none)."
+    },
+    "previous": {
+      "type": "boolean",
+      "description": "logs: its previous run's."
+    },
+    "tail": {
+      "type": "integer",
+      "description": "logs: its last this many lines (the Kubernetes view's number if none)."
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "exec: what's run, its argv (kubectl exec --, with no terminal and nothing on its stdin)."
+    },
+    "timeout": {
+      "type": "number",
+      "description": "exec: seconds it may run (60 if none; 600 at most): then it's stopped."
     }
   },
-  "required": ["op"],
+  "required": [
+    "op"
+  ],
   "additionalProperties": false
 }

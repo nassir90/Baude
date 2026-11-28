@@ -3,7 +3,7 @@
   "messages": {
     "revert": "Revert: take back this message and everything after it, and put it back in the box",
     "queued_delete": "Delete this queued message",
-    "queued_send_now": "Send now: interrupt the chat, then send this and the queued messages before it",
+    "queued_send_now": "Send now: send this and the queued messages before it, without stopping the chat",
     "queued_edit": "Edit: put this message back in the box",
     "started_with_prompt": "Started with this prompt",
     "couldnt_revert": "Couldn't revert: {$why}",

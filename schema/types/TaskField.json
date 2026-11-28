@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A field of a task's form: filled by hand, by a trigger's payload, or by its Bot.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name, as the script reads it (letters, digits, _)."
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's called on the form (its name, if none)."
+    },
+    "type": {
+      "enum": [
+        "text",
+        "number",
+        "bool",
+        "choice"
+      ],
+      "description": "What it takes."
+    },
+    "choices": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "A choice's choices."
+    },
+    "default": {
+      "description": "Its value when nothing fills it."
+    },
+    "required": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "It must be filled for a run to start."
+    }
+  },
+  "required": [
+    "name",
+    "type"
+  ],
+  "additionalProperties": false
+}

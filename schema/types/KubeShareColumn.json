@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A column of Home's namespaces' or nodes' table: its title, and what its numbers are, so a head can sort by it and add rows up (the \"Other (n)\" row).",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "name",
+        "count",
+        "cores",
+        "bytes",
+        "share"
+      ],
+      "description": "What it holds: the namespace's or node's name, a count, cores (0.00), bytes (1.2GiB), or a share (82%): column of[0] as a share of column of[1]."
+    },
+    "of": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "A share's columns: what's used, and what it's a share of (its requests or limits)."
+    }
+  },
+  "required": [
+    "title",
+    "kind"
+  ],
+  "additionalProperties": false
+}

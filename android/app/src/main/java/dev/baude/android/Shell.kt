@@ -59,7 +59,7 @@ import kotlinx.coroutines.launch
 /** One of the bottom bar's pages (Baude's side panel's, the chat's own first). */
 data class Page(val key: String, val title: String, val icon: ImageVector)
 
-/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and routines only while it's a Bot;
+/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and tasks only while it's a Bot;
  * each only where its host takes what it asks of it (takes). */
 fun pages(bot: Boolean, hostId: String): List<Page> {
     fun has(op: String) = takes(hostId, op)
@@ -68,7 +68,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
         Page("meta", "Meta", Adwaita.Meta),
         if (bot && has("memory")) Page("memory", Wording.BotMemory.title, Adwaita.DocumentEdit) else null,
         if (bot && has("emission_watch")) Page("browser", Wording.BotBrowser.title, Adwaita.WebBrowser) else null,
-        if (bot && has("routines")) Page("routines", Wording.Routines.title, Adwaita.Alarm) else null,
+        if (bot && has("tasks")) Page("tasks", Wording.Tasks.title, Adwaita.Alarm) else null,
         Page("agents", Wording.SidePanel.subagents, Adwaita.SystemUsers),
         Page("processes", Wording.SidePanel.processes, Adwaita.UtilitiesTerminal),
         if (has("ephemeral")) Page("btw", Wording.SidePanel.sideQuestions, Adwaita.DialogQuestion) else null,
@@ -87,7 +87,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
-              first: String = "chat", screen: (String) -> Unit = {}) {
+              first: String = "chat", screen: (String) -> Unit = {}, tool: (String, String) -> Unit = { _, _ -> }) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
@@ -136,7 +136,6 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         Mesh.listeners.add(l)
         Mesh.listeners.add(status)
         Stopping.listen()
-        refreshContext(chat)
         onDispose {
             Mesh.listeners.remove(l)
             Mesh.listeners.remove(status)
@@ -156,15 +155,22 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         kotlinx.coroutines.delay(100) // (the page has read it by now)
         chat.showAgent.value = null
     }
+    LaunchedEffect(all.size, TaskLinks.pending) { // (opened from a pending restart's See Thread on a task's run, or a
+        // chat's line from one: its Tasks page)
+        if (TaskLinks.pending?.let { it[0] == hostId && it[1] == sid } == true) show("tasks")
+    }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
+    LaunchedEffect(shown, split) { // (its chat page on screen, or not: what's on it seen, Mesh.tellSeen)
+        chat.inView = split || shown == "chat"
+        Mesh.tellSeen(chat)
+    }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         if (sideAll.none { it.key == side }) side = "meta"
         val i = all.indexOfFirst { it.key == shown }
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
     val modelSet = { v: String ->
-        chat.chrome.outgrown.value = false // (another model's window: as its usage says)
-        refreshContext(chat, v)
+        chat.chrome.outgrown.value = false // (another model's window: as its usage says, its host asking once it's set)
     }
     val chatControls = @Composable { inBar: Boolean -> // (its model, effort and mode: the chat's own, as Baude's
         if (takes(at, "control"))                     // header has them, not its side panel's pages)
@@ -187,7 +193,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             }
             "memory" -> MemoryPage(at, sid, here)
             "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
-            "routines" -> RoutinesPage(at, sid, here)
+            "tasks" -> TasksPage(at, sid, here)
             "agents" -> SubagentsPage(chat)
             "processes" -> ProcessesPage(chat, here)
             "artifacts" -> ArtifactsPage(chat)
@@ -209,7 +215,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
-            lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
+            lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = Tokens.Gap.avatar) }) else null,
             end = {
                 if (wide) when (if (split) "chat" else shown) {
                     "chat" -> chatControls(true)
@@ -218,7 +224,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 if (wide) IconButton(Adwaita.SidebarShowRight, Wording.SidePanel.toggleTip,
                     background = if (split) c.fg.copy(alpha = 0.10f) else null, onClick = toggle)
-                ChatMenu(at, sid, feedback, screen)
+                ChatMenu(at, sid, feedback, screen, writes = chat.chrome.writes.value,
+                    tool = { s, h -> if (h == at) screen(s) else tool(s, h) })
             })
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {
@@ -297,8 +304,12 @@ private const val GRIP = 16f          // (the rule's width to a finger)
 @Composable
 fun BottomBar(pages: List<Page>, current: Int, modifier: Modifier = Modifier, pick: (Int) -> Unit) {
     val c = LocalBaude.current
+    val scroll = rememberScrollState()
+    LaunchedEffect(current, scroll.maxValue) { // (the page shown in view, where they don't all fit)
+        if (pages.size > 1) scroll.animateScrollTo(scroll.maxValue * current / (pages.size - 1))
+    }
     Box(modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp),
+        Row(Modifier.horizontalScroll(scroll).padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             pages.forEachIndexed { i, p ->
                 val on = i == current

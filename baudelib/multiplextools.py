@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from baudelib import meshtools
+from baudelib import meshtools, toolnames
 
 NAME = "multiplex"
 WAIT_S = 160  # (a request's answer waited for this long: a wait's longest, Multiplex's start, and then some)
@@ -122,7 +122,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": NAME, "title": toolnames.SERVERS[NAME], "version": "1"}}})
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed}})
         elif method == "tools/call":

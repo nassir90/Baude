@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "How a surface takes light: Blinn-Phong, with what it gives off itself.",
+  "properties": {
+    "color": {
+      "type": "string",
+      "description": "Its own colour (a panel's: what's drawn on it) (#rrggbb)."
+    },
+    "texture": {
+      "type": "string",
+      "description": "An image in the theme's textures/ it's covered with."
+    },
+    "specular": {
+      "type": "number",
+      "description": "How much of a light's shine it gives back, 0 to 1."
+    },
+    "shininess": {
+      "type": "number",
+      "description": "How sharp the shine is (8 dull, 128 glassy)."
+    },
+    "emissive": {
+      "type": "string",
+      "description": "Light it gives off itself, whatever lights it (on a panel or a texture: its picture, lit by it) (#rrggbb)."
+    },
+    "glow": {
+      "type": "number",
+      "description": "How much brighter than its colour what it gives off is, for bloom: 1 for none."
+    },
+    "shader": {
+      "type": "string",
+      "description": "A desktop shader of the theme's (ThemeSceneCode's shaders) drawn in place of this lighting there; every other app draws the rest of this material."
+    }
+  },
+  "additionalProperties": false
+}

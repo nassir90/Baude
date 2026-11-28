@@ -453,6 +453,31 @@ def build(app, sc):
         return win
     if name == "kubernetes":
         return scenes_chat.kube_window(app)[0]
+    if name == "kubernetes-home":
+        return scenes_chat.kube_home(app)[0]
+    if name == "kubernetes-home-prod":
+        return scenes_chat.kube_home(app, "prod")[0]
+    if name == "kubernetes-home-crowded":
+        return scenes_chat.kube_home(app, "crowded")[0]
+    if name == "kubernetes-home-hover":  # (the tooltip's text is in the dump; its bubble is a surface of its own)
+        win, kv = scenes_chat.kube_home(app, "crowded")
+        spark = kv.home.memory.spark
+        T.pump(0.3)
+        spark._tip(spark, 1 + (spark.get_width() - 2) * 0.8, spark.get_height() / 2, False,
+                   type("Tip", (), {"set_text": lambda self, t: spark.set_tooltip_text(t)})())
+        return win
+    if name == "kubernetes-column-filter":
+        baude.save_settings(kube_hidden={"pods": {"Status": ["Failed", "Succeeded"]}})
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        filters = kv.col_filters
+        hovered = filters.buttons[filters.titles.index("Namespace")].get_parent().get_parent()
+        hovered.set_state_flags(Gtk.StateFlags.PRELIGHT, False)  # (the pointer over its heading)
+        filters.buttons[filters.titles.index("Status")].popup()
+        return win
+    if name == "docker-column-filter":
+        baude.save_settings(docker_hidden={"containers": {"Status": ["Exited"]}})
+        return scenes_chat.docker_window(app, page="containers")[0]
     if name == "kubernetes-shell":
         win, kv = scenes_chat.kube_window(app)
         T.pump(0.3)
@@ -469,6 +494,33 @@ def build(app, sc):
         kv.show_shell("shop/api-6f7c-mnopq")
         T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
         kv.shell_term.type("ls\n")
+        T.pump(0.5)
+        win.connect("destroy", lambda *_: kv.dock.close_all())
+        return win
+    if name in ("kubernetes-contexts", "kubernetes-removed"):
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        text = open(os.environ["KUBECONFIG"]).read()
+        if name == "kubernetes-contexts":  # (a tool's test clusters: the fixture's two contexts, and slices of k3d-dev)
+            extra = ["staging"] + [f"slice-{i}" for i in range(1, 19)] + [f"pr-{n}-preview" for n in (412, 418, 431, 455)] + \
+                ["kind-ci"]
+            text = text.replace("contexts:\n", "contexts:\n" + "".join(
+                f"- context:\n    cluster: k3d-dev\n    user: admin@k3d-dev\n  name: {n}\n" for n in extra), 1)
+            with open(os.environ["KUBECONFIG"] + ".new", "w") as f:
+                f.write(text)
+            os.replace(os.environ["KUBECONFIG"] + ".new", os.environ["KUBECONFIG"])
+            T.wait_for(lambda: len(kv.context_pick.names()) == 2 + len(extra), "the slices, in the picker", 10)
+            kv.context_pick.popup()
+            return win
+        kv.show_logs("jobs/worker-5c4b-klmno")
+        kv.show_shell("shop/api-6f7c-mnopq")
+        T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+        start = text.index("- context:\n    cluster: k3d-dev")  # (k3d-dev's context deleted: its cluster too)
+        text = text[:start] + text[text.index("  name: k3d-dev\n", start) + len("  name: k3d-dev\n"):]
+        with open(os.environ["KUBECONFIG"] + ".new", "w") as f:
+            f.write(text)
+        os.replace(os.environ["KUBECONFIG"] + ".new", os.environ["KUBECONFIG"])
+        T.wait_for(lambda: kv.table_stack.get_visible_child_name() == "removed", "removed", 10)
         T.pump(0.5)
         win.connect("destroy", lambda *_: kv.dock.close_all())
         return win

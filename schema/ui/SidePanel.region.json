@@ -1,5 +1,5 @@
 {
-  "description": "The right-hand side panel of the Baude window: a column beside the chat with a row of page buttons (icon + title) over one page at a time. Hidden by default; it holds Meta, Subagents, Processes, Side questions, Artifacts, Files, Git and Signal, plus Memory, Browser and Routines while the open chat is a Bot.",
+  "description": "The right-hand side panel of the Baude window: a column beside the chat with a row of page buttons (icon + title) over one page at a time. Hidden by default; it holds Meta, Subagents, Processes, Side questions, Artifacts, Files, Git and Signal, plus Memory, Browser and Tasks while the open chat is a Bot.",
   "apps": [
     "baude"
   ],
@@ -67,7 +67,7 @@
     },
     {
       "name": "page switcher",
-      "shows": "A centred row of buttons at the top of the panel (6px above and below, no rule under it), one per page, each an icon with its title (narrow policy: when the panel is too narrow for titles it shows icons only). The current page's button is selected. Pages in order, left to right: Meta (Baude's helper icon), Memory (pencil/document-edit icon), Browser (web-browser icon), Routines (alarm icon), Subagents (people icon), Processes (terminal icon), Side questions (question-bubble icon), Artifacts (globe icon), Files (folder icon), Git (branch icon), Signal (link icon).",
+      "shows": "A centred row of buttons at the top of the panel (6px above and below, no rule under it), one per page, each an icon with its title (narrow policy: when the panel is too narrow for titles it shows icons only). The current page's button is selected. Pages in order, left to right: Meta (Baude's helper icon), Memory (pencil/document-edit icon), Browser (web-browser icon), Tasks (alarm icon), Subagents (people icon), Processes (terminal icon), Side questions (question-bubble icon), Artifacts (globe icon), Files (folder icon), Git (branch icon), Signal (link icon).",
       "copy": [
         "side_panel.subagents",
         "side_panel.processes",
@@ -81,7 +81,7 @@
       "text": [
         "Meta",
         "Browser",
-        "Routines"
+        "Tasks"
       ],
       "parts": [
         {
@@ -100,8 +100,8 @@
           "shows": "Only while the open chat is a Bot (the Bot's own browser, watched and driven)."
         },
         {
-          "name": "Routines",
-          "shows": "Only while the open chat is a Bot (work scheduled for it)."
+          "name": "Tasks",
+          "shows": "Only while the open chat is a Bot (its tasks: scripts run by hand or as their triggers fire)."
         },
         {
           "name": "Subagents",
@@ -159,7 +159,7 @@
           "does": "shows that page. Opening Files for the first time loads the chat's folder tree; opening Git loads the history if anything changed since it last showed."
         },
         {
-          "by": "switching to another chat that isn't a Bot while Memory, Browser or Routines is showing",
+          "by": "switching to another chat that isn't a Bot while Memory, Browser or Tasks is showing",
           "does": "falls back to Meta and hides those three buttons"
         }
       ]
@@ -214,7 +214,7 @@
     },
     {
       "name": "Bot chat",
-      "shows": "Memory, Browser and Routines buttons present in the switcher, between Meta and Subagents."
+      "shows": "Memory, Browser and Tasks buttons present in the switcher, between Meta and Subagents."
     },
     {
       "name": "tasks running",

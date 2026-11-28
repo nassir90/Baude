@@ -11,7 +11,7 @@ Writes <scene>-light.png / <scene>-dark.png, an index.html gallery (one theme at
 with a Light / Dark switch) and matrix-light.png / matrix-dark.png contact sheets. Scenes drive a real BaudeWindow against tests/fake_claude.py, the same
 way the UI tests do, so the pictures always match the current code.
 
-The scenes are in tests/scenes_chat.py, tests/scenes_panels.py, tests/scenes_deps.py, tests/scenes_telemetry.py and tests/scenes_themes.py, registered (tests/scenelib.py's SCENES) as this
+The scenes are in tests/scenes_chat.py, tests/scenes_panels.py, tests/scenes_deps.py, tests/scenes_telemetry.py, tests/scenes_themes.py and tests/scenes_inbox.py, registered (tests/scenelib.py's SCENES) as this
 file imports them.
 """
 import argparse
@@ -34,6 +34,7 @@ import scenes_panels  # noqa: E402,F401
 import scenes_deps  # noqa: E402,F401
 import scenes_telemetry  # noqa: E402,F401
 import scenes_themes  # noqa: E402,F401
+import scenes_inbox  # noqa: E402,F401
 
 
 # --------------------------------------------------------------- capture --
@@ -114,6 +115,13 @@ def reset_state():
     shutil.rmtree(os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude", "claude-code-sessions"),  # (a scene's Claude
                   ignore_errors=True)                                                             # Desktop chats)
     T.feedback._gh_seen.update(at=None, repo=None)
+    for srv in baude.baudelib.hosts._HERE:  # (a scene's daemon restart, let go of)
+        srv.pending_restart = None
+        srv.restart_holds.clear()
+        srv.__dict__.pop("blockers", None)
+    if (u := getattr(Gtk.Application.get_default(), "updater", None)) is not None:  # (a scene's new version)
+        u.stop()
+        Gtk.Application.get_default().updater = None
 
 
 THEMES = ("light", "dark")

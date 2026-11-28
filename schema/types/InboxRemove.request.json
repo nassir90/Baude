@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A stopped ask taken out of every Inbox (and off the host).",
+  "properties": {
+    "op": {
+      "const": "inbox_remove",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    }
+  },
+  "required": [
+    "op",
+    "ask"
+  ],
+  "additionalProperties": false
+}

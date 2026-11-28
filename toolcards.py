@@ -9,7 +9,7 @@ import os
 import re
 import weakref
 
-from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib import toolnames, wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 
 import gi
 
@@ -129,6 +129,37 @@ def _first_line(v, limit=120):
     return (v.splitlines()[0] if v else "")[:limit]
 
 
+ANSWER_TASK = "mcp__mesh__answer_task"  # (a Bot's answer to its task's ask: drawn as "Answered <task>")
+
+
+def answer_line(inp):
+    """An answer_task call's answer in a line of at most 120 characters: each field = value (its first line), · between
+    (a value as it's written: text as it is, the rest as JSON), or its text's first line."""
+    fields = inp.get("answer")
+    if isinstance(fields, str):  # (an answer given as JSON)
+        try:
+            fields = json.loads(fields)
+        except ValueError:
+            pass
+    if isinstance(fields, dict):
+        return _first_line(" · ".join(
+            f"{k} = {_first_line(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))}"
+            for k, v in fields.items()))
+    return _first_line(inp["text"]) if isinstance(inp.get("text"), str) else ""
+
+
+def answer_result(text):
+    """What an answer_task call came back with ({task, run, values or text}; Codex's: inside the MCP result it gives),
+    or None (it failed, or isn't that)."""
+    try:
+        got = json.loads(text or "")
+        if isinstance(got, dict) and isinstance(got.get("content"), list):
+            got = json.loads("".join(c.get("text") or "" for c in got["content"] if isinstance(c, dict)))
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) and isinstance(got.get("task"), str) else None
+
+
 def summarize_tool(name, inp):
     """One line for a tool card header: what the call is for (Claude's description), or failing that,
     what it touches (a path, a pattern, a URL). A command without a description gets nothing."""
@@ -141,6 +172,10 @@ def summarize_tool(name, inp):
             return " · ".join(f"{q.get('header') or q.get('question')}: {inp['answers'][q.get('question')]}"
                               for q in qs if isinstance(q, dict) and q.get("question") in inp["answers"])
         return _first_line(str(qs[0].get("question", ""))) + (f" (+{len(qs) - 1} more)" if len(qs) > 1 else "")
+    if name == ANSWER_TASK:
+        return answer_line(inp)
+    if name == "ToolSearch" and (picked := toolnames.selected(inp.get("query"))) is not None:
+        return ", ".join(tool_label(n) for n in picked)  # (the tools it loads, as their cards name them)
     if isinstance(inp.get("command"), str) and not (inp.get("description") or "").strip():
         return ""  # nothing rather than our own words: a description on this line is always Claude's
     for key in ("description", "command", "file_path", "notebook_path", "pattern", "url", "query",
@@ -196,37 +231,22 @@ def _kv_rows(inp, skip=(), depth=0):
     return grid if row else None
 
 
-def humanize(identifier):
-    """snake_case / camelCase / kebab-case -> 'words like this'."""
-    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", identifier).replace("_", " ").replace("-", " ")
-    return " ".join(words.split()).lower()
-
-
-MCP_SERVER_NAMES = {"github": "GitHub", "gitlab": "GitLab", "gmail": "Gmail", "gdrive": "Google Drive",
-                    "google_drive": "Google Drive", "gcal": "Google Calendar", "slack": "Slack",
-                    "notion": "Notion", "linear": "Linear", "jira": "Jira", "figma": "Figma",
-                    "postgres": "Postgres", "sqlite": "SQLite", "playwright": "Playwright", "sentry": "Sentry"}
+humanize = toolnames.humanize  # (snake_case / camelCase / kebab-case -> 'words like this')
 
 
 def tool_display(name):
-    """(friendly title, source or None) for a tool name. MCP tools are named
-    mcp__<server>__<tool>; the CLI gives nothing friendlier, so derive it:
-    mcp__github__create_issue -> ("Create issue", "GitHub")
-    mcp__claude_ai_Slack__slack_send_message -> ("Send message", "Slack")."""
-    if not name.startswith("mcp__") or name.count("__") < 2:
+    """(friendly title, source or None) for a tool name: an MCP server's tool (mcp__<server>__<tool>) as its server
+    and its tool are named (baudelib.toolnames: what they and its host say, else its name in words):
+    mcp__github__create_issue -> ("Create issue", "GitHub"); any other as it is."""
+    got = toolnames.describe(name)
+    if got is None:
         return name, None
-    _, server, tool = name.split("__", 2)
-    server = re.sub(r"^(claude_ai_|plugin_[^_]+_)", "", server)
-    if re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", server):
-        source = wording.say("tool_calls.mcp")  # an unnamed connector: only an id
-    else:
-        source = MCP_SERVER_NAMES.get(server.lower()) or " ".join(
-            w[:1].upper() + w[1:] for w in humanize(server).split())
-    prefix = server.lower() + "_"
-    if tool.lower().startswith(prefix):  # slack_send_message on the Slack server
-        tool = tool[len(prefix):]
-    title = humanize(tool)
-    return (title[:1].upper() + title[1:]) or name, source
+    return got[1], got[0] or wording.say("tool_calls.mcp")  # (an unnamed connector: only an id)
+
+
+def tool_label(name):
+    """A tool's name as it's shown: an MCP server's tool as "Server / Tool" (mcp__mesh__tasks: Mesh / Tasks)."""
+    return toolnames.label(name, wording.say("tool_calls.mcp"))
 
 
 def tool_input_view(name, inp):
@@ -302,6 +322,10 @@ def tool_input_view(name, inp):
             text = html.escape(t.get("content") or t.get("activeForm") or "")
             add(sel_label(f"{mark}  <s>{text}</s>" if t.get("status") == "completed" else f"{mark}  {text}"))
         rest = None
+    elif base == "ToolSearch" and (picked := toolnames.selected(inp.get("query"))) is not None:
+        for n in picked:  # (the tools it loads, a line each, as their cards name them)
+            add(sel_label(html.escape(tool_label(n))))
+        rest = _kv_rows(inp, skip=("query",))
     else:
         rest = _kv_rows(inp)
     if rest:
@@ -313,6 +337,10 @@ def tool_input_view(name, inp):
 # there is resumed from its transcript, and said so: show_cut). A call of one of these till its result (a subagent's
 # too), and a background task that isn't a subagent till its end.
 COMMAND_TOOLS = ("Bash", "PowerShell")
+BACKGROUNDABLE = COMMAND_TOOLS + ("Agent", "Task")  # (what Claude Code moves to the background: offer_background)
+# (a command's result that says it runs in the background: started there, or moved there as it ran)
+BACKGROUNDED_RE = re.compile(r"Command (?:running in background|was manually backgrounded by user) with ID: "
+                             r"(\S+?)\.?\s+Output is being written to: (\S+)")
 CUT_CONTINUE = wording.say("cut_short.message")
 
 
@@ -551,6 +579,8 @@ class ToolCard(Gtk.Box):
         self.name, self.tool_id, self.partial_json, self.input = name, tool_id, "", {}
         self.state, self.task, self.decision, self.listeners = "running", None, None, []
         self.artifact, self.asking, self.opened_to_ask = None, None, False
+        self.to_background, self.moving = None, False  # (its Background button, offered: offer_background)
+        self.answer = None  # (an answer_task call's, once it's taken: answer_result)
         # one line:  Name [Command] [Output]  summary (cut off with …)        [spinner, while it runs]
         # and under it, what those open: what was asked, what came back (once there is some)
         grid = self.grid = Gtk.Grid()
@@ -606,6 +636,28 @@ class ToolCard(Gtk.Box):
         self.status = _card_status(self.state) if self.asking is None else None  # (waiting on you: not running)
         if self.status is not None:
             self.line.append(self.status)
+        if getattr(self, "to_background", None) is not None:
+            self.to_background.set_visible(self.state == "running" and self.asking is None and not self.moving)
+
+    def offer_background(self, move):
+        """A command or subagent its agent can move to the background as it runs (Claude Code's background_tasks):
+        Background, beside its toggles while it runs, calls move(card). It keeps running there and its turn goes on,
+        so what's sent at the turn reaches the agent."""
+        if self.base not in BACKGROUNDABLE or self.to_background is not None:
+            return
+        btn = self.to_background = Gtk.Button(label=wording.say("tool_calls.to_background"), valign=Gtk.Align.CENTER,
+                                              focus_on_click=False)
+        btn.set_tooltip_text(wording.say("tool_calls.to_background_tip"))
+        btn.add_css_class("tool-toggle")
+        btn.connect("clicked", lambda *_: move(self))
+        self.toggles.append(btn)
+        self.toggles.set_visible(True)
+        self.show_status()
+
+    def moved(self, moving):
+        """Asked to move to the background (moving), or its agent said it couldn't: Background hidden meanwhile."""
+        self.moving = moving
+        self.show_status()
 
     def ask(self, buttons):
         """Asked whether to allow it, here in the card: what it would run, opened, and under it buttons (Allow, Deny…).
@@ -653,15 +705,20 @@ class ToolCard(Gtk.Box):
         if self.decision == "denied":
             extra.append(wording.say("tool_calls.denied"))
         tail = "".join(f"  <span alpha='55%'>· {html.escape(e)}</span>" for e in extra)
-        title, source = tool_display(self.name)
+        if self.answer is not None:  # (a task's ask answered: the task, and the answer as it was taken)
+            s = answer_line({"answer": self.answer.get("values"), "text": self.answer.get("text")})
+        title = wording.say("tool_calls.answered_task", task=self.answer["task"]) if self.answer is not None else \
+            tool_label(self.name)
+        if self.answer is not None:  # (a task's name, however long: cut, the chat no wider for it)
+            self.title.set_ellipsize(Pango.EllipsizeMode.END)
+            self.title.set_max_width_chars(40)
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
-        src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
         shown = html.escape(s)
         if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):
             shown = image_link_markup(s, self.image_acts)
         elif self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
-        markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
+        markup = f"{shown}{tail}" if shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)
@@ -766,6 +823,8 @@ class ToolCard(Gtk.Box):
                 self.report = text.strip()
                 self.result_box.append(MarkdownView(text))  # a finished agent's answer is markdown
                 self.show_output()
+        elif self.name == ANSWER_TASK and not is_error and (got := answer_result(text)) is not None:
+            self.answer = got  # (it went through: the card says what was answered, no Output to open)
         elif text and not said_nothing(self.base, text, is_error):  # (it went through: no Output to open)
             self.add_output_text(text)
         for data in images:

@@ -359,18 +359,47 @@ _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
 
 # ---- desktop notifications: a reply finished (or a question asked) where you aren't looking, said by the desktop's
 # own notifications: on Linux GLib's (Gio.Notification) or org.freedesktop.Notifications' over D-Bus (_gio_notifies),
-# on macOS Notification Center's, through osascript. Settings → Notifications, in Baude and Record both.
+# on macOS Notification Center's, through the app's notifier (baudelib/notifier.py), else osascript. Settings →
+# Notifications, in Baude and Record both.
 _notified = {}  # (a notification's key: what a click on it does)
 _fdo = {"ids": {}, "keys": {}, "subscribed": False}  # (org.freedesktop.Notifications': key → its id, and back)
 FDO = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
 
 
-_identity = {}  # (notify_as's: the logo notifications show)
+_identity = {}  # (notify_as's: the logo notifications show; the app they're posted as on macOS)
 
 
-def notify_as(svg):
-    """The app's logo as an SVG file: its notifications' icon (Linux)."""
-    _identity["svg"] = svg
+def notify_as(svg=None, app=None, opened=None):
+    """The app's logo as an SVG file: its notifications' icon (Linux). app: its name (notifier.APPS), whose notifier
+    posts them (macOS); opened(args), what opens a chat from the arguments a notification this process didn't post was
+    posted with (desktop_notify's opens: one posted before a restart, or by another of this app's processes)."""
+    if svg is not None:
+        _identity["svg"] = svg
+    if app is not None:
+        _identity["app"] = app
+    if opened is not None:
+        _identity["opened"] = opened
+
+
+def _notifier():
+    """This app's notifier client (macOS), or None: none named (notify_as)."""
+    if sys.platform != "darwin" or _identity.get("app") is None:
+        return None
+    if _identity.get("client") is None:
+        from baudelib import notifier
+
+        def clicked(key, mine, args):
+            if mine and (fn := _notified.pop(key, None)) is not None:
+                fn()
+            elif args and (opened := _identity.get("opened")) is not None:
+                opened(args)
+        _identity["client"] = notifier.Client(_identity["app"], GLib.idle_add, _osascript, clicked)
+    return _identity["client"]
+
+
+def notification_pictures():
+    """Whether a notification can show a Bot's picture: on Linux, or through the app's notifier on macOS."""
+    return sys.platform != "darwin" or ((c := _notifier()) is not None and c.usable())
 
 
 NOTIFY_PICTURE_PX = tokens.px("notification.picture")  # (a Bot's picture as its notification shows it, square)
@@ -485,22 +514,33 @@ def macos_notification(title, body):
     return f"display notification {quote(body)} with title {quote(title)}"
 
 
-def desktop_notify(key, title, body="", clicked=None, picture=None):
+def _osascript(_key, title, body):
+    """A notification posted through osascript (macOS), credited to Script Editor: a click there opens Script Editor."""
+    try:
+        subprocess.Popen(["osascript", "-e", macos_notification(title, body)], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
+
+def desktop_notify(key, title, body="", clicked=None, picture=None, opens=None):
     """A desktop notification, key's (one key, one notification: a newer one takes the older's place): title the
-    chat's name, body what happened; clicked(), run when it's clicked (Linux); picture, a Bot's
-    (notification_picture's file), its icon in place of the app's logo (Linux). Nothing when Notifications is off. On
-    macOS osascript's, credited to Script Editor (the apps run in Python's bundle, not one of their own): a click there
-    opens Script Editor."""
+    chat's name, body what happened; clicked(), run when it's clicked; picture, a Bot's (notification_picture's
+    file), its icon in place of the app's logo (Linux) or attached beside the app's (macOS). Nothing when Notifications
+    is off. On macOS the app's notifier posts it, with an Open button (opens: the arguments that start the app on
+    that chat, for a click once this process is gone); without one, or turned away, osascript does."""
     if not notifications_on():
         return
     body = " ".join((body or "").split())
     body = body[:157] + "…" if len(body) > 160 else body
     if sys.platform == "darwin":
-        try:
-            subprocess.Popen(["osascript", "-e", macos_notification(title, body)], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        except OSError:
-            pass
+        client = _notifier()
+        _notified[key] = clicked or (lambda: None)
+        from baudelib.notifier import launcher_id
+        if client is None or not client.post(key, title, body, wording.say("common.open"), picture,
+                                             launcher_id(client.name), opens):
+            _notified.pop(key, None)
+            _osascript(key, title, body)
         return
     app = Gio.Application.get_default()
     if app is None:
@@ -537,6 +577,60 @@ def desktop_notify(key, title, body="", clicked=None, picture=None):
         ["default", wording.say("common.open")], hints, -1)), posted)
 
 
+PRESENT_S = 60  # (input this recently: someone's at the machine)
+_presence = {}  # (presence's last answer, and when: user_present)
+
+
+def _dbus_value(bus, name, path, iface, method):
+    """A session-bus method's one answer, asked at once (200 ms at most), or None: no such service, or no answer."""
+    try:
+        return bus.call_sync(name, path, iface, method, None, None, Gio.DBusCallFlags.NONE, 200, None).unpack()[0]
+    except GLib.Error:
+        return None
+
+
+def presence():
+    """Someone at this machine now, as the system says it: (seconds since the last input, whether the screen's locked,
+    whether the display's asleep), or None where it can't be told. On macOS, CoreGraphics' (macos.presence); elsewhere
+    GNOME's (Mutter's IdleMonitor, its ScreenSaver) or org.freedesktop.ScreenSaver's (KDE's GetSessionIdleTime)."""
+    if sys.platform == "darwin":
+        import macos
+        return macos.presence()
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error:
+        return None
+    idle = _dbus_value(bus, "org.gnome.Mutter.IdleMonitor", "/org/gnome/Mutter/IdleMonitor/Core",
+                       "org.gnome.Mutter.IdleMonitor", "GetIdletime")
+    idle = idle / 1000 if idle is not None else _dbus_value(
+        bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver",
+        "GetSessionIdleTime")
+    if idle is None:
+        return None
+    locked = _dbus_value(bus, "org.gnome.ScreenSaver", "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver", "GetActive")
+    if locked is None:
+        locked = _dbus_value(bus, "org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver",
+                             "org.freedesktop.ScreenSaver", "GetActive")
+    return float(idle), bool(locked), False  # (a display asleep is the screen saver's: locked, or blanked by it)
+
+
+def user_present(idle_s=PRESENT_S):
+    """Whether someone's at this machine: input within idle_s, the screen not locked, the display awake. None where
+    that can't be told (presence)."""
+    at, p = _presence.get("at", -1.0), _presence.get("p")
+    if time.monotonic() - at > 1:  # (asked once a second at most: a scroll asks at every step)
+        _presence["at"], _presence["p"] = time.monotonic(), (p := presence())
+    if p is None:
+        return None
+    idle, locked, asleep = p
+    return idle <= idle_s and not locked and not asleep
+
+
+def notified(key):
+    """Whether key's notification is up (posted by this process, not clicked or taken back since)."""
+    return key in _notified
+
+
 def withdraw_notification(key):
     """key's notification taken back (what it was about seen now), if one's up."""
     if _notified.pop(key, None) is None:
@@ -544,7 +638,10 @@ def withdraw_notification(key):
     if (nid := _fdo["ids"].pop(key, None)) is not None:
         _fdo["keys"].pop(nid, None)
         _fdo_call("CloseNotification", GLib.Variant("(u)", (nid,)))
-    elif sys.platform != "darwin" and (app := Gio.Application.get_default()) is not None:
+    elif sys.platform == "darwin":
+        if (client := _notifier()) is not None:
+            client.withdraw(key)
+    elif (app := Gio.Application.get_default()) is not None:
         app.withdraw_notification(key)
 
 
@@ -793,7 +890,27 @@ def discard(widget):
     GLib.idle_add(_dispose_tree, widget)
 
 
+def insert_actions(widget, prefix, group):
+    """widget.insert_action_group, taken out again and emptied as widget's disposed (_dispose_tree): a widget's
+    dispose keeps the groups put in it (they go only as it's finalized), and a group's actions' handlers, which
+    usually reach back to it, are held where Python's collector can't see them (on the actions, in C), so the widget
+    was never finalized, and with it the window it was in."""
+    widget.insert_action_group(prefix, group)
+    widget.action_groups = {**getattr(widget, "action_groups", {}), prefix: group}
+
+
+def drop_actions(widget):
+    """The action groups insert_actions put in widget, and in what's in it, taken out and emptied."""
+    for w in walk(widget):
+        for prefix, group in getattr(w, "action_groups", {}).items():
+            w.insert_action_group(prefix, None)
+            for name in group.list_actions():
+                group.remove_action(name)
+
+
 def _dispose_tree(widget):
+    drop_actions(widget)
+
     def parts(w):  # (parents first: a container's dispose lets go of its children. Not a scrollbar's insides: none
         if isinstance(w, Adw.ComboRow):  # are ours, and its scrolled window asks them for its adjustment as it goes.
             return  # Nor a combo row: its dispose, run again as it's freed, uses its list, freed the first time. Nor
@@ -874,6 +991,7 @@ def free_closed_windows(app):
                 if w.get_parent() is not None:
                     w.unparent()
                 _dispose_tree(w)
+        drop_actions(window)
         if isinstance(window, Gio.ActionMap):  # (its ☰'s actions: their handlers are mostly its own methods)
             for name in window.list_actions():
                 window.remove_action(name)
@@ -1061,8 +1179,14 @@ def keep_times(widget):
         retime(widget)
         if widget.times_tick is None:
             widget.times_tick = GLib.timeout_add_seconds(60, tick)
+
+    def hidden(*_):  # (the minute's timer holds the widget: one closed with its window lived on till it ran)
+        if widget.times_tick is not None:
+            GLib.source_remove(widget.times_tick)
+            widget.times_tick = None
     widget.times_tick = None
     widget.connect("map", shown)
+    widget.connect("unmap", hidden)
 
 
 def pretty_path(path):
@@ -1308,22 +1432,25 @@ def accent_text_rgba():
 
 class Ticker:
     """What moves while something works: a working session's dot pulsing (its opacity eased between 1 and 0.25 and
-    back every 0.9 s) and the spinners of calls still running (Spinner). One timer moves them all, FPS times a
-    second: each frame GTK draws costs 1.5-3 ms of CPU on a Mac (most of it GSK readying the window's surface), and
-    a CSS animation or an Adw.Spinner draws 60 a second, so one working session's dot, or one long-running command,
-    took a sixth of a core. In a window you aren't looking at they hold still."""
+    back every 0.9 s), the spinners of calls still running (Spinner) and a turn's dots (WorkingDots). One timer moves
+    them all, in the same frames: each frame GTK draws costs a Mac 1.5-3 ms of CPU, and far more in a large window
+    (macOS draws all of the window each frame: macos.full_redraws), and a CSS animation or an Adw.Spinner draws 60 a
+    second, so one working session's dot, or one long-running command, took a sixth of a core. So spinners move
+    SPIN_FPS times a second, a pulse alone PULSE_FPS (a dot's opacity needs fewer to look smooth), and nothing moves in
+    a window you aren't looking at, nor while no one's at the machine (user_present)."""
 
-    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, tokens.seconds("motion.pulse"), 0.25, 0.6
+    SPIN_FPS, PULSE_FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 10, 500, tokens.seconds("motion.pulse"), 0.25, 0.6
     # (held, not weakly: a widget Python keeps no wrapper of, Signal's button's icon, lost its own at once; let go of
     # as each is unmapped, which taking it out of the window does, and taken back as it's mapped again)
-    pulsing, spinning, source, interval, start = set(), set(), None, 0, 0.0
+    pulsing, spinning, dotting, source, interval, start = set(), set(), set(), None, 0, 0.0
 
     @classmethod
     def run(cls, ms=None):
-        """The timer: FPS times a second while something it moves is seen, else every IDLE_MS (to notice when it is)."""
-        ms = ms or 1000 // cls.FPS
+        """The timer: while something it moves is seen, as often as that needs; else every IDLE_MS (to notice when
+        it is)."""
+        ms = ms or 1000 // (cls.SPIN_FPS if cls.spinning else cls.PULSE_FPS)
         if cls.source is not None:
-            if cls.interval == ms:
+            if cls.interval <= ms:
                 return
             GLib.source_remove(cls.source)
         else:
@@ -1342,29 +1469,34 @@ class Ticker:
 
     @staticmethod
     def seen(widget):
-        """Mapped, in the window you're looking at."""
+        """Mapped, in the window you're looking at, with you at the machine."""
         root = widget.get_root() if widget.get_mapped() else None
-        return isinstance(root, Gtk.Window) and root.is_active()
+        return isinstance(root, Gtk.Window) and root.is_active() and user_present() is not False
 
     @classmethod
     def tick(cls):
-        for held in (cls.pulsing, cls.spinning):
+        for held in (cls.pulsing, cls.spinning, cls.dotting):
             held.difference_update([w for w in held if not w.get_mapped()])
-        if not cls.pulsing and not cls.spinning:
+        if not cls.pulsing and not cls.spinning and not cls.dotting:
             cls.source = None
             return False
-        phase = ((time.monotonic() - cls.start) / cls.PERIOD) % 2
+        now = time.monotonic()
+        phase = ((now - cls.start) / cls.PERIOD) % 2
         ease = (1 - math.cos(math.pi * (phase if phase < 1 else 2 - phase))) / 2  # (CSS's ease-in-out, near enough)
-        level, seen = round(1 - (1 - cls.LOW) * ease, 2), False
+        level, fps = round(1 - (1 - cls.LOW) * ease, 2), 0
         for w in cls.pulsing:
             here = cls.seen(w)
-            seen = seen or here
+            fps = max(fps, cls.PULSE_FPS if here else 0)
             w.set_opacity(level if here else cls.STILL)
         for w in cls.spinning:
             if cls.seen(w):
-                seen = True
+                fps = cls.SPIN_FPS
                 w.queue_draw()
-        if (ms := 1000 // cls.FPS if seen else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
+        for w in cls.dotting:
+            if cls.seen(w):
+                fps = max(fps, cls.PULSE_FPS)
+                w.step(now)
+        if (ms := 1000 // fps if fps else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
             cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
             return False
         return True
@@ -1418,14 +1550,14 @@ ICON_SLOT = 16  # status icon and disclosure arrow share one square column
 
 class WorkingDots(Gtk.Label):
     """A turn running, at the bottom left (Baude's status bar, Meta's foot): •, ••, •••, and again; otherwise it isn't there, nor the room it takes.
-    All three are laid out, the rest see-through, so what's after it doesn't move with each dot. In a window you aren't
-    looking at it holds still (Ticker)."""
+    All three are laid out, the rest see-through, so what's after it doesn't move with each dot. Moved by Ticker, in
+    its frames; in a window you aren't looking at it holds still."""
 
     STEP_MS = 350
 
     def __init__(self):
         super().__init__(xalign=0, visible=False)
-        self.working, self.shown, self.source = False, 0, None
+        self.working, self.shown, self.began = False, 0, 0.0
         self.connect("map", WorkingDots._run)  # (plain functions: see Spinner)
         self.connect("unmap", WorkingDots._stop)
         self._show(0)
@@ -1437,6 +1569,7 @@ class WorkingDots(Gtk.Label):
         self.set_visible(working)
         self.set_tooltip_text(wording.say("common.working") if working else None)
         self._show(1 if working else 0)
+        self.began = time.monotonic()
         self._stop()
         self._run()
 
@@ -1445,18 +1578,17 @@ class WorkingDots(Gtk.Label):
         self.set_markup("•" * count + f'<span alpha="1">{"•" * (3 - count)}</span>')
 
     def _run(self):
-        if self.working and self.source is None and self.get_mapped():
-            self.source = GLib.timeout_add(self.STEP_MS, self._step)
+        if self.working and self.get_mapped():
+            Ticker.dotting.add(self)
+            Ticker.run()
 
     def _stop(self):
-        if self.source is not None:
-            GLib.source_remove(self.source)
-            self.source = None
+        Ticker.dotting.discard(self)
 
-    def _step(self):
-        if Ticker.seen(self):
-            self._show(self.shown % 3 + 1)
-        return True
+    def step(self, now):
+        """(Ticker's) As many dots as STEP_MS steps since it began say, drawn if that's changed."""
+        if (count := int((now - self.began) * 1000 // self.STEP_MS) % 3 + 1) != self.shown:
+            self._show(count)
 
 
 def _slot(widget):

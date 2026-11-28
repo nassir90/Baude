@@ -4,14 +4,15 @@
 import ctypes
 import os
 import shutil
+import time
 
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
-from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
-from baudelib.emissionlink import data_home, note_leftover  # noqa
+from baudelib import errorbook, wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
+from baudelib.emissionlink import blocks_tracking, data_home, note_leftover  # noqa
 from emissioncore import CONSOLE_JS, address, download_path, failure_page, for_bots, once  # noqa: E402
 from emissionmac import MacWeb  # noqa: E402
 
@@ -230,9 +231,27 @@ class GtkWeb:
             net = WebKit.NetworkSession.new(os.path.join(root, "data"), os.path.join(root, "cache"))
             net.get_cookie_manager().set_persistent_storage(os.path.join(root, "cookies.sqlite"),
                                                             WebKit.CookiePersistentStorage.SQLITE)
+            cls.track(net, blocks_tracking(profile))
             net.connect("download-started", cls.download_started)
             cls.sessions[profile] = net
         return cls.sessions[profile]
+
+    @staticmethod
+    def track(net, on):
+        """net's cookies under another site's page (an app's preview on another host signing in) kept, as a browser
+        without tracking prevention keeps them, or (on) refused, and WebKit's tracking prevention on."""
+        from gi.repository import WebKit
+        net.set_itp_enabled(on)
+        net.get_cookie_manager().set_accept_policy(
+            WebKit.CookieAcceptPolicy.NO_THIRD_PARTY if on else WebKit.CookieAcceptPolicy.ALWAYS)
+
+    @classmethod
+    def block_tracking(cls, profile, on):
+        """As MacWeb's: profile's pages from now on blocking cross-site cookies (on), or not."""
+        if profile in cls.sessions:
+            cls.track(cls.sessions[profile], on)
+        elif profile in cls.given_back:
+            cls.track(cls.given_back[profile], on)
 
     @classmethod
     def cookies(cls, profile, done):
@@ -337,6 +356,8 @@ class GtkWeb:
         if error.matches(W.NetworkError.quark(), W.NetworkError.CANCELLED) or error.matches(
                 W.PolicyError.quark(), W.PolicyError.FRAME_LOAD_INTERRUPTED_BY_POLICY_CHANGE):
             return False  # (a load stopped, or handed to a download: no failure)
+        errorbook.note("page_load", f"{error.domain}", error.message, key=f"{error.domain}:{error.code}",
+                       code=error.code)
         view.load_alternate_html(failure_page(url, error.message), url, None)
         return True
 
@@ -555,15 +576,17 @@ class Tab:
         self.id, self.win = f"tab{Tab.made}", win
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
+        self.painted, self.ticking = None, None  # (hosted on macOS: frames)
+        self.fading = None  # (a timeout, at the Bot's pointer's idle time's end: frames then, to fade it out)
         if win.Engine is MacWeb:  # (its view kept over its place as soon as that's shown, hidden or moved: hosted, in a
             for signal in ("map", "unmap"):  # side panel that's resized and switched, every frame it's shown)
                 self.place.connect(signal, lambda *_: self.web.follow())
-            if win.hosted:  # (followed each frame while it's shown in Baude's window: not in its own, never shown)
-                self.ticking = None
-                self.place.connect("map", lambda p: setattr(self, "ticking", p.add_tick_callback(
-                    lambda *_: self.web.follow() or True)))
-                self.place.connect("unmap", lambda p: self.ticking is not None and (
-                    p.remove_tick_callback(self.ticking), setattr(self, "ticking", None)))
+            if win.hosted:  # (followed while it's shown in Baude's window, not in its own, never shown: after each
+                # frame Baude's window draws, a resize, a panel dragged, a toast coming, and each frame while the
+                # Bot's pointer moves (kick); none's drawn for it otherwise, so a page left as it is costs nothing)
+                self.place.connect("map", lambda p: self.frames(True))
+                self.place.connect("unmap", lambda p: self.frames(False))
+                self.place.connect("destroy", lambda p: self.unfade())
         self.web.window, self.web.tab_id = win, self.id
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
@@ -572,6 +595,51 @@ class Tab:
         self.last = {}
         if url is not None:
             self.web.load(address(url))
+
+    def frames(self, on):
+        """(hosted) Its page followed after each frame of the window its place is in (on), or not (off: unmapped)."""
+        if self.painted is not None:
+            clock, handler = self.painted
+            clock.disconnect(handler)
+            self.painted = None
+        if self.ticking is not None:
+            self.place.remove_tick_callback(self.ticking)
+            self.ticking = None
+        if not on:
+            self.unfade()
+        clock = self.place.get_frame_clock() if on else None
+        if clock is not None:
+            self.painted = (clock, clock.connect("after-paint", lambda *_: self.web.follow()))
+            self.kick()
+
+    def kick(self):
+        """(hosted) Frames drawn while the Bot's pointer or the glow moves, each following it, till they're still."""
+        if self.painted is None:
+            return
+        if self.ticking is None and self.win.pointer.busy():
+            self.ticking = self.place.add_tick_callback(self.tick)
+        pointer = self.win.pointer  # (its idle time ending isn't a move: frames are asked for then, to fade it out)
+        self.unfade()
+        left = pointer.seen + pointer.IDLE_S - time.monotonic()
+        if left > 0:
+            self.fading = GLib.timeout_add(int(left * 1000) + 20, self.faded)
+
+    def unfade(self):
+        if self.fading is not None:
+            GLib.source_remove(self.fading)
+            self.fading = None
+
+    def faded(self):
+        self.fading = None
+        self.kick()
+        return False
+
+    def tick(self, *_):
+        if self.win.pointer.busy():  # (a frame, followed once it's drawn: frames' after-paint)
+            return True
+        self.ticking = None
+        self.web.follow()  # (as it's left)
+        return False
 
 
 class Chrome:

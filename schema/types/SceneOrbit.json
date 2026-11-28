@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A camera's slow turn round its target, back and forth.",
+  "properties": {
+    "yaw": {
+      "type": "number",
+      "description": "How far either way it turns, degrees."
+    },
+    "period": {
+      "type": "number",
+      "description": "Seconds for one turn there and back."
+    }
+  },
+  "additionalProperties": false
+}

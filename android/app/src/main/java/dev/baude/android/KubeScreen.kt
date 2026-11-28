@@ -52,8 +52,13 @@ const val KUBE_REFRESH_S = 10
 private val PODS = Msg.KubePage(title = "Pods", resource = "pods", namespaced = true, served = true, optional = false,
     source = "kubectl")
 
+/** Home (kubedata.KUBE_HOME): the page the view opens on. */
+private val HOME = Msg.KubePage(title = "Home", resource = "home", namespaced = true, served = true, optional = false,
+    source = "summary")
+
 /** What the host's sections' icon names (the desktop's, baude-kube-nodes-symbolic…) are drawn as here. */
 fun kubeIcon(name: String?): ImageVector? = when (name?.removePrefix("baude-kube-")?.removeSuffix("-symbolic")) {
+    "home" -> Adwaita.KubeHome
     "nodes" -> Adwaita.KubeNodes
     "workloads" -> Adwaita.KubeWorkloads
     "helm" -> Adwaita.KubeHelm
@@ -82,20 +87,30 @@ class YamlShown(val uid: String, val title: String, val version: String, val tex
 class KubeState(val hostId: String) {
     var contexts by mutableStateOf<List<Msg.KubeContext>>(emptyList())
     var context by mutableStateOf<String?>(null)
+    /** The context shown's server: with its name, which cluster it is (one made again under its name is another). */
+    var server: String? = null
+    /** The context shown when it went from the kubeconfig: what the page says, till another's picked. */
+    var removed by mutableStateOf<String?>(null)
+    private var following: KubeFollow? = null // (the kubeconfig's contexts, followed while the page is open)
+    private var noneYet = false // (the kubeconfig had no context: the first one added is shown)
     var nothing by mutableStateOf<String?>(null) // (no kubeconfig context: what the status line says)
     var sections by mutableStateOf<List<Msg.KubeSection>>(emptyList())
     var added by mutableStateOf<List<Msg.KubePage>>(emptyList()) // (custom resources opened from Definitions)
     var namespaces by mutableStateOf<List<String>>(emptyList())
     var nodes by mutableStateOf(0)
-    var page by mutableStateOf(PODS)
+    var page by mutableStateOf(HOME)
     var tablePage by mutableStateOf<Msg.KubePage?>(null)
     var columns by mutableStateOf<List<Msg.KubeColumn>>(emptyList())
     var rows by mutableStateOf<List<Msg.KubeRow>>(emptyList())
     var metrics by mutableStateOf<Boolean?>(null)
-    var nsShown by mutableStateOf<List<String>>(emptyList())
+    var summary by mutableStateOf<Msg.KubeSummary?>(null) // (Home's, as the host added it up)
+    var history by mutableStateOf<List<Msg.KubeSample>>(emptyList()) // (Home's samples so far, oldest first)
+    private var historyOf: String? = null // (whose they are: context and namespaces)
+    var nsShown by mutableStateOf<List<String>?>(null) // (null: every namespace's)
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
     var sortDesc by mutableStateOf(false)
+    val colFilters = ColumnFilters("kube_hidden") // (a column's values, ticked: ColumnFilters)
     var selected by mutableStateOf<String?>(null)
     var yaml by mutableStateOf<YamlShown?>(null)
     val docks = mutableStateListOf<Any>().apply { addAll(parked.remove(hostId).orEmpty()) } // (LogsShown, ShellShown:
@@ -107,7 +122,6 @@ class KubeState(val hostId: String) {
     var loading by mutableStateOf(false)
     var fault by mutableStateOf<Msg.KubeFault?>(null)
     var missing by mutableStateOf<Msg.Dep?>(null) // (kubectl isn't on the host: what the page shows instead)
-    var live by mutableStateOf(false)
     var fade by mutableStateOf(false)
     var level by mutableStateOf("table") // (table, or categories)
     var folded by mutableStateOf(prefs().getStringSet("kube_folded", emptySet()).orEmpty().toSet())
@@ -129,27 +143,125 @@ class KubeState(val hostId: String) {
 
     fun open(context: String?, page: String?, search: String?, namespace: String?) {
         missing = null
+        stopped = false
         kube(hostId, Msg.Kube(what = "contexts")) { r ->
             r.missing?.let { return@kube lacks(it) }
-            contexts = r.contexts.orEmpty()
+            takeContexts(r.contexts.orEmpty())
             val names = contexts.mapNotNull { it.name }
+            noneYet = r.error == null && names.isEmpty()
             if (r.error != null || names.isEmpty()) {
                 nothing = if (r.error != null) r.error else Wording.Kube.noContext(r.where.orEmpty())
                 return@kube
             }
-            val last = prefs().getString("kube_context.$hostId", null)
-            val want = context?.takeIf { it in names } ?: last?.takeIf { it in names }
-                ?: contexts.firstOrNull { it.current == true }?.name ?: names.first()
             if (search != null) filter = search
             if (page != null) this.page = Msg.KubePage(title = page, resource = page, namespaced = true, served = true,
                 optional = false, source = "kubectl")
-            switchContext(want, namespace?.let { listOf(it) })
+            switchContext(wanted(context), namespace?.let { listOf(it) })
         }
+        followContexts()
     }
+
+    /** The context to show: the one asked for, else the one shown last (the same cluster: not one made again under its
+     * name), else the kubeconfig's current one, else the first. */
+    private fun wanted(context: String?): String {
+        val names = contexts.mapNotNull { it.name }
+        val last = prefs().getString("kube_context.$hostId", null)
+            ?.takeIf { l -> contexts.any { key(it) == l to prefs().getString("kube_context_server.$hostId", "").orEmpty() } }
+        return context?.takeIf { it in names } ?: last ?: contexts.firstOrNull { it.current == true }?.name ?: names.first()
+    }
+
+    /** The host's kubeconfig followed while the page is open (kube_follow's contexts: sent again each time tools add or
+     * delete clusters); the connection dropped, followed again in a while. */
+    private fun followContexts() {
+        following?.stop()
+        var f: KubeFollow? = null
+        f = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "contexts"),
+            onContexts = { r -> if (following === f) contextsIn(r.contexts.orEmpty(), r.where.orEmpty()) },
+            onEnd = { if (following === f) again(f) }, onError = { if (following === f) again(f) })
+        following = f
+        if (!f.start()) following = null
+    }
+
+    private fun again(f: KubeFollow?) {
+        following = null
+        Mesh.later(5_000) { if (following == null && f != null && !stopped) followContexts() }
+    }
+
+    private var stopped = false
+
+    /** The host's contexts changed (one added, deleted, made again): the picker keeps up; the one shown gone, so is its
+     * cluster (clusterRemoved). None shown yet, as there was none: the one wanted shown. */
+    fun contextsIn(list: List<Msg.KubeContext>, where: String = "") {
+        val before = context
+        takeContexts(list)
+        val keys = list.map { key(it) }.toSet()
+        if (before != null && (before to server.orEmpty()) !in keys) clusterRemoved()
+        else if (before == null && removed == null && noneYet && list.isNotEmpty()) {
+            noneYet = false
+            nothing = null
+            switchContext(wanted(null))
+        } else if (list.isEmpty() && removed == null && before == null) nothing = Wording.Kube.noContext(where)
+    }
+
+    /** The contexts as they are now; what was kept of one that's gone (its namespaces, that it was shown last) let go of. */
+    private fun takeContexts(list: List<Msg.KubeContext>) {
+        val keys = list.map { key(it) }.toSet()
+        for (c in contexts) if (key(c) !in keys) {
+            nsByContext.remove("$hostId/${c.name}/${c.server.orEmpty()}")
+            if (prefs().getString("kube_context.$hostId", null) == c.name &&
+                prefs().getString("kube_context_server.$hostId", "").orEmpty() == c.server.orEmpty())
+                prefs().edit().remove("kube_context.$hostId").remove("kube_context_server.$hostId").apply()
+        }
+        contexts = list
+    }
+
+    /** The context shown went from the kubeconfig (a tool deleted its cluster, or made another under its name):
+     * everything read from it let go of, its watch, logs and Home stopped, a shell in it told and ended; the page says
+     * it was removed, with the contexts there are to pick from. No other is picked for you. */
+    fun clusterRemoved() {
+        val name = context ?: return
+        gen++
+        removed = name
+        context = null
+        server = null
+        loading = false
+        progress = null
+        stopWatch()
+        hideYaml()
+        deleting = null
+        for (t in docks) when (t) {
+            is LogsShown -> if (t.context == name) { t.tail?.stop(); t.tail = null; t.state = Wording.Kube.removedState }
+            is ShellShown -> if (t.context == name) {
+                t.starting = null
+                t.term?.let { term ->
+                    if (term.ended == null) term.feed("\r\n\r\n${Wording.Kube.removedShell(name)}\r\n".toByteArray())
+                    term.close()
+                }
+                t.state = Wording.Kube.removedState
+            }
+        }
+        rows = emptyList()
+        summary = null
+        history = emptyList()
+        historyOf = null
+        tablePage = null
+        fault = null
+        fade = false
+    }
+
+    /** A request's or a follow's answer said the context shown isn't in the kubeconfig (it went before the follow said). */
+    private fun gone(g: Int) {
+        if (g == gen) clusterRemoved()
+    }
+
+    private fun key(c: Msg.KubeContext) = c.name.orEmpty() to c.server.orEmpty()
 
     /** Let go of everything running: the logs, the shells, the watch, and whatever's still to be heard. */
     fun stop() {
         gen++
+        stopped = true
+        following?.stop()
+        following = null
         closeAll()
         stopWatch()
     }
@@ -163,12 +275,15 @@ class KubeState(val hostId: String) {
 
     fun switchContext(name: String, spaces: List<String>? = null) {
         context = name
+        server = contexts.firstOrNull { it.name == name }?.server.orEmpty()
+        removed = null
+        level = "table"
         sections = emptyList()
         namespaces = emptyList()
         note = null
-        nsShown = spaces ?: nsByContext["$hostId/$name"] ?: emptyList()
-        nsByContext["$hostId/$name"] = nsShown
-        prefs().edit().putString("kube_context.$hostId", name).apply()
+        nsShown = spaces ?: nsByContext[nsKey()]
+        nsByContext[nsKey()] = nsShown
+        prefs().edit().putString("kube_context.$hostId", name).putString("kube_context_server.$hostId", server).apply()
         progress = Wording.Kube.connecting(name)
         hideYaml()
         closeAll()
@@ -176,9 +291,10 @@ class KubeState(val hostId: String) {
         fade = true
         loading = true
         val g = ++gen
-        kube(hostId, Msg.Kube(what = "connect", context = name)) { r ->
+        kube(hostId, Msg.Kube(what = "connect", context = name, server = server)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
+            if (r.removed == true) return@kube gone(g)
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
             if (f != null) return@kube failed(f)
             sections = r.sections.orEmpty()
@@ -211,8 +327,9 @@ class KubeState(val hostId: String) {
     }
 
     /** Read the page's objects (and, for pods and nodes, their CPU and memory); switch: it's another kind, so the
-     * table fades until they're in. */
-    fun load(quiet: Boolean = false, switch: Boolean = false) {
+     * table fades until they're in; fresh (Refresh): Home is read now, not from what the host kept or while it waits
+     * to try a failing cluster again. */
+    fun load(quiet: Boolean = false, switch: Boolean = false, fresh: Boolean = false) {
         val ctx = context ?: return
         stopWatch()
         if (switch) fade = true
@@ -220,12 +337,46 @@ class KubeState(val hostId: String) {
         val g = ++gen
         loading = true
         if (!quiet) progress = Wording.Kube.reading(p.title.orEmpty().lowercase(), ctx)
-        kube(hostId, Msg.Kube(what = "list", context = ctx, page = p.resource, crd = p.crd)) { r ->
+        if (p.source == "summary") return readSummary(p, ctx, g, fresh)
+        kube(hostId, Msg.Kube(what = "list", context = ctx, server = server, page = p.resource, crd = p.crd)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
+            if (r.removed == true) return@kube gone(g)
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
             if (f != null) return@kube failed(f)
             loaded(p, r.columns.orEmpty(), r.rows.orEmpty(), r.metrics, g)
+        }
+    }
+
+    /** Home's totals, for the namespaces shown, as the host adds them up (kube's summary). */
+    private fun readSummary(p: Msg.KubePage, ctx: String, g: Int, fresh: Boolean) {
+        val of = "$ctx/${nsShown?.joinToString(",")}"
+        if (of != historyOf) {
+            historyOf = of
+            history = emptyList()
+        }
+        val since = history.lastOrNull()?.at // (only the samples since the newest here)
+        kube(hostId, Msg.Kube(what = "summary", context = ctx, server = server, namespaces = nsShown, since = since,
+            fresh = if (fresh) true else null)) { r ->
+            if (g != gen) return@kube
+            r.missing?.let { return@kube lacks(it) }
+            if (r.removed == true) return@kube gone(g)
+            val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
+            if (f != null) return@kube failed(f)
+            loading = false
+            progress = null
+            fault = null
+            val began = r.summary?.began?.toDouble() ?: 0.0 // (a sample from before it: another cluster's, the name reused)
+            val held = history.filter { (it.at?.toDouble() ?: 0.0) >= began }
+            val last = held.lastOrNull()?.at?.toDouble()
+            val merged = held + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
+            val edge = (merged.lastOrNull()?.at?.toDouble() ?: 0.0) - 60.0 * (r.summary?.minutes?.toDouble() ?: 0.0)
+            history = merged.filter { (it.at?.toDouble() ?: 0.0) >= edge }
+            summary = r.summary
+            metrics = r.summary?.metrics
+            tablePage = p
+            rows = emptyList()
+            fade = false
         }
     }
 
@@ -240,6 +391,7 @@ class KubeState(val hostId: String) {
         }
         tablePage = p
         columns = cols
+        colFilters.load(p.resource)
         metrics = got
         rowsIn(list)
         fade = false
@@ -266,17 +418,17 @@ class KubeState(val hostId: String) {
     private fun startWatch(p: Msg.KubePage, g: Int) {
         val ctx = context ?: return
         var w: KubeFollow? = null
-        w = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "watch", context = ctx, page = p.resource, crd = p.crd),
+        w = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "watch", context = ctx, server = server, page = p.resource,
+            crd = p.crd),
             onRows = { r ->
                 if (watch === w && g == gen) {
                     if (r.metrics != null) metrics = r.metrics
                     rowsIn(r.rows.orEmpty())
-                    if (!r.note.isNullOrEmpty()) { setNote(r.note); live = false } else live = true
+                    if (!r.note.isNullOrEmpty()) setNote(r.note)
                 }
             },
-            onEnd = { if (watch === w) { live = false; watch = null } },
-            onError = { if (watch === w) { live = false; watch = null } },
-            onUp = { up -> if (watch === w) live = up })
+            onEnd = { e -> if (watch === w) { watch = null; if (e.removed == true) gone(g) } },
+            onError = { if (watch === w) watch = null })
         watch = w
         if (!w.start()) watch = null
     }
@@ -284,7 +436,6 @@ class KubeState(val hostId: String) {
     private fun stopWatch() {
         watch?.stop()
         watch = null
-        live = false
     }
 
     /** The list read again if it isn't watched (and the pods' CPU and memory with it). */
@@ -318,18 +469,20 @@ class KubeState(val hostId: String) {
         prefs().edit().putStringSet("kube_folded", folded).apply()
     }
 
-    fun showNamespaces(names: List<String>) {
-        nsShown = names.distinct()
-        context?.let { nsByContext["$hostId/$it"] = nsShown }
+    /** Show these namespaces' objects (in the order picked; empty for none), or every namespace's (null). */
+    fun showNamespaces(names: List<String>?) {
+        nsShown = names?.distinct()
+        context?.let { nsByContext[nsKey()] = nsShown }
+        if (page.source == "summary") return load(switch = true) // (Home's totals: the host's to add up again)
         fade = true
         Mesh.later(150) { fade = false }
     }
 
     /** Show only ns's objects (a pod's namespace tapped, a namespace opened); null: every namespace's. */
     fun setNamespace(ns: String?) {
-        if (page.namespaced == true) return showNamespaces(listOfNotNull(ns))
-        nsShown = listOfNotNull(ns)
-        context?.let { nsByContext["$hostId/$it"] = nsShown }
+        if (page.namespaced == true) return showNamespaces(ns?.let { listOf(it) })
+        nsShown = ns?.let { listOf(it) }
+        context?.let { nsByContext[nsKey()] = nsShown }
         page = allPages().firstOrNull { it.resource == "pods" } ?: PODS
         hideYaml()
         load(switch = true)
@@ -350,8 +503,10 @@ class KubeState(val hostId: String) {
         yaml = YamlShown(row.uid.orEmpty(), title, row.version.orEmpty(), old?.text.orEmpty(), old?.file ?: "object.yaml",
             old?.refs.orEmpty(), true)
         val uid = row.uid.orEmpty()
-        kube(hostId, Msg.Kube(what = "yaml", context = ctx, page = p.resource, crd = p.crd, namespace = row.namespace.orEmpty(),
-            name = row.name)) { r ->
+        val g = gen
+        kube(hostId, Msg.Kube(what = "yaml", context = ctx, server = server, page = p.resource, crd = p.crd,
+            namespace = row.namespace.orEmpty(), name = row.name)) { r ->
+            if (r.removed == true) return@kube gone(g)
             val y = yaml ?: return@kube
             if (y.uid != uid) return@kube
             yaml = YamlShown(uid, title, row.version.orEmpty(), r.text ?: r.error.orEmpty(), r.file ?: "object.yaml",
@@ -378,7 +533,10 @@ class KubeState(val hostId: String) {
         val kind = row.ownerKind.orEmpty()
         val name = row.ownerName.orEmpty()
         progress = Wording.Kube.finding(kind, name)
-        kube(hostId, Msg.Kube(what = "owner", context = ctx, kind = kind, name = name, namespace = row.namespace.orEmpty())) { r ->
+        val g = gen
+        kube(hostId, Msg.Kube(what = "owner", context = ctx, server = server, kind = kind, name = name,
+            namespace = row.namespace.orEmpty())) { r ->
+            if (r.removed == true) return@kube gone(g)
             if (ctx != context) return@kube
             goTo(r.resource.orEmpty(), r.kind ?: kind, r.name ?: name, row.namespace.orEmpty())
         }
@@ -388,7 +546,7 @@ class KubeState(val hostId: String) {
         progress = null
         val p = allPages().firstOrNull { it.resource.orEmpty().split(".")[0] == resource && (it.optional != true || it.served == true) }
         if (p == null) return setNote(Wording.Kube.noPage(kind, name))
-        if (ns.isNotEmpty() && p.namespaced == true && nsShown.isNotEmpty() && ns !in nsShown) showNamespaces(nsShown + ns)
+        nsShown?.let { if (ns.isNotEmpty() && p.namespaced == true && ns !in it) showNamespaces(it + ns) }
         filter = ""
         pending = name to (if (p.namespaced == true) ns else "")
         page = p
@@ -403,7 +561,9 @@ class KubeState(val hostId: String) {
         val ctx = context ?: return
         if (p.resource == "namespaces") return setNamespace(row.name)
         if (p.resource != "customresourcedefinitions") return
-        kube(hostId, Msg.Kube(what = "list", context = ctx, crd = row.name)) { r ->
+        val g = gen
+        kube(hostId, Msg.Kube(what = "list", context = ctx, server = server, crd = row.name)) { r ->
+            if (r.removed == true) return@kube gone(g)
             val made = r.page ?: return@kube
             if (allPages().none { it.resource == made.resource }) added = added + made
             page = allPages().first { it.resource == made.resource }
@@ -422,7 +582,8 @@ class KubeState(val hostId: String) {
         docks.filterIsInstance<LogsShown>().firstOrNull { it.context == ctx && it.namespace == row.namespace.orEmpty() &&
             it.pod == row.name.orEmpty() }?.let { picked = it; return }
         val pick = row.default?.takeIf { it in names } ?: cs.firstOrNull { !it.second }?.first ?: names.first()
-        LogsShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), cs, pick).also { docks.add(it); picked = it; tail(it) }
+        LogsShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), cs, pick, server.orEmpty())
+            .also { docks.add(it); picked = it; tail(it) }
     }
 
     /** The container's log from the start: this run's followed, or with Previous its last run's. */
@@ -432,13 +593,14 @@ class KubeState(val hostId: String) {
         l.lines = 1
         l.follow = true
         l.state = if (l.previous) Wording.Kube.previousRun else Wording.Kube.following
-        val f = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "logs", context = l.context, namespace = l.namespace,
-            pod = l.pod, container = l.container, previous = l.previous),
+        val f = KubeFollow(hostId, Msg.KubeFollow(req = KubeFollow.REQ, what = "logs", context = l.context, server = l.server,
+            namespace = l.namespace, pod = l.pod, container = l.container, previous = l.previous),
             onText = { l.append(it) },
             onEnd = { e ->
                 l.tail = null
                 val code = e.code?.toInt() ?: 0
-                if (code != 0) l.state = Wording.Kube.kubectlExited(code) else if (!l.previous) l.state = Wording.Kube.ended
+                if (e.removed == true) l.state = Wording.Kube.removedState
+                else if (code != 0) l.state = Wording.Kube.kubectlExited(code) else if (!l.previous) l.state = Wording.Kube.ended
             },
             onError = { l.tail = null; l.state = Wording.Kube.kubectlError(it) })
         l.tail = f
@@ -469,17 +631,44 @@ class KubeState(val hostId: String) {
         val names = row.containers.orEmpty().filter { it.init != true }.mapNotNull { it.name }
         if (names.isEmpty()) return setNote(Wording.Kube.noContainers(row.name.orEmpty()))
         ShellShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), names,
-            row.default?.takeIf { it in names } ?: names.first()).also { docks.add(it); picked = it; startShell(it) }
+            row.default?.takeIf { it in names } ?: names.first(), server.orEmpty())
+            .also { docks.add(it); picked = it; startShell(it) }
     }
 
-    /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. */
+    /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. Only once
+     * the host says its cluster's still there as it was shown (its server too: kube's check), and only on that server
+     * (kubectl's --server); failed at once on a kubeconfig caught half written, run once more (kubedock's again). */
     fun startShell(s: ShellShown) {
         s.term?.close()
-        val argv = listOf("kubectl", "--context", s.context, "exec", "-it", "-n", s.namespace, s.pod, "-c", s.container, "--",
-            "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+        s.term = null
         s.state = ""
+        val token = Any().also { s.starting = it }
+        kube(hostId, Msg.Kube(what = "check", context = s.context, server = s.server)) { r ->
+            if (s.starting !== token || s !in docks) return@kube
+            s.starting = null
+            if (r.removed == true) {
+                if (s.context == context && s.server == server.orEmpty()) clusterRemoved() else s.state = Wording.Kube.removedState
+                return@kube
+            }
+            openShell(s)
+        }
+    }
+
+    private fun openShell(s: ShellShown) {
+        val target = listOf("--context", s.context) + (if (s.server.isNotEmpty()) listOf("--server=${s.server}") else emptyList())
+        val argv = listOf("kubectl") + target + listOf("exec", "-it", "-n", s.namespace, s.pod, "-c", s.container, "--",
+            "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+        val began = System.currentTimeMillis()
         s.term = HostTerm(hostId, argv, "${s.pod} · ${s.namespace} · ${s.context}").also { t ->
-            t.onEnd = { code -> if (s.term === t) s.state = Wording.Kube.kubectlExited(code) }
+            t.onEnd = { code ->
+                if (s.term === t) {
+                    if (code != 0 && !s.retried && System.currentTimeMillis() - began < 3_000 &&
+                        KUBE_BROKEN.containsMatchIn(t.screen.text(all = true))) {
+                        s.retried = true
+                        startShell(s)
+                    } else s.state = Wording.Kube.kubectlExited(code)
+                }
+            }
             Terms.add(t)
         }
     }
@@ -490,43 +679,56 @@ class KubeState(val hostId: String) {
         val ctx = context ?: return
         val name = row.name.orEmpty()
         setNote(if (force) Wording.Kube.forceDeleting(name) else Wording.Kube.deleting(name))
-        kube(hostId, Msg.Kube(what = "delete", context = ctx, namespace = row.namespace.orEmpty(), name = name, force = force)) { r ->
+        val g = gen
+        kube(hostId, Msg.Kube(what = "delete", context = ctx, server = server, namespace = row.namespace.orEmpty(), name = name,
+            force = force)) { r ->
+            if (r.removed == true) return@kube gone(g)
             if (ctx != context) return@kube
             setNote(r.said ?: r.error.orEmpty())
             load(quiet = true)
         }
     }
 
-    /** The status line: the progress; else the note, how many are shown, the context, whether it's live, the metrics and
-     * that it's read-only. */
+    /** The status line: the progress; else the note, how many are shown and the metrics. */
     fun status(shown: Int): String {
         if (missing != null) return ""
+        removed?.let { return Wording.Kube.removedStatus(it) }
         nothing?.let { return it }
         progress?.let { return it }
         val ctx = context.orEmpty()
         fault?.let { return "$ctx: ${it.title}" }
         val p = tablePage ?: return ""
+        val fresh0 = note?.takeIf { it.second > SystemClock.elapsedRealtime() }?.first
+        if (p.source == "summary") return listOfNotNull(fresh0, if (metrics == true) Wording.Kube.metrics(KUBE_REFRESH_S)
+            else Wording.Kube.noMetrics).joinToString(" · ")
         val what = p.title.orEmpty().lowercase()
         var count = if (shown != rows.size) Wording.Kube.countOf(shown, what, rows.size) else Wording.Kube.count(shown, what)
-        if (nsShown.isNotEmpty() && p.namespaced == true) count = Wording.Kube.inNamespaces(count, nsSummary())
+        if (nsShown != null && p.namespaced == true) count = Wording.Kube.inNamespaces(count, nsSummary())
         val fresh = note?.takeIf { it.second > SystemClock.elapsedRealtime() }?.first
         val m = if (p.resource == "pods" || p.resource == "nodes") {
             if (metrics == true) Wording.Kube.metrics(KUBE_REFRESH_S) else Wording.Kube.noMetrics
         } else null
-        return listOfNotNull(fresh, count, ctx, if (live) Wording.Kube.live else null, m, Wording.Kube.readOnly)
+        return listOfNotNull(fresh, count, m)
             .filter { it.isNotEmpty() }.joinToString(" · ")
     }
 
-    /** The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces. */
-    fun nsSummary(): String = when {
-        nsShown.isEmpty() -> Wording.Kube.allNamespaces
-        nsShown.size <= 2 -> nsShown.joinToString(", ")
-        else -> Wording.Kube.nNamespaces(nsShown.size)
+    /** The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces; 0 namespaces. */
+    fun nsSummary(): String = nsShown.let { n ->
+        when {
+            n == null -> Wording.Kube.allNamespaces
+            n.size in 1..2 -> n.joinToString(", ")
+            else -> Wording.Kube.nNamespaces(n.size)
+        }
     }
 
+    /** Where the namespaces shown in the context shown are kept: by its host, name and server (kube_key). */
+    private fun nsKey() = "$hostId/$context/${server.orEmpty()}"
+
     companion object {
-        private val nsByContext = HashMap<String, List<String>>() // (memory only, as the desktop's)
+        private val nsByContext = HashMap<String, List<String>?>() // (memory only, as the desktop's)
         private val CLIMB = mapOf("ReplicaSet" to "replicasets", "Job" to "jobs")
+        /** What kubectl says of a kubeconfig it can't read (lookupkube._KUBE_BROKEN): one caught half written. */
+        private val KUBE_BROKEN = Regex("error loading config file", RegexOption.IGNORE_CASE)
 
         private fun prefs() = Mesh.app.getSharedPreferences("settings", Context.MODE_PRIVATE)
         /** A host's shells, kept while its page is made again. */
@@ -556,9 +758,9 @@ fun kubeColours() = if (LocalBaude.current.dark) Tokens.dark.kube else Tokens.li
  * to the categories, then leaves. */
 @Composable
 fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: String? = null, search: String? = null,
-               namespace: String? = null) {
+               namespace: String? = null, state: KubeState? = null) {
     val c = LocalBaude.current
-    val st = remember(hostId) { KubeState(hostId) }
+    val st = state ?: remember(hostId) { KubeState(hostId) }
     LaunchedEffect(st) { st.open(context, page, search, namespace) }
     LaunchedEffect(st) {
         while (true) {
@@ -571,6 +773,7 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
     val leave = { st.stop(); back() }
     val up = {
         when {
+            st.level == "contexts" -> st.level = "table"
             st.picked != null -> st.close(st.picked!!)
             st.yaml != null -> st.hideYaml()
             st.level == "table" -> st.level = "categories"
@@ -582,10 +785,12 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.kubernetes, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = up) }, end = {
             if (st.loading && st.progress != null) Box(Modifier.padding(horizontal = 9.dp)) { Spinner() }
-            IconButton(Adwaita.ViewRefresh, Wording.Common.readAgain) { st.load() }
+            IconButton(Adwaita.ViewRefresh, Wording.Common.readAgain) { st.load(fresh = true) }
             IconButton(Adwaita.WindowClose, Wording.Images.close, onClick = leave)
         })
-        if (st.level == "categories") Categories(st) else {
+        if (st.level == "categories") Categories(st)
+        else if (st.level == "contexts") ContextsLevel(st)
+        else {
             Controls(st)
             Box(Modifier.weight(1f).navigationBarsPadding().imePadding()) { Body(st) }
         }
@@ -597,12 +802,107 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
 private fun Controls(st: KubeState) {
     Row(Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        val names = st.contexts.mapNotNull { it.name }
-        if (names.isNotEmpty()) Picker(midCut(st.context.orEmpty(), 32), Wording.Kube.contextTip, names.map { it to it }, st.context) {
-            if (it != st.context) st.switchContext(it)
-        }
+        if (st.contexts.isNotEmpty()) ContextButton(st)
         Namespaces(st)
         SearchField(st.filter, { st.filter = it }, Wording.Kube.filter, Modifier.weight(1f))
+    }
+}
+
+/** The context button (pickers.ContextPicker's face): the context shown, or "Choose a context", dim, when none is
+ * (the one shown was removed); tapped, the contexts to pick from, in the page (ContextsLevel). */
+@Composable
+private fun ContextButton(st: KubeState, centred: Boolean = false) {
+    val c = LocalBaude.current
+    val face = st.context
+    Row(Modifier.clip(RoundedCornerShape(6.dp)).then(if (centred) Modifier.background(c.raised) else Modifier)
+        .clickable { st.level = "contexts" }.padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(face?.let { midCut(it, 32) } ?: Wording.Kube.pickContext, style = Type.body, color = if (face != null) c.fg else c.dim,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+        Icon(Adwaita.PanDown, Wording.Kube.contextTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+    }
+}
+
+/** The contexts to pick from, in the page (pickers.ContextPicker's list): by name (numbers by their value), the one
+ * shown ticked; past CONTEXTS_SEARCHED of them, a search over them and their groups' names over them (context_groups).
+ * It keeps up as tools add and delete clusters: a row is added or taken out where it is. */
+@Composable
+private fun ContextsLevel(st: KubeState) {
+    val c = LocalBaude.current
+    var query by remember { mutableStateOf("") }
+    val names = st.contexts.mapNotNull { it.name }.distinct().sortedWith(contextOrder)
+    val many = names.size > CONTEXTS_SEARCHED
+    val groups = if (many) contextGroups(names) else emptyMap()
+    val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val shown = names.filter { n -> words.all { it in n.lowercase() } }
+    Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding().inside(c)) {
+        if (many) SearchField(query, { query = it }, Wording.Kube.findContext, Modifier.fillMaxWidth().padding(6.dp))
+        LazyColumn(Modifier.fillMaxSize().padding(vertical = 4.dp)) {
+            if (shown.isEmpty()) item(key = "none") {
+                Text(Wording.Kube.noContextMatch, style = Type.body, color = c.dim, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
+            }
+            shown.forEachIndexed { i, name ->
+                val group = groups[name].orEmpty()
+                val before = shown.getOrNull(i - 1)?.let { groups[it].orEmpty() }
+                if (group.isNotEmpty() && before != group) item(key = "head:$group") { MenuHeading(group) }
+                else if (group.isEmpty() && !before.isNullOrEmpty()) item(key = "rule:$name") { MenuDivider() }
+                item(key = "ctx:$name") {
+                    MenuLine(onClick = { if (name != st.context) st.switchContext(name) else st.level = "table" }) {
+                        Text(midCut(name, 44), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f))
+                        Icon(Adwaita.ObjectSelect, null, tint = c.accent,
+                            modifier = Modifier.size(16.dp.icon).alpha(if (name == st.context) 1f else 0f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A context picker with more than this many has a search, and its contexts grouped (pickers.CONTEXTS_SEARCHED). */
+const val CONTEXTS_SEARCHED = 15
+
+/** A context's place in a picker (pickers.context_order): by name, any case, numbers by their value. */
+val contextOrder = Comparator<String> { a, b ->
+    fun parts(s: String) = Regex("\\d+|\\D+").findAll(s).map { it.value }.toList()
+    val x = parts(a)
+    val y = parts(b)
+    for (i in 0 until minOf(x.size, y.size)) {
+        val p = x[i]
+        val q = y[i]
+        val pn = p[0].isDigit()
+        val qn = q[0].isDigit()
+        val r = when {
+            pn && qn -> p.toBigInteger().compareTo(q.toBigInteger())
+            pn -> -1
+            qn -> 1
+            else -> p.lowercase().compareTo(q.lowercase())
+        }
+        if (r != 0) return@Comparator r
+    }
+    x.size - y.size
+}
+
+/** Each context's group (pickers.context_groups): the start of its name up to its first - _ . : / or @, where two or
+ * more share it; "" for one alone. */
+fun contextGroups(names: List<String>): Map<String, String> {
+    val sep = Regex("[-_.:/@]")
+    val starts = names.associateWith { n -> if (sep.containsMatchIn(n)) n.split(sep, 2)[0] else "" }
+    val count = starts.values.groupingBy { it }.eachCount()
+    return starts.mapValues { (_, s) -> if (s.isNotEmpty() && (count[s] ?: 0) > 1) s else "" }
+}
+
+/** What the page shows when the context shown goes from the kubeconfig (build_removed): that it was removed, and the
+ * context button, to pick another from those there are. Nothing else is picked for you. */
+@Composable
+private fun RemovedState(st: KubeState) {
+    val c = LocalBaude.current
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Adwaita.NetworkServer, null, tint = c.dim, modifier = Modifier.size(32.dp.icon))
+        Text(Wording.Kube.removed, style = Type.title, color = c.fg, textAlign = TextAlign.Center)
+        if (st.contexts.isNotEmpty()) ContextButton(st, centred = true)
     }
 }
 
@@ -611,7 +911,7 @@ private fun Controls(st: KubeState) {
 private fun Namespaces(st: KubeState) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
-    val tip = if (st.nsShown.size > 2) st.nsShown.joinToString(", ") else Wording.Kube.namespacesTip
+    val tip = st.nsShown?.takeIf { it.size > 2 }?.joinToString(", ") ?: Wording.Kube.namespacesTip
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -620,7 +920,7 @@ private fun Namespaces(st: KubeState) {
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.START) {
-            MenuChecks(Wording.Kube.allNamespaces, (st.namespaces + st.nsShown).distinct().sorted().map { it to it },
+            MenuChecks(Wording.Kube.allNamespaces, (st.namespaces + st.nsShown.orEmpty()).distinct().sorted().map { it to it },
                 st.nsShown, st::showNamespaces)
         }
     }
@@ -687,13 +987,17 @@ private fun Body(st: KubeState) {
                 val y = st.yaml
                 if (y != null) YamlLevel(st, y)
                 else {
-                    val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns) {
+                    val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns,
+                        st.colFilters.hidden, st.nodes) {
                         kubeRows(st)
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {
                         val lacks = st.missing
                         if (lacks != null) MissingDep(lacks, Wording.Window.kubernetes) { st.open(null, null, null, null) }
-                        else if (st.fault != null) ErrorState(st, st.fault!!) else if (st.tablePage != null) KubeTable(st, shown)
+                        else if (st.removed != null) RemovedState(st)
+                        else if (st.fault != null) ErrorState(st, st.fault!!)
+                        else if (st.tablePage?.source == "summary") st.summary?.let { KubeHome(st, it) }
+                        else if (st.tablePage != null) KubeTable(st, shown)
                     }
                     val status = st.status(shown.size)
                     if (status.isNotEmpty()) Text(status, style = Type.caption, color = c.dim, maxLines = 1,

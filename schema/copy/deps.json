@@ -9,6 +9,7 @@
     "not_installed_fix": "{$dep} isn't installed. Install it with {$fix}",
     "installed": "Installed",
     "install_page": "Install Page",
+    "copied": "Copied: run it in a terminal",
     "copied_restart": "Copied: run it in a terminal, then Restart",
     "providers": "Providers",
     "git_github": "Git and GitHub",

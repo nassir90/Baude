@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Who in the mesh may use one of a host's capabilities: every member, none, or those chosen. A head on the host's own machine, or one over ssh, is never refused.",
+  "properties": {
+    "who": {
+      "enum": [
+        "everybody",
+        "nobody",
+        "chosen"
+      ],
+      "description": "Every member, none, or those in members."
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "chosen's: the members' ids."
+    }
+  },
+  "required": [
+    "who"
+  ],
+  "additionalProperties": false
+}

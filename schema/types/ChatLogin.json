@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A sign-in, as its host has it: a chat's to Claude, from which every head draws the chat's sign-in card alone (LoginCard), whichever head started what's going on; or a Codex account's sign-in in Subscriptions (accounts sign_in's login), from which the head that asked draws its card.",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["needed", "signing_in", "signed_in", "failed"],
+      "description": "needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login (codex login) runs on the host for it; signed_in: it finished; failed: it ended without signing in."
+    },
+    "method": {
+      "type": "string",
+      "enum": ["browser", "device"],
+      "description": "A Codex sign-in's: browser, codex login's own (its page sends the browser back to codex's server on the host's 127.0.0.1, at port); device, codex login --device-auth's (a code entered on its page)."
+    },
+    "url": {
+      "type": "string",
+      "description": "signing_in, a Codex sign-in's: the page to open, once codex has said it."
+    },
+    "code": {
+      "type": "string",
+      "description": "signing_in, a Codex device-code sign-in's: the one-time code to enter on that page."
+    },
+    "port": {
+      "type": "integer",
+      "description": "signing_in, a Codex browser sign-in's: the port of the host's 127.0.0.1 its page sends the browser back to (1455, else 1457)."
+    },
+    "opened": {
+      "type": "boolean",
+      "description": "signing_in, a Codex browser sign-in's: codex opened the page in the host's own browser itself (on macOS, where it doesn't go by BROWSER)."
+    },
+    "expired": {
+      "type": "boolean",
+      "description": "needed because the sign-in there was ran out (expired, reached its time limit, can't be renewed), not because there's none."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "needed: the first sentence of Claude's own error; failed: why the sign-in didn't finish."
+    },
+    "who": {
+      "type": ["string", "null"],
+      "description": "signed_in: who as, as claude auth status says it (Codex's: the email its sign-in names); null if it didn't say, or the head may not read Subscriptions."
+    },
+    "turn": {
+      "type": "integer",
+      "description": "needed: which of the chat's turns that failed for want of signing in it's for, counted on its host since it started: a new one each time one fails, so every head moves the card to that turn."
+    }
+  },
+  "required": ["state"],
+  "additionalProperties": false
+}

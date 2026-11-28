@@ -91,7 +91,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                             Spacer(Modifier.width(Gap.avatarGap))
                             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f))
-                            StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
+                            StatusDot(Mesh.dot(s), !s.asks.isNullOrEmpty())
                             IconButton(Adwaita.UserTrash, Wording.Trash.moveDots) { deleting = s }
                         }
                     }
@@ -213,9 +213,10 @@ private fun PanelHeading(text: String) {
     Text(text, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp))
 }
 
-/** A rounded group on the frame, as Hosts has them (rows: its rows each pad themselves, with rules between). */
+/** A rounded group on the frame, as Hosts and the Inbox's asks have them (rows: its rows each pad themselves, with
+ * rules between). */
 @Composable
-private fun Panel(rows: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+internal fun Panel(rows: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)
         .then(if (rows) Modifier else Modifier.padding(12.dp)),

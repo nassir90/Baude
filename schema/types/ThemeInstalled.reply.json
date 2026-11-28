@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "theme_install's answer: the theme as it's installed.",
+  "properties": {
+    "op": {
+      "const": "theme_install",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "theme": {
+      "$ref": "Theme.json",
+      "description": "It."
+    },
+    "replaced": {
+      "type": "boolean",
+      "description": "Whether a theme of its name was there, and is replaced."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

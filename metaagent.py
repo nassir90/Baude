@@ -4,6 +4,7 @@ relay Claude Code runs as Meta's MCP server (RELAY), and the session itself (Age
 """
 import json
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -13,7 +14,7 @@ import uuid
 from gi.repository import GLib  # noqa: E402
 
 import chatparts  # noqa: E402
-from baudelib import agentproxy, codex, meshtools, modelfiles, wire, wording  # noqa: E402
+from baudelib import agentproxy, codex, deps, meshtools, modelfiles, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import ClaudeProc  # noqa: E402
@@ -334,7 +335,7 @@ for line in sys.stdin:
     try:
         if method == "initialize":
             result = {"protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                      "capabilities": {"tools": {}}, "serverInfo": {"name": "meta", "version": "1"}}
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": "meta", "title": "Meta", "version": "1"}}
         elif method == "tools/list":
             result = {"tools": call("_tools", {}).get("tools", [])}
         elif method == "tools/call":
@@ -497,6 +498,8 @@ class Agent:
         # Mac runs besides, each given Meta's tools through the same MCP relay, and its effort only if it takes one)
         commands = commands and takes_commands(model)  # (only Claude's models act)
         run = modelslib.launch(model, "auto" if commands else "default", effort)
+        if run["program"] == "codex" or run["program"] == "claude" and not (exe and shutil.which(exe)):
+            deps.need(run["program"], "report.claude" if run["program"] == "claude" else "programs.codex")  # (as a chat's)
         if run["missing"]:
             raise OSError(wording.say("meta.apple_not_built") if run["program"] == "apple" else
                           wording.say("meta.runner_missing", program=run["program"]))

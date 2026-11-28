@@ -23,6 +23,26 @@
       "type": "string",
       "description": "Its session's id, on its host."
     },
+    "bot": {
+      "type": "string",
+      "description": "A chat a task's run started (a subagent sender, its report of a turn): the session of the run's Bot, on its host."
+    },
+    "task": {
+      "type": "string",
+      "description": "A task's run's: the id of its task, on its Bot's Tasks page."
+    },
+    "task_name": {
+      "type": "string",
+      "description": "A chat a task's run started: its task's name, as the from line says it (\"<task> run\")."
+    },
+    "run": {
+      "type": "string",
+      "description": "A task's run's: the id of the run, on its Bot's Tasks page (its Bot: bot, else its session)."
+    },
+    "over": {
+      "enum": ["finished", "stopped", "failed"],
+      "description": "A chat a task's run started: how the turn it reports ended (finished; stopped: interrupted or stopped; failed: an error, or its agent ended before its turn did)."
+    },
     "shown": {
       "type": "string",
       "description": "What heads show of the message in place of its text: set by the host only (a held answer sent: its shown, its agent having been told more)."

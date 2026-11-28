@@ -18,11 +18,12 @@ import metalook  # noqa: E402
 import imageviews  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
+import meshui  # noqa: E402  (each host's pending daemon restart, toasted)
 import pickers  # noqa: E402
 from widgets import Ticker  # noqa: E402,F401
 from pickers import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
-    discard, ensure_icons, load_settings, pretty_path, save_settings, time_ago, toast, walk,
+    discard, ensure_icons, insert_actions, load_settings, pretty_path, save_settings, time_ago, toast, walk,
 )
 from pickers import CheckList, TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
 
@@ -35,6 +36,7 @@ from sessionlist import (  # noqa: E402
     short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
+from inboxview import InboxRow  # noqa: E402  (the Inbox, over Search sessions)
 from baudelib.desktopchats import group as desktop_group  # noqa: E402  (Claude Desktop's chats' group: Desktop)
 
 
@@ -124,6 +126,10 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         new_row.append(self.host_dd)
         top.append(new_row)
         top.append(self.folder_btn)
+        # (under it, over the search: the Inbox, drawn as New session is, with how many asks wait for you:
+        # inboxview.InboxRow)
+        self.inbox_row = InboxRow(lambda: self.win.open_inbox())
+        top.append(self.inbox_row)
         find_row = Gtk.Box(spacing=2, margin_top=6)
         self.search = Gtk.SearchEntry(placeholder_text=wording.say("sidebar.search"), hexpand=True)
         self.search.connect("search-changed", lambda *_: self.fill())
@@ -141,7 +147,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             view.append(choice)
         view.append(Gtk.Separator())
         self.group_list = CheckList(wording.say("sidebar.groups"),
-                                    lambda keys: self.filtered(sidebar_groups=keys or None), self.group_menu,
+                                    lambda keys: self.filtered(sidebar_groups=keys), self.group_menu,
                                     heading=True)
         view.append(self.group_list)
         view.append(Gtk.Separator())
@@ -169,16 +175,21 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
-        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars)
+        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars; each host's
+        # pending daemon restart, toasted: show_update_bars too)
         self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win))
         self.append(self.update_bar)
+        self.restart_toasts = meshui.RestartToasts(win, win.show_restart_blockers)
+        GLib.idle_add(lambda: (win.get_application().show_update_bars([win]), False)[1]  # (a version offered before)
+                      if win.get_application() is not None else False)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.list.add_controller(keys)
         actions = Gio.SimpleActionGroup()
         for name, fn in (("rename", self.ask_rename), ("archive", self.archive), ("unarchive", self.unarchive),
                          ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote),
-                         ("make_bot", self.ask_bot), ("unbot", self.unbot)):
+                         ("make_bot", self.ask_bot), ("unbot", self.unbot), ("rotate", self.rotate),
+                         ("access", self.ask_access)):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))
             actions.add_action(act)
@@ -202,7 +213,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: (pop.popdown(), fn(v.get_string())))
             actions.add_action(act)
-        self.insert_action_group("sb", actions)
+        insert_actions(self, "sb", actions)
         self.actions = actions
         self.remote_keys, self.remote_ids = {}, frozenset()  # (a server's folders: their servers; see groups)
         self.assigned = None  # (chat_groups, as groups last read them, for session_row)
@@ -278,7 +289,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
     # machine: this one (THIS_MACHINE: Claude Code's and Claude Desktop's chats, as ever, and those of a server on it),
     # or another a server's on (baudelib.server). A group is Baude's own, a list of chats of its own, whatever host
     # they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group). Every group's listed
-    # till some are picked (pickers.CheckList)
+    # and checked till some are unchecked (pickers.CheckList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
         one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
@@ -305,11 +316,13 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             [("", wording.say("sidebar.no_group"), "")]
 
     def picked(self, name, known):
-        """The groups picked (settings' sidebar_groups) that are still there, or None: all of them (none of those picked
-        there, or every one there picked)."""
+        """The groups picked (settings' sidebar_groups) that are still there (an empty set: none picked), or None: all
+        of them (none of those picked there, or every one there picked)."""
         shown = load_settings().get(name)
         if not isinstance(shown, list):
             return None
+        if not shown:
+            return set()
         keys = {key for key, *_ in known}
         shown = set(shown) & keys
         return shown if shown and shown != keys else None
@@ -328,9 +341,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             (groups is None or chat_group(s, assigned) in groups)
 
     def filtered(self, **picked):
-        """Groups picked (sidebar_groups=[names]; None: all of them, as is every one there): listed."""
+        """Groups picked (sidebar_groups=[names], [] for none; None: all of them, as is every one there): listed."""
         known = {"sidebar_groups": self.known_groups}
-        save_settings(**{name: None if keys is None or set(keys) >= {k for k, *_ in known[name]()} else keys
+        save_settings(**{name: None if keys is None or keys and set(keys) >= {k for k, *_ in known[name]()} else keys
                          for name, keys in picked.items()})
         self.fill_filters()
         self.fill()
@@ -343,7 +356,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.fill_new_hosts()
         self.show_host_state()
         self.group_list.fill([(key, label) for key, label, _note in self.known_groups()],
-                             sorted(self.group_filter() or ()))
+                             None if (picked := self.group_filter()) is None else sorted(picked))
 
     def host_menu(self, x, y):
         """Right-click New session's host: Add Host…, always; and for another machine's, Deactivate, or Activate for one
@@ -386,23 +399,38 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         pop.set_pointing_to(rect)
-        pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        self.menu_open = pop  # (open, or about to be: a row's isn't rebuilt from under it, fill waits till it's closed)
+        pop.connect("closed", lambda p: (self.menu_closed(p), GLib.idle_add(p.unparent)))
         # (on an idle, after the one its sections' separators are shown in: popped up before it, it's sized without
         # them, and macOS never sizes it again, so its last item was cut off)
         GLib.idle_add(self.popup_on_screen, pop)
         return pop
 
-    @staticmethod
-    def popup_on_screen(pop):
-        """menu_at's idle: pop shown while its parent's still on screen. The list rebuilt before it (a chat archived,
-        trashed or refreshed) takes the row out of the window, and a popover over a widget with no window has no
-        surface to open from: GTK crashes. Then it's dropped instead."""
+    def popup_on_screen(self, pop):
+        """menu_at's idle: pop shown while its parent's still on screen. A parent taken out of the window by then (a
+        header's or a group's, gone with what it was in) has no surface to open a popover from: GTK crashes. Then
+        it's dropped instead, as one that didn't open is, so fill doesn't wait for it (menu_held)."""
         parent = pop.get_parent()
         if parent is not None and parent.get_mapped():
             pop.popup()
-        elif parent is not None:
+        if parent is not None and not pop.get_visible():
             pop.unparent()
+            self.menu_closed(pop)
         return False
+
+    def menu_held(self):
+        """A row's menu is open (or about to be): the list isn't rebuilt under it, which closed it as it was used
+        (any chat on any host changing refills the list). fill waits for it to close."""
+        pop = getattr(self, "menu_open", None)
+        return pop is not None and (row := pop.get_parent()) is not None and row.is_ancestor(self.list)
+
+    def menu_closed(self, pop):
+        """menu_at's menu gone: the list rebuilt now if a fill waited for it."""
+        if getattr(self, "menu_open", None) is pop:
+            self.menu_open = None
+            if getattr(self, "fill_waiting", False):
+                self.fill_waiting = False
+                GLib.idle_add(lambda: self.fill() and False)
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
     # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it
@@ -492,7 +520,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         state = self.group_state(ids)
         save_settings(chat_groups={**assigned, **dict.fromkeys(ids, "")} or None,
                       group_names=[g for g in made_groups(st) if g != name] or None,
-                      sidebar_groups=sorted(set(picked) - {name}) or None if isinstance(picked, list) else picked)
+                      sidebar_groups=sorted(set(picked) - {name}) or None
+                      if isinstance(picked, list) and name in picked else picked)
         self.groups_changed()
         return state
 
@@ -540,7 +569,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         # (and the host listed: this machine's again while the one picked is gone)
         seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
-                                       s.get("said"), s.get("group"), bool(s.get("archived")), len(s.get("held") or []))
+                                       s.get("said"), s.get("group"), bool(s.get("archived")), len(s.get("held") or []),
+                                       str(s.get("bot")))  # (a Bot made, renamed, its picture changed, or a chat again)
                                       for s in network().sessions() if self.shows(s, hosts, groups, assigned)
                                       or s["id"] in getattr(self, "listed_remote", ())))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
@@ -795,6 +825,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
 
     def fill(self):
         if self.closed():
+            return
+        if self.menu_held():
+            self.fill_waiting = True
             return
         # rebuilding the list loses the scroll position (and focus scrolls it): put it back
         adj = self.scroller.get_vadjustment()

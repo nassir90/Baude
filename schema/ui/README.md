@@ -33,7 +33,7 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
 - `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
   every app it's gone from (`baude`, `record`, `phone`).
-- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided, source}`, `rule` written to hold for every app, `source` what it can be audited by: `{"issue": "BaudeInternal#N"}` or `{"session": …, "message": <the owner's message's uuid>}`.
+- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided, source}`, `rule` written to hold for every app, `source` what it can be audited by: `{"issue": "BaudeInternal#N"}` or `{"session": …, "message": <the owner's message's uuid>}`. A decision a later one replaces stays as it was, with `superseded` (the date), and the later one says which it supersedes.
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose
@@ -52,15 +52,36 @@ An entry or a part may carry:
 
 ## Rules every entry follows
 
+- **One name for a model.** Wherever an app shows a model (the model pickers and their face, Telemetry, New session, a subagent's card, Signal's reader), it names it as its host lists it, else as its id reads by schema/icons/models/families.json's names (claude-opus-4-7 is "Opus 4.7"), else its name to what serves it (qwen3:4b), one formatter on each app (providers.model_name, the phone's modelName); its slug shows only on hover (a long-press on the phone). The owner asked that the model dropdown's names match the telemetry section's, the slug on hover only (2026-11-26). Source: `[{"issue": "BaudeInternal#235"}]`.
+- **A dependency installed is found without a restart.** Wherever an app says a dependency is missing (Settings → Dependencies, a feature's missing row such as Telemetry's Line Profiling), it looks again each time it asks, and a Python module installed with pip --user since the host or app started is found (its user site-packages put on the path if it has come since, the import caches dropped); the owner found Line Profiling still saying it needed line_profiler after it was installed (2026-11-27). Source: `[{"issue": "BaudeInternal#309"}]`.
 - **One word-wrap icon.** Every wrap toggle (code views, Kubernetes logs, on every app) draws `baude-wrap-symbolic` from schema/icons; the owner asked that all of them come from one place, with a clearer icon (2026-11-24). Source: `[{"issue": "BaudeInternal#207"}]`.
 - **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
-- **What closes is freed.** A closed window, a closed tab (a file's code, a chat, a page of notes, the Feedback tab) and a closed dialog are freed with everything they hold, and changing the accent doesn't keep each logo drawn for it; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
+- **What closes is freed.** A closed window, a closed tab (a file's code, a chat, a page of notes, the Feedback tab) and a closed dialog are freed with everything they hold, as are a list's rows when it's filled again (a notebook's pages as another notebook is picked), and changing the accent doesn't keep each logo drawn for it; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
+- **At rest, an app costs nothing.** Nothing is drawn frame after frame unless something on screen moves: a page
+  hosted in a panel (a Bot's Browser page) is kept in place as the window draws, not by drawing it each frame. What
+  shows something working moves in shared frames, as few as look smooth (a working dot's pulse 10 a second, a spinner
+  20), and holds still in a window you aren't looking at and while no one's at the machine. From the owner's review of
+  the mesh's telemetry (2026-11-27): Baude's window sat at 17–19% CPU with nothing happening, where near 0 was
+  expected. Source: `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "90c7f3bb-88bc-4a22-9305-4e0bd74d460b"},
+  {"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"}]`.
+- **A view out in its own window uses that window's title bar.** A view that moves out to a window of its own
+  (Kubernetes, Docker, Databases, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
+  its bar's controls in that window's header bar, beside the window's own controls, with no empty band above the
+  view; back over the window it came from, its bar is as it was. The owner found an empty band at the top of the
+  Kubernetes view moved out (2026-11-26). Source: `[{"issue": "BaudeInternal#250"}]`.
 - **A Bot has only its Name.** Wherever an app lists or shows a Bot (a sidebar or home row, the open chat's header and
   window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
   nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot
   (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so. The owner: "Bot's just have a Name. When you promote to a bot you have the option
   of setting the Bot's new name." (2026-11-22). Source: `[{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message":
   "30af64bb-6804-4040-984b-d3fd2a444e53"}]`.
+- **A Bot knows itself by its Name, and gets its tools as it's made.** Every host keeps a Bot's folder (its memory,
+  picture and tasks) under the Bot's name, moved as it's renamed, so what its agent is told of itself and its folder
+  says the name, never its chat's id. A chat made a Bot while its agent runs is given a Bot's tools and told who it
+  is without being started again, where its agent can take tools as it runs (Claude Code's); another (pi's, Codex's) is started
+  again for them after its turn, its conversation going on. The owner asked that Bots refer to themselves by name, not id, and that the research
+  on adding MCP tools to a running chat be used for a chat made a Bot (2026-11-27). Source:
+  `[{"issue": "BaudeInternal#288"}]`.
 - **A picture is set into the page.** Wherever an app shows someone's or a Bot's picture, or their initials on a colour
   (the Git page's authors, a Bot's sidebar or home row, Bot Settings, This phone's Bots, the phone's chat header), it's round, under the inset shade
   `picture-shade` in schema/tokens: a blurred shadow round its rim, one from its top edge and a hairline ring just inside
@@ -118,16 +139,19 @@ An entry or a part may carry:
 - **Telemetry is a timestamped log that stays on the user's machines.** Every app tells its own machine's host only
   (the phone's app its own host), as it happens and each with its own time: each chat opened, in front, left, each turn
   sent and ended (how long, model, effort, tokens), by the chat's host id and session id; a host keeps its own sessions'
-  turn ends too, samples its machine and its processes every 5 seconds, and keeps line profiles of what it's told to
-  profile (line_profiler, optional). All of it only while that host's telemetry is on, switched at run time from
+  turn ends too, samples its machine and its processes every 5 seconds, and, while its line profiling is switched on
+  too, keeps line profiles (line_profiler, optional) of what each process profiles: the developers' pick shipped with
+  the code (lineprofile.DEFAULTS), or what telemetry_set from any member of the mesh names in its place for that host;
+  no app asks the user to name functions. All of it only while that host's telemetry is on, switched at run time from
   Settings → Telemetry or telemetry_set. Any member reads any host's over a stretch (telemetry_read), so one machine
   pulls every host's and puts them together by time (baudelib/telemetry.py's gather); a chat's size is worked out
   from its transcript when asked (chat_size), never kept. No screen time or menu counts. Nothing is sent outside the
   mesh. The owner: "Once a minute is completely bonkers and quite useless", "Sreen time is a pretty useless metric,
   how is that going to help me make the app better (in isolation)", "Store chat activity yes with timestamps", "Yes
-  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26). Source:
-  `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
-  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}]`.
+  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26); and that which
+  functions are profiled is the developers' call, a default set overridable over the mesh (2026-11-27, paraphrased).
+  Source: `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}, {"issue": "BaudeInternal#285"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in
@@ -146,6 +170,35 @@ An entry or a part may carry:
   phone's measures are made as it's built. The owner asked for a way, from inside the app, for Meta to create, install
   and preview themes in Settings, as generic as it can be while staying fast (2026-11-24). Source:
   `[{"issue": "BaudeInternal#218"}]`.
+- **A theme is colours, a skin or a scene, each with the ones under it.** One model covers every theme
+  (schema/types/ThemeManifest.json), a folder on its host (themes/<name>/) or that folder zipped as one file
+  (<name>.baudetheme) to pass round, installed on a host as the rule above has it (theme_install), its kind its highest
+  layer:
+  - colours: tokens.json, the colours every app draws (the rule above);
+  - skin: colours, and how the desktop apps draw their own widgets: theme.css over theirs, or a GTK theme in place of
+    libadwaita's stylesheet (Windows XP's, Windows 95's: gtk/<name>/ in the theme, or one on the machine, taken as an
+    app starts), its corners and title bar probed as they are now (theming.py); the phone draws the colours;
+  - scene: a skin, and a space (scene.json, schema/types/Scene.json) every app draws, Baude's own things placed in it
+    as live widgets (chats with their state, hosts, Meta cards, windows: SceneObject.json), lit, with bloom. The
+    widgets in a scene are drawn with the theme's colours and skin, so a scene of Windows 95 panels is one theme.
+  What each app takes from a theme: every app its data (tokens.json, scene.json, its models, textures and fonts);
+  the desktop apps its theme.css and GTK theme too, and its code (desktop/*.py, given the scene's SceneAPI, and
+  shaders/*.glsl), only once its host's user has trusted that code as it is (theme_trust: its sha256; changed, it's
+  not run till it's trusted again, and the scene's drawn from its data alone). The phone never runs a theme's code.
+  Anyone on the mesh may trust a theme's code (theme_trust is taken from any of the mesh's apps and heads, as every
+  other request is): `{"said": "Anyone on the mesh", "rule": "Any member of the mesh may trust a theme's code on any
+  host; no app or host asks for more than its being in the mesh", "decided": "2026-11-26", "source": [{"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "368e4c39-2ac3-4d3f-8367-b69de411b295"}]}`.
+  The owner: "If both of these can be done, and they can be distributed as some kind of plugin, we can merge the
+  semantic "theme" framework. Ontologically we want this to meld with the work we did on the windows XP themes and
+  such too" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}]`.
+- **A scene's chat is the chat's own page.** A chat in a scene is drawn as the app's own chat page of that chat, the
+  widgets its window shows (its messages, tool cards, the box to write in and the status bar), live, differing from
+  the window's only by the scene's light and the panel's edge; a stand-in made of parts is drawn only where there's no
+  app to give the page (the sample's rig without one). The owner, of the Space Station scene: "Space station UI looked
+  100% different, quite concerning" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+  "message": "ef0e29ca-95e4-410d-8a14-fb11966725c7"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP
@@ -154,6 +207,21 @@ An entry or a part may carry:
   Agent MCP requirements are different to that of the wire (which can be as detailed as we want). They still are
   basically thin clients." (source: BaudeInternal#200; session b3845b21-55ac-4aab-a769-fb8517403c51, message
   868770b1-06c0-44a3-bdb9-c1851cf4b39a)
+- **A chat looks the same on every head.** What a host's chat shows that isn't its transcript (a sign-in card, a
+  permission prompt and whether it's still asking) is drawn from what its host keeps and says on the wire (ChatLogin and
+  login_state, an ask listed or not), never from what one head did or worked out itself, so this machine's Baude,
+  another machine's and the phone show the same widget, live or opened later. The owner found a chat's sign-in card
+  saying it was cancelled on the host's own machine while another machine showed Claude's real error, and asked that
+  the wire and the main chat keep widgets consistent across the heads viewing a chat (2026-11-26). Source:
+  `[{"issue": "BaudeInternal#247"}]`.
+- **An MCP tool is named "Server / Tool".** Wherever an app names a tool of an MCP server (mcp__<server>__<tool>):
+  its card, Meta's card for another server's tool, a ToolSearch's "select:" list, a permission prompt and its Always
+  allow, a denied note, a notification, it says "<Server> / <Tool>" ("Mesh / Tasks"), never the raw name or query. The
+  names come from what's structured: Baude's own servers' titles (their serverInfo.title and tools/list title,
+  baudelib/toolnames.py) and the servers' configured names Claude Code reports (system init's mcp_servers), which a
+  host keeps and says in its info's tool_names; the name split into words is only the fallback. The owner asked for
+  human-readable, namespaced MCP names such as "Mesh / Tool" in place of ToolSearch's raw select:mcp__mesh__tasks,
+  ideally from the JSON rather than split from underscores (2026-11-26). Source: `[{"issue": "BaudeInternal#257"}]`.
 - **A pull request is a pill.** Wherever an app draws a pull request (the Git page's list and log, a reply's or
   message's GitHub pull-request link or bare #12, Signal's links, Record's chat and notes), it's a pill: git's merge
   logo, a space, then the number, never a #, coloured by where it stands (green open, grey draft or closed, red changes
@@ -166,11 +234,17 @@ An entry or a part may carry:
   Copy and dots, a side question's dots and meter) is as tall as the chat's status line, and Clear isn't bold. The owner
   asked for Meta's box and the chat's to start on the same line (2026-11-12) and for side questions' to match them when
   maximised (2026-11-14). Source: `[{"issue": "BaudeInternal#50"}, {"issue": "BaudeInternal#85"}]`.
-- **A dropdown opens as the button goes down.** Every dropdown (a picker's button, a choice row, a host picker) opens
-  its list as the mouse button goes down on it; let go over a choice and that one's picked and the list closes, let go
-  outside and it closes, let go on the dropdown itself (a plain click) and the list stays open to pick from
-  (pickers.press_opens_dropdowns; a touch screen's tap is a plain click). The owner found dropdowns behaved unnaturally
-  and asked for open on press, close on release (2026-11-14). Source: `[{"issue": "BaudeInternal#74"}]`.
+- **A menu opens as the button goes down.** Every dropdown (a picker's button, a choice row, a host picker, ☰'s
+  carets) and every right-click menu (a sidebar row's, a card's, a chat's) opens as the mouse button goes down on it,
+  and stays open as the button comes up. Held, and let go over a choice (a menu's item, a list's row, a popover's
+  button) a quarter second or more after the press, that one's picked and it closes (sooner is a click, as a native
+  menu takes it, and picks nothing); let go on what was pressed or between choices and it stays open to pick from with
+  a click; let go outside it and it closes (pickers.press_opens_dropdowns; a touch screen's tap is a plain click). Nothing rebuilds what an open menu
+  hangs from: the sessions sidebar waits for a row's menu to close before it lists again. The owner found dropdowns
+  behaved unnaturally and asked for open on press, close on release (2026-11-14), then found right-click menus and the
+  new dropdowns jittered and closed as the button came up, and asked again that they show on the press over what's
+  pressed and go on the release over a choice (2026-11-26).
+  Source: `[{"issue": "BaudeInternal#74"}, {"issue": "BaudeInternal#273"}]`.
 - **A row opens by growing into its page.** Where a list's row opens a page in the side panel (a subagent, a process, a
   side question), the row's line grows into the page's header and its darker square grows to fill the panel, from
   wherever the row is scrolled to, and closes back the same way; never a slide. While it grows the row's hover highlight
@@ -201,3 +275,43 @@ An entry or a part may carry:
   own terms (the Agent tool, subagents) keep the word. The owner: "They are not \"Agents\" the y are \"Bots\" I have no
   idea what an \"Agent\" is" (2026-11-22). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
   "5d9296b7-3bd3-4521-ba9f-f69dbe09d930"}]`.
+- **What the hosts said is kept.** An app whose process or link the OS ends while it's put away (the phone; a web
+  version's tab) keeps on disk each host's sessions as last listed and the transcripts of the chats last open, and
+  shows them at once when it comes back or starts again, reading on from where the kept part ends once its host is
+  reached; a turn that ended meanwhile is read in, and what waited in a queue is sent then. The owner asked the phone to
+  be designed for Android closing its connections, with more caching (2026-11-26). Source: `[{"issue":
+  "BaudeInternal#243"}]`.
+- **Missing programs are the dependency store's to say.** Before any app or host runs a program that may not be
+  installed (claude, codex, gh, git, kubectl, Docker, …), it asks baudelib/deps (schema/deps, what Settings →
+  Dependencies lists) whether it's there; where it isn't, the feature shows what the store says of it (its Missing
+  state, its Dependencies row, or the same in a line: "Codex CLI isn't installed: npm install -g @openai/codex"),
+  never the run's OS error ("No such file or directory"). The owner found Subscriptions showing that raw error while
+  Dependencies already knew codex wasn't installed (2026-11-26). Source: `[{"issue": "BaudeInternal#234"}]`.
+- **A Bot picks the subscription of what it starts.** Every way a Bot (or Meta) starts a chat of its own (the mesh's
+  start_subagent, a task script's agent() and subagents.start) takes the subscription it runs on (account: a Claude or
+  Codex account of that host's, by its id or name, or the CLI's own sign-in) in place of the default, and the same
+  callers can list each host's subscriptions (the mesh's subscriptions, the SDK's subscriptions()) with whether each is
+  the default or disabled and the models it runs; a disabled one is refused as its chats are. The owner asked that the
+  Bots' spawn API can override the provider and look at the providers available (2026-11-27). Source: `[{"issue":
+  "BaudeInternal#300"}]`.
+- **A text row stays put while it's typed in.** A page that refreshes or takes the host's answer (Settings →
+  Telemetry every few seconds, Dependencies' Deciders as one's added) changes its other rows and groups in place: it
+  never takes out and puts back the text row being typed in or the group holding it, so the row keeps its focus, its
+  caret and what's typed, and the page stays where it's scrolled to. The owner found a text change at the foot of
+  Settings → Telemetry jumping the page back to its top (2026-11-27). Source: `[{"issue": "BaudeInternal#286"}]`.
+- **Telemetry names the UI by this spec.** The owner's goals for telemetry: "measure how much time is spent in each
+  part of the codebase (for python with line_profiler); measure the raw number of invocations and a trivial index of
+  the invocations that doesn't require searching with a model; measure the number of times something is executed;
+  record the errors that happen during program execution." Every app names what the user does and what's on screen
+  by this spec's entity and part names (an entity is the nearest widget whose class an entry's `code` names; a part
+  is the one whose copy says what the widget shows), so the spec is the index: an error's screen and part, its
+  breadcrumbs and (with telemetry's counters) every count are keyed `Entity.kind` and part name, never a widget's own
+  text. A new entry or part names its code and copy so it's found. The owner: "Yep, unifying schema/ui and telemetry
+  is a pretty good idea as it points to homogenous UI ontology" (owner, 2026-11-27 session). Source:
+  `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"},
+  {"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"}]`.
+- **Every telemetry row says the code that made it.** Every event, sample, profile and error a host keeps carries the
+  commit (its first 12 characters) and wire version of the process that made it, so what changed between versions
+  can be told apart without going by times alone. The coordinator's plan, which the owner approved ("You can build
+  this", owner, 2026-11-27 session). Source: `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message":
+  "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"}]`.

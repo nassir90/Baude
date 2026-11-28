@@ -7,6 +7,7 @@ import shutil
 import weakref
 import time
 
+from baudelib import providers  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from lookup import REF_KINDS, ref_date
 
@@ -33,7 +34,7 @@ from panels import natural_height  # noqa: E402,F401
 from pickers import TreeList  # noqa: E402,F401
 import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
 import browserpane  # noqa: E402  (a Bot's browser, the side panel's Browser page: beside this file)
-import routinespage  # noqa: E402  (a Bot's routines, the side panel's Routines page: beside this file)
+import taskspage  # noqa: E402  (a Bot's tasks, the side panel's Tasks page: beside this file)
 from codeview import FilesPage  # noqa: E402,F401
 from gitview import GitPage  # noqa: E402,F401
 
@@ -80,11 +81,11 @@ class SidePanel(Gtk.Box):
         self.browser_page = self.stack.add_titled(self.browser, "browser", browserpane.PAGE)
         self.browser_page.set_icon_name("web-browser-symbolic")
         self.browser_page.set_visible(False)
-        # a Bot's routines (routinespage.RoutinesPage): work it's given on a schedule, while the open chat's a Bot
-        self.routines = routinespage.RoutinesPage(win)
-        self.routines_page = self.stack.add_titled(self.routines, "routines", routinespage.PAGE)
-        self.routines_page.set_icon_name("alarm-symbolic")
-        self.routines_page.set_visible(False)
+        # a Bot's tasks (taskspage.TasksPage): scripts its host runs, by hand or as triggers fire, while it's a Bot
+        self.tasks = taskspage.TasksPage(win)
+        self.tasks_page = self.stack.add_titled(self.tasks, "tasks", taskspage.PAGE)
+        self.tasks_page.set_icon_name("alarm-symbolic")
+        self.tasks_page.set_visible(False)
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
@@ -409,12 +410,12 @@ class SidePanel(Gtk.Box):
     def bot_changed(self, info):
         """The open chat (info: the sidebar's, or None) a Bot or not: its Memory page shown, and read, or hidden."""
         bot = bool(info and info.get("bot"))
-        if not bot and self.stack.get_visible_child_name() in ("memory", "browser", "routines"):
+        if not bot and self.stack.get_visible_child_name() in ("memory", "browser", "tasks"):
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
         self.browser_page.set_visible(bot)
-        self.routines_page.set_visible(bot)
-        self.routines.show(info)
+        self.tasks_page.set_visible(bot)
+        self.tasks.show(info)
         self.browser.show(info)
         self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 
@@ -713,7 +714,7 @@ class SignalPage(panels.ExpandStack):
         options = Gtk.Box(spacing=6)
         lsp = load_settings().get("signal_lsp")  # (unanswered, servers already installed are used: nothing to fetch)
         for attr, label, active, tip, fn in (
-                ("sonnet", (load_settings().get("signal_model") or "sonnet").capitalize(),
+                ("sonnet", providers.model_name(load_settings().get("signal_model") or "sonnet"),
                  bool(load_settings().get("signal_reader", True)),
                  wording.say("signal.reader_tip"),
                  self.set_sonnet),
@@ -889,9 +890,10 @@ class SignalPage(panels.ExpandStack):
     def show_reader(self, ref):
         """The reader's chat, the lines it's added since it was last drawn (kept at the bottom if it was there)."""
         chat, box = ref.reader_chat, self.reader_box
-        name = ref.agent.model.capitalize() if ref.agent is not None else "Reader"
+        name = providers.model_name(ref.agent.model) if ref.agent is not None else "Reader"
         self.reader_row.set_title(name)
         self.reader_title.set_text(name)
+        self.reader_title.set_tooltip_text(ref.agent.model if ref.agent is not None else None)
         drawn = self.reader_shown
         if drawn is None or drawn[0] is not chat or drawn[1] > len(chat) or \
                 (drawn[1] and chat[drawn[1] - 1][0] != drawn[2]):  # (another chat, or older lines dropped)

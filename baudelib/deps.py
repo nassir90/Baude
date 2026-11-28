@@ -109,6 +109,23 @@ def _ran(argv):
     return ok
 
 
+def _importable(module):
+    """Can this Python import module, as it would if started now? Not found, it's looked for again with what
+    installing it since may have changed: the user's site-packages (pip --user's) put on sys.path if it's come since
+    this started, and the import system's caches of folders dropped."""
+    import importlib
+    import importlib.util
+    if importlib.util.find_spec(module) is not None:
+        return True
+    import site
+    if site.ENABLE_USER_SITE:
+        user = site.getusersitepackages()
+        if os.path.isdir(user) and user not in sys.path:
+            site.addsitedir(user)
+    importlib.invalidate_caches()
+    return importlib.util.find_spec(module) is not None
+
+
 def _found(way):
     """Does a way find it: True, False, or a probe's count (0 is found: Ollama running with no models)."""
     if "env" in way or "which" in way or "glob" in way:
@@ -122,8 +139,7 @@ def _found(way):
         except (ImportError, AttributeError):
             return False
     if "python" in way:
-        import importlib.util
-        return importlib.util.find_spec(way["python"]) is not None
+        return _importable(way["python"])
     if "run" in way:
         return _ran(way["run"])
     return False
@@ -232,8 +248,15 @@ def missing(key, here=None):
     return None if got["present"] else got
 
 
+def need(key, feature):
+    """Missing (feature without it) raised if it isn't here: looked for before a program's run, so what's said is
+    this, not the run's OSError."""
+    if (dep := missing(key)) is not None:
+        raise Missing(dep, feature)
+
+
 # (Settings → Dependencies' groups, in its order: what needs them)
-GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.database_schemas", "deps.multiplex",
+GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.docker", "window.database_schemas", "deps.multiplex",
           "mesh_versions.emission", "side_panel.signal", "telemetry.title")
 
 

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of Baude's things as a scene is given it, to place and to draw by: a chat, a host, a Meta card, a window. Every app gives a scene the same ones, from what its hosts say.",
+  "properties": {
+    "kind": {
+      "enum": [
+        "chat",
+        "host",
+        "meta_card",
+        "window"
+      ],
+      "description": "What it is."
+    },
+    "id": {
+      "type": "string",
+      "description": "Its id: a chat's host/session, a host's id, a card's, a window's."
+    },
+    "name": {
+      "type": "string",
+      "description": "What it's called, as every app shows it (a Bot's name; a chat's title)."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its host's id (a chat's, a card's, a window's)."
+    },
+    "state": {
+      "type": "string",
+      "description": "Where it stands: a chat's working, waiting, idle or stopped (schema/types/Session.json); a host's up or down; a card's done, running or asking."
+    },
+    "bot": {
+      "type": "boolean",
+      "description": "Whether a chat is a Bot."
+    },
+    "used": {
+      "type": "number",
+      "description": "When it was last used, Unix seconds (a chat's last message)."
+    },
+    "unread": {
+      "type": "boolean",
+      "description": "Whether a chat has a reply not looked at."
+    }
+  },
+  "required": [
+    "kind",
+    "id"
+  ],
+  "additionalProperties": false
+}

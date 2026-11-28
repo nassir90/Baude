@@ -457,7 +457,7 @@ class SpellCheck:
             a = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             a.connect("activate", lambda _a, v, fn=fn: fn(*json.loads(v.get_string())))
             acts.add_action(a)
-        view.insert_action_group("spell", acts)
+        widgets.insert_actions(view, "spell", acts)
         self.menu = None
         view.connect("destroy", lambda *_: self.menu is not None and self.menu.unparent())
         worker()

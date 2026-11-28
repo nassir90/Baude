@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "seen's answer.",
+  "properties": {
+    "op": {
+      "const": "seen_set",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "seen": {
+      "anyOf": [{"$ref": "TurnEnd.json"}, {"type": "null"}],
+      "description": "The last turn's end seen now (null: none yet)."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

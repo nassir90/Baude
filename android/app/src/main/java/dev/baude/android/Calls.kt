@@ -24,6 +24,10 @@ class Call(val id: String, val name: String, input: JSONObject = JSONObject()) {
     var subagent by mutableStateOf(false)
     var inputOpen by mutableStateOf(false)
     var outputOpen by mutableStateOf(false)
+    /** An answer_task call's, once it's taken (toolcards.answer_result): {task, run, values or text}. */
+    var answer by mutableStateOf<JSONObject?>(null)
+    /** Asked to move to the background (moveToBackground): its Background hidden meanwhile. */
+    var moving by mutableStateOf(false)
     private var report: String? = null
     private var taskId: String? = null
     private var taskType: String? = null
@@ -37,6 +41,8 @@ class Call(val id: String, val name: String, input: JSONObject = JSONObject()) {
                 report = text.trim()
                 outputs.add(Out(text, markdown = true))
             }
+        } else if (name == ANSWER_TASK && !isError && answerResult(text)?.also { answer = it } != null) {
+            // (it went through: the card says what was answered, no Output to open)
         } else if (text.isNotEmpty() && !saidNothing(base, text, isError)) {
             outputs.add(Out(cut(text), numbered = base == "Read" && input.optString("file_path").isNotBlank()))
         }
@@ -86,7 +92,10 @@ class ChatCalls {
     val autoOpened = HashMap<String, String>() // (a group: what it was last opened by itself for)
 }
 
-private val BACKGROUND_COMMAND = Regex("""Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
+private val BACKGROUND_COMMAND = Regex("""Command (?:running in background|was manually backgrounded by user) with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
+
+/** What Claude Code moves to the background as it runs (toolcards.BACKGROUNDABLE). */
+val BACKGROUNDABLE = setOf("Bash", "PowerShell", "Agent", "Task")
 private val AGENT_ID = Regex("""agentId: (\w+)""")
 
 private fun cut(text: String) = if (text.length < 200_000) text
@@ -100,6 +109,32 @@ fun saidNothing(base: String, text: String, isError: Boolean): Boolean {
     if (isError) return false
     val t = text.trim()
     return base in setOf("Edit", "MultiEdit", "Write") && FILE_WRITTEN.matches(t) || base == "Skill" && SKILL_LAUNCHED.matches(t)
+}
+
+/** A Bot's answer to its task's ask (toolcards.ANSWER_TASK): drawn as "Answered <task>". */
+const val ANSWER_TASK = "mcp__mesh__answer_task"
+
+/** An answer_task call's answer in a line of at most 120 characters (toolcards.answer_line): each field = value (its
+ * first line), · between (text as it is, the rest as JSON), or its text's first line. */
+fun answerLine(input: JSONObject): String {
+    fun first(v: String) = v.trim().lines().firstOrNull().orEmpty().take(120)
+    val fields = input.optJSONObject("answer") ?: (input.opt("answer") as? String)?.let { runCatching { JSONObject(it) }.getOrNull() }
+    if (fields != null) return first(fields.keys().asSequence().joinToString(" · ") { k ->
+        val v = fields.opt(k)
+        "$k = ${first(if (v is String) v else JSONObject.wrap(v).let { w -> if (w == null || w === JSONObject.NULL) "null" else w.toString() })}"
+    })
+    return first((input.opt("text") as? String).orEmpty())
+}
+
+/** What an answer_task call came back with (toolcards.answer_result; Codex's inside the MCP result it gives), or
+ * null. */
+fun answerResult(text: String): JSONObject? {
+    var got = runCatching { JSONObject(text) }.getOrNull() ?: return null
+    got.optJSONArray("content")?.let { parts ->
+        got = runCatching { JSONObject((0 until parts.length()).joinToString("") { parts.optJSONObject(it)?.optString("text").orEmpty() }) }
+            .getOrNull() ?: return null
+    }
+    return if (got.opt("task") is String) got else null
 }
 
 /** The mesh's tools that start a subagent on a host or message a chat there, which Baude draws as cards of their own. */
@@ -116,7 +151,9 @@ fun summary(name: String, input: JSONObject?): String {
             .joinToString(" · ") { q -> "${(q.opt("header") as? String)?.ifEmpty { null } ?: q.optString("question")}: ${answers.opt(q.optString("question"))}" }
         return first(qs.optJSONObject(0)!!.optString("question")) + if (qs.length() > 1) " (+${qs.length() - 1} more)" else ""
     }
+    if (name == ANSWER_TASK) return answerLine(input)
     fun text(k: String) = input.opt(k) as? String
+    if (name == "ToolSearch") McpNames.selected(text("query").orEmpty())?.let { picked -> return picked.joinToString(", ") { toolTitle(it) } }
     if (text("command") != null && text("description").orEmpty().isBlank()) return ""
     for (k in listOf("description", "command", "file_path", "notebook_path", "pattern", "url", "query", "prompt", "path", "skill"))
         text(k)?.takeIf { it.isNotBlank() }?.let { return first(it) }

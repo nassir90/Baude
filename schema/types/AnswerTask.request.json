@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An ask of one of a Bot's tasks' runs (task_ask) answered: the Bot's answer_task tool's, or anyone's who may manage the Bot. Taken only for an ask of that run that's waiting on that Bot; the run goes on at once. Refused, with what's wrong, if it doesn't fit the ask's form.",
+  "properties": {
+    "op": {
+      "const": "answer_task",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The Bot's session id: the one the ask's waiting on."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id."
+    },
+    "answer": {
+      "type": "object",
+      "description": "An ask with a form: its fields' values, by name."
+    },
+    "text": {
+      "type": "string",
+      "description": "An ask with no form: the answer."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "run"
+  ],
+  "additionalProperties": false
+}

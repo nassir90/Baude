@@ -1,5 +1,5 @@
 {
-  "description": "The main area's tab bar and the pages open in its tabs: in Baude the chat (pinned, first, never closed) plus code files and the Ongoing Feedback page; in Record its chats, notes, code files, deleted pages and Ongoing Feedback. This is how code and Feedback pages open beside the chat. The Kubernetes and Database Schemas views are not tabs: they are full-window views over everything (see Kubernetes, DatabaseSchemas).",
+  "description": "The main area's tab bar and the pages open in its tabs: in Baude the chat (pinned, first, never closed) plus code files and the Ongoing Feedback page; in Record its chats, notes, code files, deleted pages and Ongoing Feedback. This is how code and Feedback pages open beside the chat. The Kubernetes and Databases views are not tabs: they are full-window views over everything (see Kubernetes, DatabaseSchemas).",
   "apps": [
     "baude",
     "record"

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene (a theme's scene.json): a space every app draws, with Baude's things placed in it as live widgets, real and usable as they are in a window. Distances are metres; angles degrees; +y is up.",
+  "properties": {
+    "camera": {
+      "$ref": "SceneCamera.json",
+      "description": "Where it's seen from."
+    },
+    "background": {
+      "type": "string",
+      "description": "What's behind everything (#rrggbb)."
+    },
+    "ambient": {
+      "type": "string",
+      "description": "Light that reaches everything evenly (#rrggbb)."
+    },
+    "lights": {
+      "type": "array",
+      "items": {
+        "$ref": "SceneLight.json"
+      },
+      "description": "Its lights, at most 8."
+    },
+    "bloom": {
+      "$ref": "SceneBloom.json",
+      "description": "A glow round what's brighter than white: left out for none."
+    },
+    "materials": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "SceneMaterial.json"
+      },
+      "description": "Its materials, by name."
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "SceneNode.json"
+      },
+      "description": "What's in it, in order."
+    }
+  },
+  "required": [
+    "camera",
+    "nodes"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A running script's line in its run's log (on the host's own socket, with its run's token).",
+  "properties": {
+    "op": {
+      "const": "task_report",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+      "type": "string",
+      "description": "Its run's id (BAUDE_TASK_RUN)."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    },
+    "say": {
+      "type": "string",
+      "description": "The line."
+    }
+  },
+  "required": [
+    "op",
+    "run",
+    "token",
+    "say"
+  ],
+  "additionalProperties": false
+}

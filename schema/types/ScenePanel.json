@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A panel: one of Baude's things drawn as a live widget (real, usable, as in a window) on a flat face, px by px, the face size metres wide and high.",
+  "properties": {
+    "show": {
+      "enum": [
+        "chat",
+        "chat_row",
+        "host",
+        "meta_card",
+        "window"
+      ],
+      "description": "What's drawn: a chat (its page, the transcript and its box), a chat's row (as the sidebar has it), a host (its name, state and chats), a Meta card, or a whole window as it is."
+    },
+    "of": {
+      "type": "string",
+      "description": "Which thing: its id (a chat's host/session, a host's id), or first: the first slot's thing. Left out in slots."
+    },
+    "px": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "The widget's size, px (2 numbers)."
+    },
+    "size": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "The face's size, metres (2 numbers)."
+    }
+  },
+  "required": [
+    "show"
+  ],
+  "additionalProperties": false
+}

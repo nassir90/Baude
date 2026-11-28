@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A restart of the host process it's keeping till nothing blocks it: what asked for it, whether a head's holding it, and what it waits for. Every head shows the same.",
+  "properties": {
+    "by": {
+      "enum": ["head", "update"],
+      "description": "What asked for it: a head (Restart Daemon), or its own updater (a newer version)."
+    },
+    "to": {
+      "type": "string",
+      "description": "The commit it'll restart onto, when its updater asked."
+    },
+    "paused": {
+      "type": "boolean",
+      "description": "A head is showing what it waits for: it won't restart till that head's let go."
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "$ref": "RestartBlocker.json"
+      },
+      "description": "What it waits for, oldest session first."
+    }
+  },
+  "required": ["by", "paused", "blockers"],
+  "additionalProperties": false
+}

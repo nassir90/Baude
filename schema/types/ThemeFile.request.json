@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a theme's files (an asset, scene.json, a shader): the phone's, to draw a scene; another host's, to pass a theme on.",
+  "properties": {
+    "op": {
+      "const": "theme_file",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "name": {
+      "type": "string",
+      "description": "The theme's name."
+    },
+    "path": {
+      "type": "string",
+      "description": "The file's path in its folder."
+    }
+  },
+  "required": [
+    "op",
+    "name",
+    "path"
+  ],
+  "additionalProperties": false
+}

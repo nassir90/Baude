@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An ask's answer, waited for: a task's script's (run, token), till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll); a chat's own tools' (session), as long, 600 seconds at most. An answer a chat's model gets so isn't sent it as a message as well.",
+  "properties": {
+    "op": {
+      "const": "inbox_wait",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "session": {
+      "type": "string",
+      "description": "A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id (BAUDE_TASK_RUN): a task's script's."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    },
+    "timeout": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "How long to wait, in seconds (0: not at all; none: till it's answered)."
+    }
+  },
+  "required": [
+    "op",
+    "ask"
+  ],
+  "additionalProperties": false
+}

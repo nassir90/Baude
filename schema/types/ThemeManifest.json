@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme's manifest.json: what the theme is, which of its layers it has and what each app may load from it. A theme is a folder (its host's themes/<name>/), or that folder zipped as one file (<name>.baudetheme) to pass round. A folder with no manifest (theme.css, tokens.json) is a theme of kind colours or skin, as its files say.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name, its folder's: 1 to 40 letters, digits, spaces, - or _."
+    },
+    "kind": {
+      "enum": [
+        "colours",
+        "skin",
+        "scene"
+      ],
+      "description": "Its highest layer: colours (tokens.json: every app's colours), skin (colours, and the desktop apps' look over theirs: theme.css, a GTK theme), scene (a skin, and a space Baude's things are placed in: scene.json). Each layer has the ones under it, which the widgets put in a scene are drawn with."
+    },
+    "description": {
+      "type": "string",
+      "description": "One line saying what it is, for Settings → Theme and Meta."
+    },
+    "tokens": {
+      "type": "boolean",
+      "description": "Whether it has tokens.json (ThemeFiles' tokens): colours over schema/tokens', light and dark, for every app."
+    },
+    "skin": {
+      "$ref": "ThemeSkin.json",
+      "description": "Its skin, the desktop apps': left out for none."
+    },
+    "scene": {
+      "$ref": "ThemeScene.json",
+      "description": "Its scene: left out for none."
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each file a scene or a skin uses, by its path in the folder: models/ (.obj), textures/ (.png, .jpg, .webp), fonts/ (.ttf, .otf), shaders/ (.glsl, the desktop's). Every app may read them; none is run."
+    }
+  },
+  "required": [
+    "name",
+    "kind"
+  ],
+  "additionalProperties": false
+}

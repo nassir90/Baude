@@ -12,11 +12,13 @@ import threading
 import time
 import urllib.parse
 from baudelib.claude import claude_env, claude_exe, MODELS, spent_since
+from baudelib import deps  # noqa: E402  (what a program run here needs: claude for /logout)
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
 from baudelib.transcripts import find_session, history_items, session_file
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
+from baudelib import providers as providerslib  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from baudelib.models import model_program  # noqa: E402,F401
 
@@ -29,6 +31,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: Record's too)
 from livefeed import LIVE_SECONDS  # noqa: E402
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
+import meshui  # noqa: E402  (a daemon's pending restart and what it waits for: Record's too)
 import metalook  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
@@ -37,9 +40,9 @@ from widgets import load_settings, pretty_path, save_settings, toast  # noqa: E4
 from markdownview import MarkdownView, sel_label  # noqa: E402,F401
 from startup import trace  # noqa: E402
 from toolcards import (  # noqa: E402
-    QuestionForm, StatusSlot, ToolCard, ended_by_stop, summarize_tool, tool_display, tool_input_view,
+    QuestionForm, StatusSlot, ToolCard, api_error_label, ended_by_stop, summarize_tool, tool_label, tool_input_view,
 )
-from chatinput import LoginCard, _AUTH_ESCAPES  # noqa: E402
+from chatinput import LoginCard, _AUTH_ESCAPES, needs_login  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, _HOST_APART, _LOCAL_SERVER, cached_session_info, chat_group, chat_groups, host_apart,
     host_key, is_desktop, local_host, made_groups, main_folder, network, on_main, remote_info, remote_name,
@@ -49,6 +52,57 @@ from refpopovers import chat_checkout  # noqa: E402
 
 
 MESH_CHAT_TOOLS = ("mcp__mesh__start_subagent", "mcp__mesh__message_chat")  # (drawn as MeshCard)
+
+
+def folder_completion(typed, part, names):
+    """Tab in a folder's path, as GTK's file chooser and a shell complete: the path typed, part (its last part when
+    that isn't a folder, else None) and the folders listed for it (those part begins, or those in it). One: it, with a
+    / to go on into it; several: as much as all of them share; nothing more to put: None."""
+    if part is None:
+        if not typed.endswith("/"):
+            return typed + "/"
+        typed, part = typed, ""
+    elif typed.endswith("/") or not typed.endswith(part):
+        return None
+    if not names:
+        return None
+    if len(names) == 1:
+        return typed[:len(typed) - len(part)] + names[0] + "/"
+    shared = os.path.commonprefix([n.casefold() for n in names])
+    if len(shared) <= len(part):
+        return None
+    return typed[:len(typed) - len(part)] + names[0][:len(shared)]
+
+
+def folder_keys(keyval, held, complete, pick, picked, into, up, home, hidden):
+    """A folder's path field's keys, as file choosers have them: Tab completes it (GTK, shells); Up and Down pick in
+    the list under it and Enter goes into the one picked (GTK's location bar, Finder's Go to Folder); Alt+Up or Cmd+Up
+    goes to the folder above (Nautilus, Dolphin, GTK; Finder), Alt+Down or Cmd+Down into the one picked or the only
+    one; Alt+Home or Cmd+Shift+H home; Ctrl+H, Alt+. or Cmd+Shift+. shows or hides hidden folders. True: taken."""
+    mods = held & (Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                   Gdk.ModifierType.META_MASK)
+    shift, ctrl = Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.CONTROL_MASK
+    alt, cmd = Gdk.ModifierType.ALT_MASK, Gdk.ModifierType.META_MASK
+    did = None
+    if keyval == Gdk.KEY_Tab and not mods:
+        did = complete
+    elif keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and not mods:
+        did = lambda: pick(-1 if keyval == Gdk.KEY_Up else 1)  # noqa: E731
+    elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not mods and picked():
+        did = into
+    elif keyval == Gdk.KEY_Up and mods in (alt, cmd):
+        did = up
+    elif keyval == Gdk.KEY_Down and mods in (alt, cmd):
+        did = into
+    elif keyval == Gdk.KEY_Home and mods == alt or keyval in (Gdk.KEY_h, Gdk.KEY_H) and mods == cmd | shift:
+        did = home
+    elif keyval in (Gdk.KEY_h, Gdk.KEY_H) and mods == ctrl or keyval == Gdk.KEY_period and mods == alt or \
+            keyval in (Gdk.KEY_period, Gdk.KEY_greater) and mods == cmd | shift:
+        did = hidden
+    if did is None:
+        return False
+    did()
+    return True
 
 
 class MeshCard(ToolCard):
@@ -150,9 +204,9 @@ class MeshCard(ToolCard):
         if self.base == "start_subagent":
             title = (listed or {}).get("title") or self.task_title() or "Subagent"
             model = self.input.get("model") or (listed or {}).get("model")
-            if model and r is not None:
-                model = next((m.get("displayName") for m in r.info.get("models") or []
-                              if isinstance(m, dict) and m.get("value") == model and m.get("displayName")), model)
+            slug = providerslib.model_slug(model, r.info.get("models") or [] if r is not None else []) if model else None
+            if model:
+                model = providerslib.model_name(model, r.info.get("models") or [] if r is not None else [])
             bits = [f"Subagent on {host}" if host else "Subagent"] + ([model] if model else [])
         else:
             bot = ((listed or {}).get("bot") or {}).get("name")
@@ -177,6 +231,7 @@ class MeshCard(ToolCard):
             bits.append("its host went before it answered")
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         self.sub.set_text(" · ".join(bits))
+        self.sub.set_tooltip_text(slug if self.base == "start_subagent" else None)
         self.head_tip(listed, host)
 
     def head_tip(self, listed, host):
@@ -289,6 +344,7 @@ class WindowRemote:
             MarkdownView.base_dir = cwd  # (its relative links are its server's: not one of this machine's files)
         self.reset_stream_state()
         self.session_id, self.remote, self.desktop_chat = info["id"], r, False
+        self.shown_rotated = (r.sessions.get(info["id"]) or {}).get("rotated")  # (a Bot rotated since: on_network)
         path = r.mirror(info["id"])
         if not os.path.exists(path) and not r.local:  # (one on this machine is read where it is, once it's there)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -301,6 +357,7 @@ class WindowRemote:
         self.view_session(path)
         self.show_title(info.get("title"))
         self.show_held()
+        self.show_listed_context(again=True)
         self.default_mode()
         if r.state == "alive" and (r.sessions.get(info["id"]) or {}).get("state") in ("working", "waiting") \
                 and not self.live_elsewhere():  # (at a turn: live, as it goes on, Stop and all; attached once, so
@@ -343,6 +400,8 @@ class WindowRemote:
             self.remote_syncing.pop(key, None)
             for fn in job["then"]:
                 fn()
+            if self.remote is r and self.session_id == sid:
+                self.tell_seen()  # (fetched up to its turn's end, in front of you: seen)
         threading.Thread(target=work, daemon=True).start()
 
     def on_network(self):
@@ -368,7 +427,10 @@ class WindowRemote:
         # one's gone; one in history not shown yet, kept)
         for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
+        self.sender_waits()  # (a task's ask its run waits on: said on its from line, while it waits)
+        self.refresh_inbox()  # (the Inbox: its count, its tab and each ask's, as the hosts say them)
         self.show_held()
+        self.show_listed_context()
         if self.remote is None and self.proc is not None and not self.busy \
                 and (self.desktop_chat or is_desktop(self.session_id)) and self.host_took_up():
             self.restart_proc()  # (a Desktop chat this machine's host took up: its own claude let go, written in
@@ -379,6 +441,13 @@ class WindowRemote:
         if (git := getattr(getattr(self, "panel", None), "git_page", None)) is not None:
             git.show_autofix()  # (Auto-fix turned on or off elsewhere: its agent, the phone)
         listed = self.remote.sessions.get(self.session_id)
+        if listed and not getattr(self, "rotating", False) and \
+                (listed.get("rotated") or 0) > (getattr(self, "shown_rotated", None) or 0):  # (the Bot rotated
+            self.shown_rotated = listed.get("rotated")                                 # since: its new conversation
+            # shown, not for a listing older than the one shown)
+            info = remote_info({**listed, "server": self.remote})
+            GLib.idle_add(lambda: self.session_id == info["id"] and self.open_remote(info) and False)
+            return
         if listed and (listed.get("title") or getattr(self, "session_title", None)) and \
                 (self.bot_name() or listed.get("title") or self.session_title) != self.title_label.get_text():
             self.show_title(listed.get("title") or self.session_title)  # (a new title, or made a Bot or renamed one)
@@ -389,6 +458,8 @@ class WindowRemote:
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):
             self.sync_remote(self.remote, self.session_id)
+        if listed and self.proc is not None and getattr(self.proc, "session", None) == self.session_id:
+            self.withdraw_asks({a.get("request_id") for a in listed.get("asks") or []})
         if listed and self.missing_session == self.session_id:  # (its host has it again: attached again, below)
             self.missing_session = self.missing_reason = None
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
@@ -399,6 +470,9 @@ class WindowRemote:
         self.update_session_state()
         if bool(self.cut_state()) != (getattr(self, "cut_row", None) is not None):
             self.show_cut(self.cut_state())
+        if self.resume_state() != getattr(self, "resume_shown", None):
+            self.show_resume(self.resume_state())
+        self.tell_seen()  # (its turn's end listed, in front of you: seen)
 
     def remote_view(self):
         """A network session with nothing of its server's attached (gone, or not there): watched from its mirror again,
@@ -454,36 +528,49 @@ class WindowRemote:
         """Open folder… with another host picked: "Open a folder on <host>", a folder there typed or browsed, from the
         one last used there (else its home). Under the path, the folders the host lists (list_dir) as it's typed: those
         in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
-        clicked is put in the path. Open: a blank chat there, in it (new_session_on)."""
+        clicked is gone into. Open: a blank chat there, in it (new_session_on). Keys as file choosers have them
+        (folder_keys): Tab completes, Up and Down pick in the list, Alt+Up goes up, Ctrl+H shows hidden folders."""
         home = r.info.get("home") or "/"
         entry = Gtk.Entry(text=(load_settings().get("remote_folders") or {}).get(r.key) or home, activates_default=True,
                           width_chars=44)
-        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         rows.add_css_class("boxed-list")
-        rows.connect("row-activated", lambda _l, row: (entry.set_text(row.path), entry.grab_focus(),
-                                                       entry.set_position(-1)))
         scroll = Gtk.ScrolledWindow(child=rows, hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=240,
                                     max_content_height=240)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.append(entry)
         box.append(scroll)
         asked = [0]
+        state = {"part": None, "names": [], "listed": None, "hidden": False, "then": None}  # (what's listed for the
+        # path as typed: its last part when that isn't a folder, the names; listed: the ask it's for; then: a key's
+        # doing, waiting for it)
 
         def full():  # (the path typed, absolute: ~ the host's home)
             t = entry.get_text().strip() or "~"
             return home.rstrip("/") + t[1:] if t == "~" or t.startswith("~/") else t
 
-        def show(folder, names):
+        def put(path):  # (a folder gone into: its path, with a / to list what's in it)
+            entry.set_text(path.rstrip("/") + "/" if path.rstrip("/") else "/")
+            entry.grab_focus_without_selecting()
+            entry.set_position(-1)
+        rows.connect("row-activated", lambda _l, row: put(row.path))
+
+        def show(folder, names, part=None):
             while (row := rows.get_row_at_index(0)) is not None:
                 rows.remove(row)
+            state.update(part=part, names=names, listed=asked[0])
             above = [("..", os.path.dirname(folder.rstrip("/")) or "/")] if folder.rstrip("/") else []
             for name, path in above + [(n, os.path.join(folder, n)) for n in names]:
                 line = Gtk.Box(spacing=8, margin_start=10, margin_end=10, margin_top=6, margin_bottom=6)
                 line.append(Gtk.Image.new_from_icon_name("go-up-symbolic" if name == ".." else "folder-symbolic"))
                 line.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
                 row = Gtk.ListBoxRow(child=line)
-                row.path = path
+                row.path, row.up = path, name == ".."
                 rows.append(row)
+            rows.unselect_all()
+            if (then := state["then"]) is not None:
+                state["then"] = None
+                then()
 
         def look(*_):
             asked[0] += 1
@@ -497,14 +584,73 @@ class WindowRemote:
                 if reply.get("op") == "dir" and not reply.get("error"):
                     show(folder, [e["name"] for e in reply.get("entries") or [] if e.get("dir") and
                                   e["name"].casefold().startswith((part or "").casefold()) and
-                                  (not e["name"].startswith(".") or (part or "").startswith("."))])
+                                  (not e["name"].startswith(".") or (part or "").startswith(".") or state["hidden"])],
+                         part)
                 elif part is None:  # (not a folder: its parent's, that its last part begins)
                     parent, part = os.path.split(t.rstrip("/"))
                     r.request({"op": "list_dir", "path": parent or "/"}, lambda rep: got(rep, parent or "/", part))
                 else:
-                    show(folder, [])
+                    show(folder, [], part)
             r.request({"op": "list_dir", "path": t}, lambda rep: got(rep, t, None))
         entry.connect("changed", look)
+
+        def listed(then):  # (a key's doing, once the folders for the path as typed are listed)
+            if state["listed"] == asked[0]:
+                return then()
+            state["then"] = then
+
+        def complete():  # (Tab: the one folder the path begins, else as much as all of them share; none, a bell)
+            t = entry.get_text()
+            done = folder_completion(t, state["part"], state["names"]) if full().startswith("/") else None
+            if done is None:
+                entry.error_bell()
+            else:
+                entry.set_text(done)
+                entry.set_position(-1)
+
+        def pick(step):  # (Up and Down: a folder in the list picked, the path still typed in)
+            row = rows.get_selected_row()
+            if row is not None:
+                row = rows.get_row_at_index(max(row.get_index() + step, 0))
+            elif step < 0:
+                row = rows.get_last_child()
+            else:  # (the first folder, past ..)
+                first = rows.get_row_at_index(0)
+                row = rows.get_row_at_index(1) if first is not None and first.up else first
+                row = row or first
+            if row is None:
+                return
+            rows.select_row(row)
+            ok, box_ = row.compute_bounds(rows)
+            adj = scroll.get_vadjustment()
+            if ok and box_.get_y() < adj.get_value():
+                adj.set_value(box_.get_y())
+            elif ok and box_.get_y() + box_.get_height() > adj.get_value() + adj.get_page_size():
+                adj.set_value(box_.get_y() + box_.get_height() - adj.get_page_size())
+
+        def into():  # (the folder picked in the list, else the only one there)
+            row = rows.get_selected_row()
+            if row is None and len(state["names"]) == 1:
+                row = rows.get_last_child()
+            if row is None:
+                return entry.error_bell()
+            put(row.path)
+
+        def hidden():
+            state["hidden"] = not state["hidden"]
+            look()
+
+        def up():  # (from the folder listed: the one typed, else the one its last part is in)
+            t = full().rstrip("/")
+            if state["part"] is not None:
+                t = os.path.dirname(t)
+            if full().startswith("/") and t.rstrip("/"):
+                put(os.path.dirname(t.rstrip("/")) or "/")
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", lambda _c, keyval, _code, held: folder_keys(
+            keyval, held, complete=lambda: listed(complete), pick=pick,
+            picked=lambda: rows.get_selected_row() is not None, into=lambda: listed(into), up=up, home=lambda: put(home), hidden=hidden))
+        entry.add_controller(keys)
         look()
         dlg = Adw.AlertDialog(heading=wording.say("sidebar.open_folder_on", host=remote_name(r)), extra_child=box,
                               default_response="open", close_response="cancel")
@@ -540,13 +686,20 @@ class WindowRemote:
             wording.say("new_session.host_named", name=remote_name(r), host=r.host)  # noqa: E731
         def offered(r):
             host = r or local_host()
-            return [(m["value"], m.get("displayName") or m["value"])
-                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
+            listed = host.info.get("models", []) if host is not None else []
+            return [(m["value"], providerslib.model_name(m["value"], listed), providerslib.model_slug(m["value"], listed))
+                    for m in listed if m["value"] != "codex/default"] or [(v, n, v) for v, n in MODELS]
         servers_dd = Gtk.DropDown.new_from_strings([named(r) for r in servers])
         field(wording.say("new_session.host"), servers_dd)
         server = lambda: servers[servers_dd.get_selected()]  # noqa: E731
-        agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
+        agent_dd = Gtk.DropDown.new_from_strings([label for _value, label, _slug in offered(servers[0])])
         field(wording.say("common.model"), agent_dd)
+        def slug_tip(*_):  # (the model's slug, on hover only)
+            listed = offered(server())
+            at = agent_dd.get_selected()
+            agent_dd.set_tooltip_text(listed[at][2] if at < len(listed) else None)
+        agent_dd.connect("notify::selected", slug_tip)
+        slug_tip()
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
@@ -566,7 +719,7 @@ class WindowRemote:
         def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)
             r = server()
             where.set_text((load_settings().get("remote_folders") or {}).get(place(r)) or home(r) or "~")
-            agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
+            agent_dd.set_model(Gtk.StringList.new([label for _value, label, _slug in offered(r)]))
         servers_dd.connect("notify::selected", picked_server)
 
         def check():
@@ -642,41 +795,82 @@ class WindowRemote:
             app = self.get_application()
             _HOST_APART[0].act(said[0], app.restart, lambda then=None: self.restart_host(then=then))
 
-    def restart_host(self, waited=0, then=None):
-        """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
-        there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
-        cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
-        its sessions resumes as it's next written to (the windows on them reattach as it's back). then: what's done
-        once it's gone, in place of starting it again (Baude restarted too: the new Baude starts it)."""
+    def restart_host(self, then=None, now=False):
+        """This Mac's host process stopped and started again (a newer one, after an update): kept by it as its restart
+        (restart free) till nothing it runs blocks it (meshui.restart_dialog says what), as stopping it would stop
+        that; now: at once, those stopped. Every head toasts it pending (meshui.RestartToasts). A
+        turn that's only the model writing is cut short, said so (cut), and carried on with Continue. Its claudes
+        stop, their transcripts kept, and each of its sessions resumes as it's next written to (the windows on them
+        reattach as it's back). then: what's done once it's gone, in place of waiting for it back (Baude restarted
+        too: the new Baude reaches it). One on older code is asked as it was then (meshui.ask_restart)."""
         r = local_host()
         if r is None:  # (none running: started, as the restart would)
             if then is not None:
                 return then()
             return self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
-        busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
+        meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text),
+                           lambda grace: self.wait_host_gone(r, then, grace))
 
-        def later(n):
-            if not waited:
-                toast(self.sidebar, wording.say("hosts.restart_waiting", n=n))
-            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5, then) and False)
+    def wait_host_gone(self, r, then=None, grace=5):
+        """r (This Mac's host process) restarting: once it's gone, then(), or it back (local_server), said; given up
+        on if, grace seconds on, its restart's dropped and it's still there. One wait at a time."""
+        r.restart_until = max(getattr(r, "restart_until", 0), time.monotonic() + grace)
+        if getattr(r, "restart_waited", False):
+            return
+        r.restart_waited = True
 
-        def answered(reply):
-            if reply.get("op") == "busy":
-                return later(len(reply.get("sessions") or []) or 1)
-            end = time.monotonic() + 15
-
-            def gone():  # (the old one gone: a new one, started as any is: local_server)
-                if r.state == "alive" and time.monotonic() < end:
-                    return True
-                if then is not None:
-                    then()
-                    return False
-                self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
+        def gone():  # (the old one gone: the new one, as it started itself, reached as any is: local_server)
+            if r.state == "alive" and (r.info.get("restart") or time.monotonic() < r.restart_until):
+                return True
+            r.restart_waited = False
+            if r.state == "alive":
                 return False
-            GLib.timeout_add(250, gone)
-        if busy:
-            return later(len(busy))
-        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
+            if then is not None:
+                then()
+                return False
+            self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
+            return False
+        GLib.timeout_add(250, gone)
+
+    def show_restart_blockers(self, key=None):
+        """Details on a pending restart's toast (key: its host's): what that daemon's restart waits for
+        (meshui.restart_dialog), the restart held meanwhile; See Thread on one shows it (see_blocker), the toast back
+        saying it's paused (RestartToasts.hold)."""
+        r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_host()
+        if r is None or not r.info.get("restart"):
+            return
+
+        def ask(now):
+            if r.mine:
+                return self.restart_host(now=now)
+            meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text))
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b),
+                              lambda: self.sidebar.restart_toasts.hold(r.key))
+
+    def see_blocker(self, r, b):
+        """What r's restart waits for, shown (See Thread): a chat, opened (an agent run's: the chat on its host it's
+        for); a task's run, its Bot's chat opened on its Tasks page, at that run; a terminal, ☰ → Terminal on it."""
+        if b.get("kind") == "terminal":
+            return self.terminal.show(r.where, remote_name(r), b["terminal"])
+        sid = b.get("session")
+        on = next((x for x in network().remotes() if x.info.get("id") == b["host"]), None) if b.get("host") else r
+        on = on if on is not None and sid in on.sessions else network().find(sid)
+        if on is None:
+            return
+        self.open_mesh_chat({**on.sessions[sid], "server": on})
+        if b.get("kind") != "task" or not b.get("run"):
+            return
+        tasks, end = self.panel.tasks, time.monotonic() + 10
+
+        def at_run():  # (once the chat's open, its Tasks page reading its Bot's: the run)
+            if tasks.sid != sid:
+                return time.monotonic() < end
+            self.show_panel(True, "tasks")
+            if b.get("task"):
+                tasks.open_task(b["task"])
+            tasks.open_run({"id": b["run"], "name": b.get("name"), "status": "running"})
+            return False
+        GLib.timeout_add(100, at_run)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once
@@ -737,6 +931,34 @@ class WindowRemote:
                    "mode": mode, "group": listed.get("group"), "draft": True,
                    **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply, carry_from=was))
+
+    def remote_rotate_to(self, model):
+        """Another kind of model picked in a Bot: its conversation rotated on its host (archived as a past thread, if
+        anything's been said) and the Bot carried on afresh on that model, shown as its host lists it then."""
+        r, sid = self.remote, self.session_id
+        effort = self.local_effort if model_program(model) == "pi" else self.effort
+        self.rotating = True  # (its host's listing of it not shown till its reply: done opens it)
+        self.composer_box.gate("rotating", True)  # (nothing sent till its new conversation is open)
+
+        def done(reply):
+            self.rotating = False
+            self.composer_box.gate("rotating", False)
+            if reply.get("op") != "rotated":
+                self.note(wording.say("trash.host_refused", host=remote_name(r), op="rotate",
+                                      why=baudelib.wire.said(reply)))
+                return
+            for listed in (reply.get("session"), reply.get("thread")):
+                if isinstance(listed, dict) and baudelib.wire.is_id(listed.get("id") or ""):
+                    r.forget_mirror(listed["id"])
+                    r.sessions[listed["id"]] = listed
+            here = self.remote is r and self.session_id == sid and isinstance(reply.get("session"), dict)
+            if here:
+                self.shown_rotated = reply["session"].get("rotated")  # (opened here, not again by on_network)
+            r.network.changed()
+            if here:
+                self.open_remote(remote_info({**reply["session"], "server": r}))
+                self.note(wording.say("chat_header.model_note_new", name=self.model_said(model)))
+        r.request({"op": "rotate", "session": sid, "model": model, **({"effort": effort} if effort else {})}, done)
 
     def remote_started(self, r, reply, carry_from=None):
         """A server started a session asked for here: its group listed, and it opened (another host's isn't listed till
@@ -910,6 +1132,9 @@ class WindowRemote:
                 "Looking for daemon…" if self.remote.mine else wording.say("hosts.looking", host=name)
         elif kind == "live":
             text = wording.say("chat_banner.active_elsewhere")
+        elif kind == "disabled":
+            text = wording.say("subscriptions.disabled_chat", name=(self.chat_account_info() or {}).get("name") or
+                               wording.say("subscriptions.cli_default"))
         elif kind == "missing":  # (its host there, but with no such session: session_missing)
             name = "Daemon" if self.remote.mine else remote_name(self.remote)
             text = wording.say("chat_banner.missing_because", name=name, reason=self.missing_reason) \
@@ -939,7 +1164,8 @@ class WindowRemote:
         """What's in the way of this chat from outside it, said in the banner till it's gone. Another program (not Baude:
         live_elsewhere) has the session: no text box (show_composer), as two writers would interleave two
         conversations in one transcript. Its host isn't there, or its connection's dropped (drop): its send button off
-        (Composer.gate), as there's no one to send to. claude's retrying the model's API (show_retry). Those waited out
+        (Composer.gate), as there's no one to send to. The subscription it runs on disabled on its host: its send
+        button off too, till it's enabled or another's picked. claude's retrying the model's API (show_retry). Those waited out
         here (dropped, retrying) with an ellipsis going."""
         live = self.live_elsewhere()
         gone = self.remote is not None and (self.resume_pending and self.remote.state != "alive" or
@@ -947,8 +1173,9 @@ class WindowRemote:
         dropped = self.drop_running is not None and self.remote is not None and self.drop_session == self.session_id
         missing = self.remote is not None and self.proc is None and self.missing_session == self.session_id
         apart = self.host_apart_said()  # (this Mac's host process on other code: said when nothing of the chat's is)
+        off = self.subscription_off()
         kind = "gone" if gone else "missing" if missing else "live" if live else "drop" if dropped else \
-            "retry" if self.retrying is not None else "apart" if apart is not None else None
+            "disabled" if off else "retry" if self.retrying is not None else "apart" if apart is not None else None
         self.banner_kind = kind
         if kind is not None:
             self.banner.set_title(self.banner_text(kind))
@@ -960,6 +1187,7 @@ class WindowRemote:
         if hasattr(self, "composer_box"):
             self.composer_box.gate("network", dropped)
             self.composer_box.gate("host", gone or missing)
+            self.composer_box.gate("disabled", off)
         self.show_composer()
 
     def tail_lines(self, lines):
@@ -1006,19 +1234,24 @@ class WindowRemote:
         self.tail.stop()
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
-        if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
+        left = self.take_background(self.session_id)  # (left mid-turn in a window, still at it)
+        if left is None and reason:  # (its claude gone meanwhile: drop, on_exit; said even if it's running again)
             self.note(wording.say("chat_notes.resumed_from", reason=reason))
-        elif self.resumed_note:
+        elif left is None and self.resumed_note and not self.agent_running():  # (said only where its agent's started
+            # again: one still running, at a turn or between them, is attached to, not resumed)
             self.note(wording.say("chat_notes.resumed"))
         self.resumed_note, self.resume_reason = False, None
-        if (left := self.take_background(self.session_id)) is not None:  # (left mid-turn in a window, still at it)
+        if left is not None:
             self.attach_proc(left)
             return
         self.restart_proc(resume=True)
 
+    def agent_running(self):
+        """Is a network session's agent running on its host (listed working, waiting or idle, not stopped)?"""
+        listed = (self.remote.sessions.get(self.session_id) or {}) if self.remote is not None else {}
+        return listed.get("state") not in (None, "stopped")
+
     def h_result(self, msg):
-        telemetryview.turn_ended(self, msg, self.model, self.local_effort if model_program(self.model) == "pi" else
-                                 self.effort)
         self.compact_ended()
         if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
             GLib.idle_add(self.send_reverted)
@@ -1053,7 +1286,7 @@ class WindowRemote:
             if (why := self.login_ask(msg)) is not None and not getattr(self, "login_asked", False):
                 self.login_prompt(why)
         self.end_turn()
-        self.tell_desktop(self.session_id, turn_said(msg))
+        self.tell_desktop(self.session_id, turn_said(msg), turn={"uuid": msg.get("uuid")})
         self.update_status(wording.say("status_bar.last_turn", turns=msg.get("num_turns", 0),
                                        seconds=f"{msg.get('duration_ms', 0) / 1000:.1f}", used=fmt_tokens(tok),
                                        written=fmt_tokens(u.get("output_tokens", 0))))
@@ -1062,8 +1295,8 @@ class WindowRemote:
         """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and
         what waited for its end done."""
         proc = self.proc if proc is None else proc
-        if self.queued and self.send_after_result is None and self.queue_upto is None:
-            self.queue_upto = "all"
+        if any(not t.hosted for t in self.queued) and self.send_after_result is None and self.queue_upto is None:
+            self.queue_upto = "all"  # (its host's queue its host sends: hostqueue)
         self.set_busy(False)
         self.login_asked, self.turn_sent = False, None  # (login_prompt's, send_text's: the next turn's own)
         self.keep_chat_model()
@@ -1134,19 +1367,94 @@ class WindowRemote:
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
         self.tell_desktop(self.session_id, wording.say("asks.has_question_for_you", name="Claude")
                           if name == "AskUserQuestion"
-                          else wording.say("asks.waiting_for_tool", tool=name or wording.say("asks.a_tool")))
+                          else wording.say("asks.waiting_for_tool", tool=tool_label(name) if name else wording.say("asks.a_tool")))
 
-    def sign_in(self, args=(), ask=None):
-        """/login (or a turn that failed for want of it: ask, its error): claude auth login on the machine the chat runs
-        on, as a card (LoginCard): this one's here; another's by its host process there."""
+    def sign_in(self, args=(), ask=None, login=None):
+        """/login (or a turn that failed for want of it: ask, its error; a host's chat's sign-in as its host has it:
+        login): claude auth login on the machine the chat runs on, as a card (LoginCard): Baude's own chat's here; a
+        host's chat's by that host process, for the chat, so its host has the card's state for every head. One card a
+        chat: what its host says of its sign-in after is said in that card (h_login)."""
         elsewhere = self.remote is not None and not self.remote.local
         account = self.chat_account_info()  # (a chat under a Claude account: that account signed in to there instead)
-        self.add(LoginCard(self, args, where=self.remote.where if elsewhere else None,
-                           host=remote_name(self.remote) if elsewhere else None, ask=ask,
-                           retry=getattr(self, "turn_sent", None) if ask is not None else None,
-                           account=account if (account or {}).get("kind") in ("token", "folder") else None,
-                           account_where=self.remote.where if self.remote is not None else {"via": "local"}))
+        kept = self.host_keeps_login()
+        card = LoginCard(self, args, where=self.remote.where if kept or elsewhere else None,
+                         host=remote_name(self.remote) if elsewhere else None, ask=ask, login=login,
+                         session=self.session_id if kept else None,
+                         retry=getattr(self, "turn_sent", None) if ask is not None or login is not None else None,
+                         account=account if (account or {}).get("kind") in ("token", "folder") else None,
+                         account_where=self.remote.where if self.remote is not None else {"via": "local"})
+        was = getattr(self, "login_card", None)  # (the chat's card before: this one in its place)
+        if was is not None and was.get_parent() is not None and was.chat == card.chat and was.proc is None:
+            self.leave_login_card(was)
+        self.login_card = card
+        self.add(card)
         self.stick_bottom = True
+        return card
+
+    def host_keeps_login(self):
+        """Whether the open chat's sign-in is its host's to keep (a host's chat, its host one that keeps it: attach's
+        answer says so); else the card's this head's own, as an older host's heads had it."""
+        return self.remote is not None and getattr(self.proc, "keeps_login", True)
+
+    def h_login(self, msg):
+        """A host's chat's sign-in, as its host has it (login_state, or attach's answer): said in the chat's sign-in
+        card, the same on every head; a card made if there's none, in place of the failed turn's error line. Another
+        turn that failed for want of it: the card moved to that turn."""
+        login, card = msg.get("login"), getattr(self, "login_card", None)
+        if card is not None and card.get_root() is self and card.chat == (self.remote, self.session_id):
+            if (login or {}).get("state") == "needed" and login.get("turn") != (card.login or {}).get("turn") and \
+                    card.get_parent() is not None:
+                why = self.drop_login_line() or getattr(self, "login_why", None)
+                self.move_login_card(card)
+                card.stands_for = why
+                self.stick_bottom = True
+                card.retry, card.resent = getattr(self, "turn_sent", None) or card.retry, False
+            card.show(login)
+            if card.gone:  # (another head's sign-in, with nothing to sign in for, cancelled: nothing to say)
+                self.login_card = None
+            return
+        if login is None:
+            return
+        why = self.drop_login_line() or (getattr(self, "login_why", None) if login.get("state") == "needed" else None)
+        self.login_asked = True
+        card = self.sign_in(login=login)
+        card.from_host, card.stands_for = True, why
+
+    def move_login_card(self, card):
+        """The chat's sign-in card moved to the end, for a later turn that failed for want of signing in: the error it
+        stood in for at the turn before drawn there again, as a head opening the chat later draws it."""
+        self.leave_login_card(card)
+        self.add(card)
+
+    def leave_login_card(self, card):
+        """A sign-in card taken out of the chat: the error it stood in for drawn where it was."""
+        if (parent := card.get_parent()) is not None:
+            if getattr(card, "stands_for", None):
+                parent.insert_child_after(api_error_label(card.stands_for), card)
+            parent.remove(card)
+
+    def drop_login_line(self):
+        """The last turn's error, drawn from history, when it's one signing in again would fix (claude's line for it,
+        or its words drawn as a reply): its sign-in card goes in its place (as it does in a live turn's)."""
+        child = self.transcript.get_last_child()
+        while child is not None and not child.get_visible():
+            child = child.get_prev_sibling()
+        text = child.get_text() if isinstance(child, Gtk.Label) else getattr(child, "text", None)
+        if child is not None and isinstance(text, str) and needs_login(text):
+            self.transcript.remove(child)
+            return text
+        return None
+
+    def login_standing_in(self, content):
+        """The chat's sign-in card, if its host says the chat needs signing in and content (a message of claude's,
+        drawn from history after the card was made) is the error it stands in for; else None."""
+        card = getattr(self, "login_card", None)
+        if card is None or not self.host_keeps_login() or card.get_parent() is None or \
+                card.chat != (self.remote, self.session_id) or (card.login or {}).get("state") != "needed":
+            return None
+        text = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text") \
+            if isinstance(content, list) else str(content or "")
+        return card if needs_login(text) else None
 
     def at_chat(self, chat):
         """Whether chat (a sign-in card's, its host and session) is the one open."""
@@ -1166,11 +1474,13 @@ class WindowRemote:
             self.restart_claude()
 
     def restart_claude(self):
-        """The chat's claude started again (signed in or out since): Baude's own, here (restart_proc); a host process's
+        """The chat's claude started again (signed in or out since, or another account picked at its turn): Baude's own, here (restart_proc); a host process's
         (this machine's, or the one the chat runs on), stopped there, so its next message starts it again, as it's
         signed in now."""
         if self.remote is not None and self.session_id:
             self.remote.request({"op": "stop", "session": self.session_id, "restart": True})
+        else:
+            self.take_account()  # (an account picked at the turn: taken now)
         self.restart_proc(resume=True)
 
     def send_again(self, sent):
@@ -1187,11 +1497,14 @@ class WindowRemote:
 
         def run():
             try:
+                deps.need("claude", "report.claude")
                 r = subprocess.run([claude_exe(), "auth", "logout"], capture_output=True, text=True, timeout=60,
                                    stdin=subprocess.DEVNULL, env=claude_env())
                 said = _AUTH_ESCAPES.sub("", (r.stdout + r.stderr)).strip().splitlines()
                 text = wording.say("chat_notes.signed_out") if r.returncode == 0 else \
                     wording.say("chat_notes.sign_out_failed", why=str(said[-1] if said else r.returncode))
+            except deps.Missing as e:  # (no claude here: what to install, as Settings → Dependencies says it)
+                text = str(e)
             except (OSError, subprocess.SubprocessError) as e:
                 text = wording.say("chat_notes.sign_out_failed", why=str(e))
             GLib.idle_add(lambda: (self.note(text), self.signed_in()) and False)
@@ -1199,9 +1512,25 @@ class WindowRemote:
 
     def login_prompt(self, why):
         """A turn that failed for want of signing in (why: its error): said in a card in place of the error, with Sign
-        in, on whichever machine the chat runs on (sign_in); once a turn."""
-        self.login_asked = True
-        self.sign_in(ask=why)
+        in, on whichever machine the chat runs on (sign_in); once a turn. A host's chat's is its host's to say
+        (login_state: h_login), so every head shows the same card."""
+        self.login_asked, self.login_why = True, why
+        if not self.host_keeps_login():
+            self.sign_in(ask=why)
+
+    def withdraw_asks(self, listed):
+        """A host's chat's asks as its host lists them (listed: their request ids): one asked here that it doesn't
+        list any more was answered on another head (or can't be now), so it isn't waiting on you here either, as on
+        every head."""
+        withdraw = getattr(self.proc, "withdraw", None) or {}
+        seen = self.proc.__dict__.setdefault("asks_listed", set())  # (one not listed yet may be in a listing on its
+        seen |= listed & set(withdraw)  # way: only one its host has listed, then doesn't, is answered)
+        for rid in [r for r in withdraw if r in seen and r not in listed]:
+            seen.discard(rid)
+            if rid in self.proc.asks:
+                withdraw.pop(rid)()
+            else:
+                withdraw.pop(rid)
 
     def permission_card(self, rid, name, inp, tool_use_id):
         """Asks whether to allow a call: in the call's own card, when it's in the chat (ToolCard.ask); else (no card for
@@ -1219,8 +1548,7 @@ class WindowRemote:
             box.append(sel_label(f"<b>{html.escape(wording.say('asks.has_question', name='Claude'))}</b>"))
             box.append(row)
         elif card is None:
-            title, source = tool_display(name)
-            what = f"{source}: {title}" if source else title
+            what = tool_label(name)
             summary = summarize_tool(name, inp)
             box.append(sel_label(f"<b>{html.escape(wording.say('asks.allow_tool', tool=what))}</b>" +
                                  (f"  <span alpha='60%'>{html.escape(summary)}</span>" if summary else "")))
@@ -1242,7 +1570,7 @@ class WindowRemote:
                     def kept(reply, allowed=allowed):
                         if reply.get("op") == "error":
                             allowed.discard(name)
-                            self.note(wording.say("asks.not_always_allowed", tool=tool_display(name)[0],
+                            self.note(wording.say("asks.not_always_allowed", tool=tool_label(name),
                                                   why=baudelib.wire.said(reply)))
                     self.remote.request({"op": "always_allow", "session": self.session_id, "add": [name]}, kept)
             proc.asks.pop(rid, None)
@@ -1270,10 +1598,10 @@ class WindowRemote:
                 self.tool_cards[tool_use_id].set_decision(decision)  # keeps tool groups together
             elif behavior != "allow":  # (allowed, it runs: nothing to say)
                 self.note(wording.say("tool_calls.denied_tool" if decision == "denied" else "tool_calls.not_answered_tool",
-                                      tool=name))
+                                      tool=tool_label(name)))
 
         choices = [(wording.say("common.allow"), "allow", False, "suggested-action"),
-                   (wording.say("asks.always_allow", tool=tool_display(name)[0]), "allow", True, None),
+                   (wording.say("asks.always_allow", tool=tool_label(name)), "allow", True, None),
                    (wording.say("common.deny"), "deny", False, "destructive-action")]
         if model_program(self.model) != "claude" and not self.host_lists("always_allow"):  # (Apple's model, or one on
             del choices[1]  # this Mac: each call asked, no always; a host's that keeps it, as a phone's: offered)
@@ -1282,12 +1610,22 @@ class WindowRemote:
             row.set_orientation(Gtk.Orientation.VERTICAL)
             row.append(QuestionForm(inp["questions"], lambda answers: decide(None, "answer", answers),
                                     lambda: decide(None, "deny")))
+        row.set_sensitive(self.writes_chat())  # (one its host lets this head only read: nothing to answer with)
         for label, beh, always, css in choices:
             b = Gtk.Button(label=label)
             if css:
                 b.add_css_class(css)
             b.connect("clicked", decide, beh, always)
             row.append(b)
+        def withdrawn():  # (answered on another head: its host lists it no more; the buttons go, as there)
+            proc.asks.pop(rid, None)
+            if card is not None:
+                card.answered()
+            elif box.get_parent() is not None:
+                box.get_parent().remove(box)
+            self.waiting_cards.discard(waiting)
+            self.update_session_state()
+        proc.withdraw = {**getattr(proc, "withdraw", {}), rid: withdrawn}
         if card is not None:
             # (however it stops asking, answered or not, it isn't waiting on you any more; the window held weakly, as the
             # card's listeners outlive its handlers)

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene's code, the desktop apps' alone. Code is run only once its host's user has trusted it as it is (theme_trust: the sha256 of its files): changed, it isn't run till it's trusted again, and the scene is drawn as scene.json has it.",
+  "properties": {
+    "python": {
+      "type": "string",
+      "description": "A Python file in the theme (desktop/scene.py) whose setup(scene) is called with the scene's SceneAPI as the scene starts: it may move, add and take away the scene's nodes each frame and answer picks."
+    },
+    "shaders": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "GLSL shaders in the theme by a material's shader name (shaders/<file>.glsl): a fragment shader's body the desktop's GL scene compiles in place of its own lighting for the materials that name it."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Slots: a panel for each of Baude's things that fit, laid out in the node's space.",
+  "properties": {
+    "of": {
+      "enum": [
+        "chat",
+        "host",
+        "meta_card",
+        "window"
+      ],
+      "description": "Which things."
+    },
+    "where": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Only those whose fields are these (a chat's host, state, bot)."
+    },
+    "sort": {
+      "enum": [
+        "recent",
+        "name"
+      ],
+      "description": "Their order: the last used first, or by name."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "At most this many."
+    },
+    "layout": {
+      "enum": [
+        "row",
+        "grid",
+        "ring",
+        "stack"
+      ],
+      "description": "row: side by side along x; grid: rows of columns; ring: round the node's y axis, facing out of it; stack: each above the last."
+    },
+    "spacing": {
+      "type": "number",
+      "description": "Metres between them (a ring's radius for ring)."
+    },
+    "columns": {
+      "type": "integer",
+      "description": "A grid's."
+    },
+    "panel": {
+      "$ref": "ScenePanel.json",
+      "description": "How each is drawn (its show, px and size): left out for none. It's a node of the slot's, <slots>/<n>/panel."
+    },
+    "hidden": {
+      "type": "boolean",
+      "description": "Whether each slot's panel starts hidden (a reveal, or the theme's code, shows it)."
+    },
+    "with": {
+      "type": "array",
+      "items": {
+        "$ref": "SceneNode.json"
+      },
+      "description": "Nodes put in each slot's space beside its panel (a box it's in, a stand), for its thing: their ids are the slot's and theirs (<slots>/<n>/<id>), their parent the slot unless they name another of these."
+    }
+  },
+  "required": [
+    "of"
+  ],
+  "additionalProperties": false
+}

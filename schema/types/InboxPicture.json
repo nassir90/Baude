@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of an ask's version's pictures, as it's listed: its bytes are fetched by its name (inbox_picture).",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name, as the body and buttons use it."
+    },
+    "mime": {
+      "type": "string",
+      "description": "What it is (image/png, image/jpeg, ...)."
+    },
+    "size": {
+      "type": "integer",
+      "description": "How many bytes it is."
+    },
+    "width": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its width in pixels, if it could be read."
+    },
+    "height": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its height in pixels, if it could be read."
+    }
+  },
+  "required": [
+    "name",
+    "mime",
+    "size"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene's camera.",
+  "properties": {
+    "position": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Where it is (3 numbers)."
+    },
+    "target": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "What it looks at (3 numbers)."
+    },
+    "fov": {
+      "type": "number",
+      "description": "Its field of view, degrees: from top to bottom where the view is wider than tall, from side to side where it's taller (a phone held upright sees as much across)."
+    },
+    "orbit": {
+      "$ref": "SceneOrbit.json",
+      "description": "A slow turn round its target: left out for none."
+    }
+  },
+  "required": [
+    "position",
+    "target"
+  ],
+  "additionalProperties": false
+}

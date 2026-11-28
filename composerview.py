@@ -286,6 +286,22 @@ class ComposerView(Gtk.TextView):
         self.quotes = []  # (first line, last line) of each run of "> " lines
         self.block_rgba, self.rule_rgba = Gdk.RGBA(), Gdk.RGBA()
 
+    def do_size_allocate(self, width, height, baseline):
+        """A new height for the box (Composer's, grown or shrunk with its text): the text at its top while it all
+        fits, the caret kept in sight once it doesn't. A typed character scrolls the caret into sight while the box is
+        still its old height, gliding there, and while it glides GTK keeps the old height as the text's page: a box
+        grown to fit a new line stayed scrolled, its top line cut and a gap at its bottom (the scrollbar shown for
+        that page: Composer._scrollbar), till the text's height next changed."""
+        adj = self.get_vadjustment()
+        if adj is None or adj.get_page_size() == height:
+            Gtk.TextView.do_size_allocate(self, width, height, baseline)
+            return
+        fits = height >= self.measure(Gtk.Orientation.VERTICAL, width)[1]
+        adj.set_value(0 if fits else adj.get_value())  # (ends a glide, so GTK takes this height as the page)
+        Gtk.TextView.do_size_allocate(self, width, height, baseline)
+        if not fits:
+            self.scroll_mark_onscreen(self.get_buffer().get_insert())
+
     def do_snapshot_layer(self, layer, snapshot):
         if layer != Gtk.TextViewLayer.BELOW_TEXT or not (self.code_blocks or self.quotes):
             return
@@ -673,7 +689,10 @@ class Composer(Gtk.Overlay):
         self.add_overlay(actions)
         if follow_text:  # (a box taller than its text: the buttons level with its last line, at most at the bottom)
             self.connect("get-child-position", self._place_actions)
-            self.input.get_buffer().connect("changed", lambda *_: self.queue_allocate())
+            # (once GTK has measured the changed lines: laid out at once, a new line's box was drawn a frame at its old
+            # height, the new line under its bottom)
+            self.input.get_buffer().connect("changed", lambda *_: GLib.idle_add(
+                lambda: self.queue_allocate() or GLib.SOURCE_REMOVE, priority=GLib.PRIORITY_HIGH_IDLE + 10))
             adj.connect("value-changed", lambda *_: self.queue_allocate())
         self.add_css_class("card")
         self.add_css_class("composer-box")
@@ -771,8 +790,8 @@ class Composer(Gtk.Overlay):
         return True
 
     def gate(self, name, on):
-        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone),
-        on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
+        """A reason what's written can't be sent now (the context exhausted, a host's connection dropped or gone, the
+        subscription it runs on disabled), on or off: the send button's off while there's any, unless it's Stop (busy). The text box stays as it is."""
         (self.gates.add if on else self.gates.discard)(name)
         self.send.set_sensitive(self.busy or not self.gates)
 

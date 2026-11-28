@@ -101,6 +101,10 @@
       ],
       "description": "A Bot's; null for a chat."
     },
+    "rotated": {
+      "type": ["number", "null"],
+      "description": "A Bot's: when it was last rotated (its conversation archived as a past thread, a new one begun), epoch seconds; null if it never has. A head's copy of its transcript is let go of as it changes."
+    },
     "autofix": {
       "anyOf": [
         {
@@ -114,7 +118,18 @@
     },
     "acting": {
       "type": "boolean",
-      "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."
+      "description": "Whether its turn is at its browser's tools (Emission's), its own or a subagent's: from the start of a call of Emission's till another tool's call or text starts after it (in each agent's own messages; on while any agent is at one), the turn ends or its agent goes; only while it's working, not asking."
+    },
+    "context": {
+      "anyOf": [
+        {
+          "$ref": "ContextUsage.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said."
     },
     "on_phone": {
       "type": "boolean",
@@ -126,7 +141,16 @@
     },
     "spawned_by": {
       "type": ["string", "null"],
-      "description": "The chat whose mesh tools started it (start's spawned_by)."
+      "description": "The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it."
+    },
+    "task_asks": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "A Bot's: the uuids of the messages its tasks' runs have sent it as asks, each run waiting for input (asking) till the turn that message began ends. Empty for every other."
+    },
+    "task_run": {
+      "anyOf": [{"$ref": "TaskRunRef.json"}, {"type": "null"}],
+      "description": "The task's run that started it (start's task_run), on its Bot's host."
     },
     "desktop": {
       "type": "boolean",
@@ -153,7 +177,19 @@
           "type": "null"
         }
       ],
-      "description": "The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in); null for the CLI's own sign-in."
+      "description": "The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone)."
+    },
+    "account_gone": {
+      "type": "boolean",
+      "description": "Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked."
+    },
+    "account_disabled": {
+      "type": "boolean",
+      "description": "The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked."
+    },
+    "resume_at": {
+      "type": ["number", "null"],
+      "description": "When its host sends it a message to carry on (seconds since 1970): its last turn was stopped by a usage limit and the subscription it runs on has Auto Resume on Reset on (accounts' auto_resume), so it's resumed a minute after the limit resets. Null once anything's sent to it, it's cancelled (resume_cancel), or the subscription's disabled or no longer resumes its chats."
     },
     "held": {
       "type": "array",
@@ -179,6 +215,14 @@
         "$ref": "Ask.json"
       },
       "description": "What it's asking, not answered yet."
+    },
+    "ended": {
+      "anyOf": [{"$ref": "TurnEnd.json"}, {"type": "null"}],
+      "description": "Its last turn's end, as its host keeps it; null before one has ended (and always for a chat another chat's mesh tools, or a task's run, started)."
+    },
+    "seen": {
+      "anyOf": [{"$ref": "TurnEnd.json"}, {"type": "null"}],
+      "description": "The last turn's end that's been seen: a head showed it on screen (seen), or its user wrote in it since. Ended and not seen: every head keeps its notification of it, and its dot, till it is; then every head takes them back."
     }
   },
   "required": ["id"],

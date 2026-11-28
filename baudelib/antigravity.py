@@ -151,6 +151,7 @@ class AntigravityProc(ClaudeProc):
                 self.emit("_stderr", text=line.strip())
 
     def _failed(self, error):
+        self._flush_thought()
         self.reply(self.init_rid, error=error)
         self.result(error)
         self.stopping = True
@@ -172,6 +173,7 @@ class AntigravityProc(ClaudeProc):
                 params["_meta"] = {"antigravity": {"systemPrompt": {"append": self.instructions}}}
                 self.instructions = None
         if self.resume:
+            fresh = dict(params)
             params["sessionId"] = self.resume
             if "resume" in (caps.get("sessionCapabilities") or {}):
                 method = "session/resume"
@@ -179,9 +181,12 @@ class AntigravityProc(ClaudeProc):
                 method = "session/load"
             else:
                 return self._failed("Antigravity cannot resume this session")
-        else:
-            method = "session/new"
-        self.rpc(method, params, self._opened, self._failed)
+
+            def unknown(_error):  # (a session this agy has never seen or has dropped: a new one, the message still sent)
+                self.resume = None
+                self.rpc("session/new", fresh, self._opened, self._failed)
+            return self.rpc(method, params, self._opened, unknown)
+        self.rpc("session/new", params, self._opened, self._failed)
 
     def _opened(self, result):
         self.thread = result.get("sessionId") or self.resume

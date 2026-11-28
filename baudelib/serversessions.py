@@ -1285,6 +1285,8 @@ class ServerSessions:
                         accounts.carry_seen(seen) != seen:
                     continue  # (picked again, or written or sent to as it was copied: looked at again)
                 s.meta.setdefault("profiles", {})[program] = to
+                if program == "antigravity":
+                    s.meta.pop("cli_id", None)  # (each account's agy has its own sessions: a new one on it)
                 s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
                 s.account_to, s.account_after_turn = None, False
                 self.account_kept(program, to)

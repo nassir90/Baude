@@ -244,6 +244,37 @@ abstract class Screens(private val theme: String) {
         withMenus("05b-subscriptions-menu")
     }
 
+    // (Settings → Subscriptions scrolled to Antigravity: its CLI default's and Studio's latest context as a bar with
+    // its reported cost, Lab's with no chat yet; then the CLI default's ⋮ (Disable alone);
+    // then Add account, Login and Folder)
+    @Test fun subscriptionsAntigravity() {
+        antigravityFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        scrollUnder("Lab")
+        laidOut()
+        screen("05y-subscriptions-antigravity")
+        tap("Change this account", nth = 3)
+        laidOut()
+        withMenus("05y-subscriptions-antigravity-menu")
+    }
+
+    @Test fun subscriptionsAntigravityAdd() {
+        antigravityFixture()
+        val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
+        val login = dev.baude.android.ClaudeLogin(host, null, "antigravity").apply { name.value = "Studio" }
+        show {
+            SettingsScreen({}, {}, page = 1)
+            dev.baude.android.ClaudeSignIn(host, null, {}, "antigravity", login)
+        }
+        laidOut()
+        screen("05y-subscriptions-antigravity-add")
+        login.existing.value = true
+        login.folder.value = "~/.gemini"
+        laidOut()
+        screen("05y-subscriptions-antigravity-add-folder")
+    }
+
     // (Add account (Claude) on workshop, each step: Login, Token (empty, then typed), Folder, starting, the page's link with the code
     // box, a code typed, what claude said of it, failed)
     @Test fun subscriptionsSignIn() {
@@ -252,7 +283,7 @@ abstract class Screens(private val theme: String) {
         val login = dev.baude.android.ClaudeLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
-            dev.baude.android.ClaudeSignIn(host, null, {}, login)
+            dev.baude.android.ClaudeSignIn(host, null, {}, login = login)
         }
         laidOut()
         screen("05c-subscriptions-claude-new-login")
@@ -917,6 +948,36 @@ abstract class Screens(private val theme: String) {
                         for (id in listOf("", "w1", "h2")) put(id, org.json.JSONObject().put("usage", limits(id))
                             .put("read", System.currentTimeMillis() / 1000 - 600))
                     })
+                }
+        }
+    }
+
+    /** Antigravity's CLI default and two accounts beside Claude's Work: the CLI default's usage as the list tracked it,
+     * Studio's as its read says it, Lab's with nothing reported yet. */
+    private fun antigravityFixture() {
+        fun tracked(used: Int, size: Int, cost: Double?) = org.json.JSONObject().put("context_used", used)
+            .put("context_size", size).put("cost_usd", cost ?: org.json.JSONObject.NULL).put("sessions", 2)
+            .put("seen", System.currentTimeMillis() / 1000 - 300)
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(WORK,
+                    org.json.JSONObject().put("id", "g1").put("provider", "antigravity").put("name", "Studio").put("kind", "profile"),
+                    org.json.JSONObject().put("id", "g2").put("provider", "antigravity").put("name", "Lab").put("kind", "profile"))))
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "").put("antigravity", "g1"))
+                .put("claude_cli", true).put("codex_usage", true)
+                .put("antigravity_usage", org.json.JSONObject().put("antigravity", tracked(18_204, 1_048_576, 0.0312))
+                    .put("g1", tracked(40_000, 200_000, 0.4)))
+                .apply {
+                    if (m.optString("what") != "usage") return@apply
+                    when (m.optString("provider").takeIf { m.optString("id").isEmpty() } ?: m.optString("id")) {
+                        "antigravity" -> put("tracked", tracked(18_204, 1_048_576, 0.0312))
+                        "g1" -> put("tracked", tracked(43_820, 200_000, 0.4127))
+                        "g2" -> put("tracked", org.json.JSONObject.NULL)
+                        else -> put("usage", org.json.JSONArray(listOf(
+                            org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", 25)
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600))))
+                    }
                 }
         }
     }
@@ -1786,6 +1847,18 @@ I rewrote byte-pair merging to work on one flat array instead of a list of strin
         val rotated = Msg.Session.from(fresh)
         Mesh.sessions["h1"] = listOf(rotated) + Mesh.sessions.getValue("h1").drop(1) + thread
         return rotated
+    }
+
+    // (a new chat on workshop on Antigravity's model, nothing sent yet: its context meter says no window till its
+    // session says one)
+    @Test fun chatAntigravityFresh() {
+        val first = Mesh.sessions.getValue("h1").first()
+        val fresh = first.json().put("id", "g").put("model", "antigravity/default").put("prompts", 0).put("size", 0)
+        fresh.remove("title")
+        fresh.remove("context")
+        Mesh.sessions["h1"] = listOf(Msg.Session.from(fresh)) + Mesh.sessions.getValue("h1")
+        Mesh.openChat("h1", "g")
+        render("10g-chat-antigravity-fresh") { ChatShell("h1", "g", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
     }
 
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)

@@ -69,8 +69,9 @@ class HostAccounts(val hostId: String) {
     val defaults = mutableStateOf<Map<String, String>>(emptyMap()) // (the account a new chat takes, by provider: accounts.selected)
     val error = mutableStateOf<String?>(null)
     val loaded = mutableStateOf(false)
-    val usage = mutableStateMapOf<String, Usage>() // (each subscription's, by usage key: an account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's)
+    val usage = mutableStateMapOf<String, Usage>() // (each subscription's, by usage key: an account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's, ANTIGRAVITY_CLI Antigravity's)
     val last = mutableStateOf<Map<String, List<Limit>>>(emptyMap()) // (what the host last read of each, shown greyed till usage has it)
+    val tracked = mutableStateOf<Map<String, Tracked>>(emptyMap()) // (each Antigravity subscription's tracked usage, as the host's list says it)
     val codexUsage = mutableStateOf(false) // (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
@@ -81,26 +82,45 @@ class HostAccounts(val hostId: String) {
 
     /** A subscription's usage as last read: its limits (name, percent), or what to say instead; asOf, where they're as
      * its chats' turns last said them (a setup token's): when (seconds since 1970). */
-    class Usage(val limits: List<Limit>?, val said: String?, val asOf: Long? = null)
+    class Usage(val limits: List<Limit>?, val said: String?, val asOf: Long? = null, val tracked: Tracked? = null)
+
+    /** An Antigravity subscription's tracked usage (accounts.antigravity_usage): the context its most recently active
+     * chat last reported (used, of its window's size), and the cost its chats reported in USD, where said. */
+    class Tracked(val used: Long?, val size: Long?, val cost: Double?) {
+        companion object {
+            fun from(o: JSONObject): Tracked {
+                fun whole(k: String) = (o.opt(k) as? Number)?.takeIf { it is Int || it is Long }?.toLong()
+                return Tracked(whole("context_used"), whole("context_size"), (o.opt("cost_usd") as? Number)?.toDouble())
+            }
+        }
+    }
 
     /** One limit: its key (five_hour…), name, percent used, and when it resets (seconds since 1970), if said. */
     class Limit(val key: String, val name: String, val percent: Double, val resets: Double?)
 
     /** The subscriptions whose usage is read, by usage key: Claude's CLI's own sign-in (where the host has claude),
-     * each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account. */
+     * each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account, Antigravity's
+     * CLI's own sign-in (where the host has agy), each Antigravity account. */
     fun usageIds(): List<String> =
         (if (claudeCli.value) listOf("") else emptyList()) + accounts.value.filter { it.provider == "claude" }.map { it.id.orEmpty() } +
             (if (cliCard("codex")) listOf(CODEX_CLI) else emptyList()) +
-            accounts.value.filter { it.provider == "codex" && codexUsage.value }.map { it.id.orEmpty() }
+            accounts.value.filter { it.provider == "codex" && codexUsage.value }.map { it.id.orEmpty() } +
+            (if (cliCard("antigravity")) listOf(ANTIGRAVITY_CLI) else emptyList()) +
+            accounts.value.filter { it.provider == "antigravity" }.map { it.id.orEmpty() }
 
     /** Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage). */
-    fun cliCard(provider: String) = if (provider == "claude") claudeCli.value else provider !in missing.value && codexUsage.value
+    fun cliCard(provider: String) = if (provider == "claude") claudeCli.value
+        else provider !in missing.value && (provider == "antigravity" || codexUsage.value)
+
+    /** Whether a usage key is an Antigravity subscription's. */
+    fun antigravity(key: String) = key == ANTIGRAVITY_CLI || accounts.value.any { it.provider == "antigravity" && it.id == key }
 
     /** (on the main thread) Each subscription's (id's) usage asked of the host, one ask at a time each. */
     fun readUsage(ids: List<String>) {
         for (id in ids) {
             if (!reading.add(id)) continue
             Mesh.ask(hostId, (if (id == CODEX_CLI) Msg.Accounts(what = "usage", provider = "codex", id = "")
+                else if (id == ANTIGRAVITY_CLI) Msg.Accounts(what = "usage", provider = "antigravity", id = "")
                 else Msg.Accounts(what = "usage", id = id)).json()) { r ->
                 reading.remove(id)
                 val error = took(r)
@@ -108,6 +128,8 @@ class HostAccounts(val hostId: String) {
                 val limits = reply.usage?.takeIf { it.isNotEmpty() }
                 usage[id] = when {
                     error != null -> Usage(null, error)
+                    r.has("tracked") -> reply.tracked?.takeIf { it.length() > 0 }?.let { Usage(null, null, tracked = Tracked.from(it)) }
+                        ?: Usage(null, Wording.Subscriptions.afterTurn)
                     limits != null -> Usage(limits(limits), null, reply.asOf?.toLong())
                     reply.apiKey == true -> Usage(null, Wording.Subscriptions.noLimits)
                     reply.afterTurn == true -> Usage(null, Wording.Subscriptions.afterTurn)
@@ -135,6 +157,7 @@ class HostAccounts(val hostId: String) {
         auto.value = g.autoDisable.orEmpty().toSet()
         resumes.value = g.autoResume.orEmpty().toSet()
         g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
+        tracked.value = g.antigravityUsage?.let { t -> t.keys().asSequence().mapNotNull { k -> t.optJSONObject(k)?.let { k to Tracked.from(it) } }.toMap() }.orEmpty()
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
@@ -142,7 +165,7 @@ class HostAccounts(val hostId: String) {
 
     /** A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable). */
     fun switch(what: String, provider: String, key: String, on: Boolean) =
-        ask(if (key == CODEX_CLI) Msg.Accounts(what = what, provider = "codex", id = "", on = on)
+        ask(if (key == CODEX_CLI || key == ANTIGRAVITY_CLI) Msg.Accounts(what = what, provider = provider, id = "", on = on)
             else Msg.Accounts(what = what, provider = provider, id = key, on = on))
 
     private fun limits(u: List<Msg.UsageLimit>) =
@@ -151,15 +174,20 @@ class HostAccounts(val hostId: String) {
     companion object {
         const val USAGE_S = 30 // (how often a shown page reads its subscriptions' usage again)
         const val CODEX_CLI = "codex" // (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
-        val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
+        const val ANTIGRAVITY_CLI = "antigravity" // (Antigravity's CLI's own sign-in's: accounts.ANTIGRAVITY_CLI)
+        val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex,
+            "antigravity" to Wording.Programs.antigravity)
+
+        /** A provider's CLI's own sign-in's usage key. */
+        fun cliKey(provider: String) = when (provider) { "claude" -> ""; "antigravity" -> ANTIGRAVITY_CLI; else -> CODEX_CLI }
     }
 }
 
-/** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
- * host picked beside New session, changed there: its name; for each provider, its heading, then a card for each subscription (CLI default first, where the host has the
+/** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude, Codex and Antigravity accounts
+ * kept on the host picked beside New session, changed there: its name; for each provider, its heading, then a card for each subscription (CLI default first, where the host has the
  * provider's program), each with Disabled where it is and ⋮ (an account's Rename…, Sign In Again… or Replace Token…, Remove…; every
- * card's Disable or Enable, Auto Disable on Exhaustion, Auto Resume on Reset), and each card's usage as a
- * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
+ * card's Disable or Enable, and, but Antigravity's, Auto Disable on Exhaustion, Auto Resume on Reset), and each card's usage as a
+ * bar for each limit with its percentage (Antigravity's: its latest context's), read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
  * (where the host lacks the provider's program, its Dependencies row instead: DepRow). */
 @Composable
 fun SubscriptionsPage() {
@@ -194,7 +222,7 @@ fun SubscriptionsPage() {
                 val mine = host.accounts.value.filter { it.provider == provider }
                 Row(Modifier.padding(start = 14.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    modelLogo(if (provider == "claude") "claude" else "gpt", title)?.let {
+                    modelLogo(when (provider) { "claude" -> "claude"; "codex" -> "gpt"; else -> "gemini" }, title)?.let {
                         Icon(it, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     }
                     Text(title, style = Type.bold, color = c.fg, modifier = Modifier.weight(1f))
@@ -203,14 +231,18 @@ fun SubscriptionsPage() {
                     BoxedList(listOf(Unit), "") { ActionRow(error, null) }
                     continue
                 }
-                val cli = if (provider == "claude") "" else HostAccounts.CODEX_CLI
+                val cli = HostAccounts.cliKey(provider)
+                val limited = provider != "antigravity" // (Antigravity's provider says no limits: nothing to disable or resume on)
+                // (an Antigravity card's, till the page's own read answers: what the host's list tracked of it)
+                fun usage(key: String) = host.usage[key] ?: if (limited) null
+                    else host.tracked.value[key]?.let { HostAccounts.Usage(null, null, tracked = it) }
                 if (host.cliCard(provider))
-                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true,
-                        cli in host.disabled.value, cli in host.auto.value, cli in host.resumes.value) { kind ->
+                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, usage(cli), host.last.value[cli], true,
+                        cli in host.disabled.value, cli in host.auto.value, cli in host.resumes.value, limited) { kind ->
                         host.switchPicked(kind, provider, cli) }
-                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
-                    provider == "claude" || host.codexUsage.value, a.id.orEmpty() in host.disabled.value,
-                    a.id.orEmpty() in host.auto.value, a.id.orEmpty() in host.resumes.value) { kind ->
+                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, usage(a.id.orEmpty()), host.last.value[a.id.orEmpty()],
+                    provider != "codex" || host.codexUsage.value, a.id.orEmpty() in host.disabled.value,
+                    a.id.orEmpty() in host.auto.value, a.id.orEmpty() in host.resumes.value, limited) { kind ->
                     if (kind in listOf("disable", "auto", "resume")) host.switchPicked(kind, provider, a.id.orEmpty())
                     else dialog = kind to a }
                 val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
@@ -231,6 +263,7 @@ fun SubscriptionsPage() {
         kind == "rename" -> RenameAccount(host, a, close)
         kind == "again" && a.kind == "token" -> ReplaceToken(host, a, close)
         kind == "again" && a.provider == "claude" -> ClaudeSignIn(host, a.id.orEmpty(), close)
+        kind == "again" && a.provider == "antigravity" -> ClaudeSignIn(host, a.id.orEmpty(), close, "antigravity")
         kind == "again" && a.provider == "codex" && host.missing.value["codex"] != null ->
             host.missing.value.getValue("codex").let { SignInLacks(it, depTitle(it, Wording.Programs.codex), a, close) }
         kind == "again" -> CodexSignIn(host, a.id.orEmpty(), null, close)
@@ -247,11 +280,12 @@ private fun HostAccounts.switchPicked(kind: String, provider: String, key: Strin
 }
 
 /** A subscription's card: its name, Disabled where it is, and ⋮ with what can be done to it (pick: an account's
- * "rename", "again" or "remove"; every card's "disable", "auto", "resume"); its usage: a bar for each limit with its name and percentage over it, else what was
+ * "rename", "again" or "remove"; every card's "disable", and where its provider has limits (limited) "auto", "resume"); its usage: a bar for each limit with its name and percentage over it, else what was
  * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
 private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
-                             shown: Boolean, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
+                             shown: Boolean, off: Boolean, auto: Boolean, resume: Boolean, limited: Boolean,
+                             pick: (String) -> Unit) {
     val c = LocalBaude.current
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
@@ -261,7 +295,7 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (off) Text(Wording.Subscriptions.disabled, style = Type.body, color = c.dim, maxLines = 1,
                 modifier = Modifier.padding(horizontal = 8.dp))
-            AccountMenu(a, off, auto, resume, pick)
+            AccountMenu(a, off, auto, resume, limited, pick)
         }
         if (shown) UsageBars(usage, last, Modifier.padding(end = 6.dp))
     }
@@ -269,34 +303,54 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
 
 /** A subscription's usage (a Subscriptions card's, and ⋮'s usage row's): a line for each limit, its name and percentage,
  * its bar under it, and where they're as its chats' turns last said them, Last update <how long ago> dim under them;
- * else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where it has none). */
+ * an Antigravity subscription's tracked usage, Latest Context with its tokens of its window's and its bar, then its
+ * reported cost dim; else what was said instead. Till it's read, what the host last read (last, or an Antigravity
+ * subscription's lastTracked) greyed (Checking… where it has none). */
 @Composable
-private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier) {
+private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier,
+                      lastTracked: HostAccounts.Tracked? = null) {
     val c = LocalBaude.current
-    val stale = usage == null && last != null
+    val stale = usage == null && (last != null || lastTracked != null)
     Column(modifier.alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val tracked = if (stale) lastTracked else usage?.tracked
         val limits = if (stale) last else usage?.limits
-        if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
-        else for (l in limits) {
-            val percent = l.percent
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                if (l.name.isNotBlank()) Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
-                    .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim) // (blank: ⋮'s placeholder, its height only)
-            }
-            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
-                Box(Modifier.fillMaxWidth((percent / 100).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
-                    .background(c.accentBg))
-            }
+        if (tracked != null) {
+            val (used, size) = tracked.used to tracked.size
+            if (used != null && size != null && size > 0)
+                UsageBar(Wording.Subscriptions.antigravityContext, Wording.Subscriptions.antigravityTokens(
+                    used = "%,d".format(java.util.Locale.ROOT, used), size = "%,d".format(java.util.Locale.ROOT, size)),
+                    used.toDouble() / size)
+            tracked.cost?.let { Text(Wording.Subscriptions.antigravityCost(cost = "%.4f".format(java.util.Locale.ROOT, it)),
+                style = Type.body, color = c.dim) }
+            return@Column
         }
+        if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
+        else for (l in limits) UsageBar(limitLabel(l), if (l.name.isBlank()) null // (blank: ⋮'s placeholder, its height only)
+            else Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, l.percent).trimEnd('0').trimEnd('.')),
+            l.percent / 100)
         val asOf = if (stale) null else usage?.asOf
         if (limits != null && asOf != null) Text(Wording.Subscriptions.lastUpdate(ago = ago(asOf)), style = Type.body, color = c.dim)
     }
 }
 
+/** A line of name and amount (dim, at its end) with a bar under it filled fraction of the way (subscriptionpage._bar):
+ * a limit's, or an Antigravity subscription's latest context (its tokens of its window's). */
+@Composable
+private fun UsageBar(name: String, amount: String?, fraction: Double) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(name, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+        if (amount != null) Text(amount, style = Type.body, color = c.dim)
+    }
+    Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
+        Box(Modifier.fillMaxWidth(fraction.toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
+            .background(c.accentBg))
+    }
+}
+
 /** Whose usage ⋮'s usage row shows (subscriptionpage.usage_account): (host, provider, account id, "" for the CLI's own
- * sign-in; null for the one a new chat there takes): the chat's (host, sid), on a Claude or Codex model, the account
+ * sign-in; null for the one a new chat there takes): the chat's (host, sid), on a Claude, Codex or Antigravity model, the account
  * it actually runs under, its model's provider's, on its host; else, with no such chat, the account a new chat on the
  * default model (Claude's) takes on the host picked beside New session; null with no computer host. */
 fun usageAccount(chat: Pair<String, String>?): Triple<String, String, String?>? {
@@ -304,7 +358,7 @@ fun usageAccount(chat: Pair<String, String>?): Triple<String, String, String?>? 
         val (hostId, sid) = chat
         val s = if (sid.isEmpty()) null else Mesh.session(hostId, sid)
         val prog = program(s?.model?.ifBlank { null } ?: defaultModel(hostId))
-        if (prog == "claude" || prog == "codex") return Triple(hostId, prog, s?.let { it.account?.id.orEmpty() })
+        if (prog in listOf("claude", "codex", "antigravity")) return Triple(hostId, prog, s?.let { it.account?.id.orEmpty() })
     }
     val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id ?: return null
     return Triple(hostId, "claude", null)
@@ -361,7 +415,8 @@ fun MenuUsage(chat: Pair<String, String>?, go: () -> Unit) {
         else {
             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (loading) UsageBars(null, List(2) { HostAccounts.Limit("", " ", 0.0, null) })
-            else UsageBars(host.usage[id], host.last.value[id])
+            else UsageBars(host.usage[id], host.last.value[id],
+                lastTracked = if (provider == "antigravity") host.tracked.value[id] else null)
         }
     }
 }
@@ -406,11 +461,12 @@ object MenuUsageHosts {
     fun of(id: String) = hosts.getOrPut(id) { HostAccounts(id) }
 
     /** The usage key (HostAccounts.usage's) of provider's subscription want (null: the one a new chat takes): an
-     * account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's; null where the host has none. */
+     * account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's, ANTIGRAVITY_CLI Antigravity's; null where the
+     * host has none. */
     fun profile(h: HostAccounts, provider: String, want: String?): String? {
         val id = want ?: h.defaults.value[provider].orEmpty()
         val account = id != "" && h.accounts.value.any { it.provider == provider && it.id.orEmpty() == id }
-        return if (account) id else if (!h.cliCard(provider)) null else if (provider == "claude") "" else HostAccounts.CODEX_CLI
+        return if (account) id else if (!h.cliCard(provider)) null else HostAccounts.cliKey(provider)
     }
 }
 
@@ -435,11 +491,11 @@ private fun limitLabel(l: HostAccounts.Limit): String {
 }
 
 /** A subscription's ⋮ with what can be done to it (pick): an account's (a) "rename" and "again"; every one's
- * "disable" (Enable, where it's disabled: off), "auto" (Auto Disable on Exhaustion) and "resume" (Auto Resume on
- * Reset), each ticked where it's on; an
+ * "disable" (Enable, where it's disabled: off), and where its provider has limits (limited) "auto" (Auto Disable on
+ * Exhaustion) and "resume" (Auto Resume on Reset), each ticked where it's on; an
  * account's "remove". */
 @Composable
-private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
+private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, resume: Boolean, limited: Boolean, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
@@ -453,8 +509,10 @@ private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, resume: Bo
                 MenuDivider()
             }
             MenuChoice(if (off) Wording.Subscriptions.enable else Wording.Subscriptions.disable, false) { open = false; pick("disable") }
-            MenuChoice(Wording.Subscriptions.autoDisable, auto) { open = false; pick("auto") }
-            MenuChoice(Wording.Subscriptions.autoResume, resume) { open = false; pick("resume") }
+            if (limited) {
+                MenuChoice(Wording.Subscriptions.autoDisable, auto) { open = false; pick("auto") }
+                MenuChoice(Wording.Subscriptions.autoResume, resume) { open = false; pick("resume") }
+            }
             if (a != null) {
                 MenuDivider()
                 MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
@@ -510,6 +568,7 @@ private fun send(host: HostAccounts, msg: Msg.Accounts, busy: (Boolean) -> Unit,
 @Composable
 private fun AddAccount(host: HostAccounts, provider: String, done: () -> Unit) {
     if (provider == "codex") return CodexSignIn(host, null, "", done)
+    if (provider == "antigravity") return ClaudeSignIn(host, null, done, "antigravity")
     if (host.claudeCli.value) return ClaudeSignIn(host, null, done)
     var name by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
@@ -699,12 +758,14 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
 
 /** An Add account dialog's choice of how the account signs in, as three segments: Login (first), Token (a token or API
  * key's box under it, the button Add account, usable once something's typed) and Folder (an existing signed-in folder
- * on the host: its box under it) (subscriptionpage._Source). tab: 0, 1 or 2. */
+ * on the host: its box under it) (subscriptionpage._Source); Antigravity's (token false) Login and Folder only
+ * (add_antigravity's). tab: 0, 1 or 2. */
 @Composable
-private fun SignInTabs(tab: Int, enabled: Boolean, pick: (Int) -> Unit) {
+private fun SignInTabs(tab: Int, enabled: Boolean, token: Boolean = true, pick: (Int) -> Unit) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))) {
-        for ((on, label) in listOf(Wording.Subscriptions.newLogin, Wording.Subscriptions.tokenTab, Wording.Common.folder).withIndex())
+        for ((on, label) in listOf(Wording.Subscriptions.newLogin, Wording.Subscriptions.tokenTab, Wording.Common.folder).withIndex()
+            .filter { token || it.index != 1 })
             Box(Modifier.weight(1f).background(if (tab == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
                 .focusProperties { canFocus = false } // (Tab: the account name straight to the box under it; picked by touch)
                 .clickable(enabled = enabled) { pick(on) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -785,11 +846,12 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
 }
 
 /** claude auth login run on a host with a Claude account's own folder (hostaccounts' sign_in), on a connection of its
- * own: a new account's (id null: named name, added once it's signed in) or an account's (id). Signing in (active): the
+ * own: a new account's (id null: named name, added once it's signed in) or an account's (id); agy's Google sign-in the
+ * same way for an Antigravity account (provider antigravity: _antigravity_sign_in). Signing in (active): the
  * page to open (url) as the host passes it on, a code that page shows sent to it on the same connection (paste), and
  * what claude says of it (note); its end: done, else why not (failed). stop() lets go of the connection, which stops it
  * there. Compose state, changed on the main thread. */
-class ClaudeLogin(val host: HostAccounts, val id: String?) {
+class ClaudeLogin(val host: HostAccounts, val id: String?, val provider: String = "claude") {
     val name = mutableStateOf("")
     val folder = mutableStateOf("")
     val existing = mutableStateOf(false) // (Folder picked over Login)
@@ -836,7 +898,7 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
             }
         }) { w ->
             if (w !== conn) return@watch
-            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", provider = "claude".takeIf { fresh }, id = id,
+            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", provider = provider.takeIf { fresh }, id = id,
                 name = name.value.trim().takeIf { fresh }).json())
             else if (w.state == "down") end(Wording.HostStatus.connectionDropped)
         }
@@ -876,11 +938,15 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
 
 /** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): Login (claude auth login
  * run there with the account's own folder: ClaudeLogin, as a card, ClaudeCard) or, a new account's only, Token (a setup
- * token or API key pasted) or Folder (a signed-in Claude folder on the host); Close stops it. */
+ * token or API key pasted) or Folder (a signed-in Claude folder on the host); Close stops it. Antigravity's (provider
+ * antigravity: add_antigravity, sign_in_again's): Login (agy's Google sign-in) or Folder (an existing Gemini
+ * directory on the host), no Token. */
 @Composable
-internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, login: ClaudeLogin = remember { ClaudeLogin(host, id) }) {
+internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, provider: String = "claude",
+                          login: ClaudeLogin = remember { ClaudeLogin(host, id, provider) }) {
     DisposableEffect(login) { onDispose { login.stop() } }
     val fresh = id == null
+    val antigravity = login.provider == "antigravity"
     var name by login.name
     var folder by login.folder
     var existing by login.existing
@@ -894,12 +960,13 @@ internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, log
             fresh && keyed -> if (token.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
                 name = name.trim(), token = token.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             fresh && existing && folder.isBlank() -> { empty += 1 }
-            fresh && existing -> if (folder.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
+            fresh && existing -> if (folder.isNotBlank()) { login.cancel(); send(host, if (antigravity) Msg.Accounts(what = "add",
+                provider = "antigravity", name = name.trim(), home = folder.trim()) else Msg.Accounts(what = "add", provider = "claude",
                 name = name.trim(), folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             else -> login.start(done)
         }
     }
-    val heading = if (fresh) Wording.Subscriptions.addClaude
+    val heading = if (fresh && antigravity) Wording.Subscriptions.addAntigravity else if (fresh) Wording.Subscriptions.addClaude
         else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
     Form(heading, if (carded) null else if (fresh && keyed) Wording.Subscriptions.addAccount
         else if (fresh && existing) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
@@ -907,13 +974,14 @@ internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, log
         if (fresh) {
             val open = !login.active.value
             NameField(name, { name = it }, Wording.Subscriptions.nameHint, go, enabled = open)
-            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open) {
+            SignInTabs(if (keyed) 1 else if (existing) 2 else 0, open, token = !antigravity) {
                 keyed = it == 1
                 existing = it == 2
                 if (login.failed.value != null) login.cancel() // (the dialog's own button back in place of Try Again)
             }
             if (keyed) SecretField(token, { token = it }, Wording.Subscriptions.tokenHint, go)
-            if (existing) key(empty) { NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, enabled = open) }
+            if (existing) key(empty) { NameField(folder, { folder = it }, if (antigravity) Wording.Subscriptions.antigravityFolderHint
+                else Wording.Subscriptions.claudeFolderHint, go, enabled = open) }
         }
         if (carded) ClaudeCard(login, go)
     }

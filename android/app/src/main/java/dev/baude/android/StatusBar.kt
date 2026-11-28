@@ -95,7 +95,7 @@ fun WorkingDots(working: Boolean) {
 class ContextShown(val label: String, val text: String?, val value: Float, val tip: String, val over: Boolean)
 
 /** The window of a model on a host, as far as it's known before its session says (meta.window): what a provider
- * says of its own, else what a session last said, else the program's. */
+ * says of its own, else what a session last said, else the program's (none for Antigravity's). */
 fun contextWindow(hostId: String, model: String?): Int? {
     val m = model?.takeIf { it != "default" } ?: defaultModel(hostId) ?: return saidWindow("default@$hostId")
     val program = program(m)
@@ -106,6 +106,7 @@ fun contextWindow(hostId: String, model: String?): Int? {
         "claude" -> if ("[1m]" in m) 1_000_000 else 200_000
         "codex" -> 200_000
         "pi" -> 32_768
+        "antigravity" -> null // (known only once its session says it)
         else -> 4_096
     }
 }

@@ -72,6 +72,7 @@ class AntigravityProc(ClaudeProc):
         self.last_text = ""
         self.text_parts = []
         self.text_id = None
+        self.thought_parts = []
         self.tools = {}
         self.context_usage = {}
         self.started_at = 0
@@ -233,6 +234,7 @@ class AntigravityProc(ClaudeProc):
             self.last_text = ""
             self.text_parts = []
             self.text_id = None
+            self.thought_parts = []
             self.tools = {}
             self.started_at = time.monotonic()
         try:
@@ -257,6 +259,7 @@ class AntigravityProc(ClaudeProc):
                   usage={})
 
     def finish(self, error=None, interrupted=False):
+        self._flush_thought()
         self._flush_text()
         with self.lock:
             self.turn = False
@@ -270,9 +273,10 @@ class AntigravityProc(ClaudeProc):
             return
         text = block["text"]
         if thinking:
-            self.emit("assistant", message={"id": str(uuid.uuid4()), "role": "assistant",
-                                            "content": [{"type": "thinking", "thinking": text}]})
+            self._flush_text()
+            self.thought_parts.append(text)
             return
+        self._flush_thought()
         if not self.text_parts:
             self.text_id = str(uuid.uuid4())
             self.emit("stream_event", event={"type": "message_start", "message": {"id": self.text_id}})
@@ -282,6 +286,12 @@ class AntigravityProc(ClaudeProc):
         self.last_text += text
         self.emit("stream_event", event={"type": "content_block_delta", "index": 0,
                                            "delta": {"type": "text_delta", "text": text}})
+
+    def _flush_thought(self):
+        if self.thought_parts:
+            self.emit("assistant", message={"id": str(uuid.uuid4()), "role": "assistant", "content": [
+                {"type": "thinking", "thinking": "".join(self.thought_parts)}]})
+            self.thought_parts = []
 
     def _flush_text(self):
         if self.text_parts:
@@ -295,6 +305,7 @@ class AntigravityProc(ClaudeProc):
         if not tool_id:
             return
         if tool_id not in self.tools:
+            self._flush_thought()
             self._flush_text()
             name = update.get("title") or "Antigravity tool"
             inp = update.get("rawInput") or {}
@@ -380,6 +391,10 @@ class AntigravityProc(ClaudeProc):
         subtype = request.get("subtype")
         if subtype == "interrupt":
             if self.turn:
+                with self.lock:
+                    open_asks, self.asks = list(self.asks), {}
+                for ask in open_asks:
+                    self.write({"id": ask, "result": {"outcome": {"outcome": "cancelled"}}})
                 self.write({"method": "session/cancel", "params": {"sessionId": self.thread}})
             self.reply(rid, {"running": self.turn})
         elif subtype == "get_context_usage":

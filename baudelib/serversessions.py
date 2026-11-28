@@ -301,7 +301,7 @@ class ServerSessions:
             profile = s.meta.get("profiles", {}).get("antigravity", "")
             s.proc = antigravity.AntigravityProc(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
-                s.meta["cwd"], s.meta["model"], resume=run["resume"], exe=run["exe"], mode=run["mode"],
+                s.meta["cwd"], s.meta["model"], resume=s.meta.get("cli_id"), exe=run["exe"], mode=run["mode"],
                 env={**s.env, **(self.env or {})},
                 on_models=lambda choices: self.antigravity_model_update(choices, profile),
                 instructions=told, profile=profile)
